@@ -86,6 +86,9 @@ const OTHER_CUSTOMER: Address = '0x9999999999999999999999999999999999999999';
 const BUNDLER: Address = '0x4337000000000000000000000000000000000001';
 const ENTRY_POINT: Address = '0x0000000071727De22E5E9d8BAf0edAc6f37da032';
 const SAFE: Address = '0x5afe000000000000000000000000000000000002';
+// ウォレットの中継 (ガス代を別の token で払う 7702 の中継・2026-11-18 の MetaMask の形)。
+const CUSTOMER_RELAYER: Address = '0xc066000000000000000000000000000000000003';
+const RELAY: Address = '0xdb9b000000000000000000000000000000000004';
 const USDC_LIKE: Address = '0x0000000000000000000000000000000000000bbb';
 const BK = 'Zm9vYmFyYmE';
 const BK2 = 'a-b_c-d_e-8';
@@ -430,6 +433,22 @@ describe('印の付いた入金だけを行にする', () => {
     },
   );
 
+  it('ウォレットの中継の tx (同じ「transfer + 印」が署名した中身と実行する中身の 2 か所・Transfer は 1 つ) → 1 行 (2026-11-18 の実機: MetaMask がガス代を USDC で払った)', async () => {
+    show();
+    const inner = execute(markedTransfer(BK, SHOP, 1_000n * ONE));
+    // 中継の contract への呼び出し: 署名した実行の中身と、実行する中身に、同じ並びが入る。
+    const relay = encodeFunctionData({
+      abi: parseAbi(['function relay(bytes signedCall, bytes execCall)']),
+      functionName: 'relay',
+      args: [inner, inner],
+    });
+    expect(relay.split(markedTransfer(BK, SHOP, 1_000n * ONE).slice(2)).length - 1).toBe(2);
+    pay(995n, 1, { input: relay, txFrom: CUSTOMER_RELAYER, txTo: RELAY });
+    await tick();
+    expect(rows()).toEqual([[stdId(tx(1)), 'R-1']]);
+    expect(loadHistory()[0].customer).toBe(getAddress(CUSTOMER));
+  });
+
   it.each([
     ['印だけ (transfer の calldata が前に無い・input の word の境界にある)', () => {
       const words = `${'00'.repeat(32)}${billKeyStdMark(BK)!.slice(2)}`;
@@ -577,6 +596,32 @@ describe('1 tx 1 行・払った側の行', () => {
     await tick();
     expect(loadHistory()[0]).toMatchObject({ id: stdId(tx(2)), receiptNo: null, lineItems: null });
     expect(b).toEqual([{ billKey: BK2, count: 2, amount: (1_000n * ONE).toString() }]);
+  });
+
+  it('印が A・A・B で Transfer が 2 つの tx (2 つの会計を同時に見張る): どの会計の入金ともしない (A に 2 つ数えて B を 0 にしない)', async () => {
+    const a: QrBillRecorded[] = [];
+    const b: QrBillRecorded[] = [];
+    show(BK, { receiptNo: 'R-1' }, NOW, (e) => a.push(e));
+    show(BK2, { receiptNo: 'R-2' }, NOW, (e) => b.push(e));
+    const input = handleOps(
+      executeBatch([
+        markedTransfer(BK, SHOP, 1_000n * ONE),
+        markedTransfer(BK, SHOP, 1_000n * ONE),
+        markedTransfer(BK2, SHOP, 1_000n * ONE),
+      ]),
+    );
+    pay(995n, 1, { logIndex: 0, input, txFrom: BUNDLER, txTo: ENTRY_POINT });
+    pay(995n, 1, { logIndex: 1, input, txFrom: BUNDLER, txTo: ENTRY_POINT, from: OTHER_CUSTOMER });
+    await tick();
+    expect(loadHistory()).toEqual([]);
+    expect(a).toEqual([]);
+    expect(b).toEqual([]);
+    // 次の別の tx の入金は、それぞれの会計の 1 件目 (前の tx を数えていない)。
+    chain.head = 1_004n;
+    pay(1_000n, 2, { billKey: BK2 });
+    await tick();
+    expect(b).toEqual([{ billKey: BK2, count: 1, amount: (1_000n * ONE).toString() }]);
+    expect(a).toEqual([]);
   });
 
   it('同じ額の 2 つの会計への 1 つの Transfer: input にある印の会計の行 (先に出した会計ではない)', async () => {
