@@ -44,6 +44,8 @@ const F11_PAGES: Array<[string, number]> = [
   ['/[locale]/orders/pickup', 223],
   ['/[locale]/pricing', 238],
   ['/[locale]/privacy', 215],
+  // 2026-11-18 /sponsors を新設 (PR の CI の表で 237 kB)。
+  ['/[locale]/sponsors', 237],
   ['/[locale]/store/library', 257],
   ['/[locale]/store/seller/[address]', 236],
   ['/[locale]/terms', 215],
@@ -138,6 +140,7 @@ ${PAY_ROW}
 ├ ● /[locale]/pricing                             4.94 kB         238 kB
 ├ ● /[locale]/privacy                             1.93 kB         215 kB
 ├ ● /[locale]/scan                                17.4 kB         370 kB
+├ ● /[locale]/sponsors                             3.1 kB         237 kB
 ├ ● /[locale]/store                               5.38 kB         239 kB
 ├ ● /[locale]/store/library                       15.9 kB         257 kB
 ├ ƒ /[locale]/store/seller/[address]              2.52 kB         236 kB

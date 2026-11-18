@@ -73,6 +73,23 @@ describe('SiteFooter', () => {
     expect(anchors.indexOf(link)).toBe(anchors.indexOf(screen.getByRole('link', { name: guides })) + 1);
   });
 
+  // スポンサー・広告掲載のご案内 (/sponsors・2026-11-18) は、お問い合わせ (Discord) の直前 (列の終わり)。兄弟リンクと同じく
+  // locale なし href (middleware が /{locale}/sponsors へ)。ガイド・料金・法務の並びは動かさない。
+  it.each([
+    ['ja', 'スポンサー・広告募集', 'お問い合わせ (Discord)'],
+    ['en', 'Sponsorship & ads', 'Contact (Discord)'],
+  ] as const)('%s: お問い合わせの直前にスポンサー・広告の募集「%s」→ /sponsors (可視テキストが名前)', (locale, name, contact) => {
+    renderWithIntl(<SiteFooter />, { locale });
+    const link = screen.getByRole('link', { name });
+    expect(link).toHaveAttribute('href', '/sponsors');
+    expect(link).not.toHaveAttribute('aria-label');
+    expect(link.textContent).toBe(name);
+    const anchors: HTMLElement[] = Array.from(link.closest('nav')!.querySelectorAll('a'));
+    expect(anchors.indexOf(link)).toBe(anchors.indexOf(screen.getByRole('link', { name: contact })) - 1);
+    // ガイド・料金は先頭のまま。
+    expect(anchors.slice(0, 2).map((a) => a.getAttribute('href'))).toEqual(['/guide', '/pricing']);
+  });
+
   it('事業者名と copyright を表示する', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
     // copyright 行に LEGAL_ENTITY.companyName が含まれる
@@ -267,6 +284,8 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
         expect(screen.queryByRole('link', { name })).toBeNull();
       }
       expect(screen.queryByRole('link', { name: 'お問い合わせ (Discord)' })).toBeNull();
+      // スポンサー・広告の募集も OpenPay 側の導線なので出さない。
+      expect(screen.queryByRole('link', { name: 'スポンサー・広告募集' })).toBeNull();
       expect(screen.queryByRole('link', { name: 'AIストア' })).toBeNull();
       // ガイドのハブも OpenPay 側の導線なので出さない。
       expect(screen.queryByRole('link', { name: 'ガイド' })).toBeNull();
@@ -285,6 +304,7 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
     try {
       renderWithIntl(<SiteFooter />, { locale: 'ja' });
       expect(screen.getByRole('link', { name: 'お問い合わせ (Discord)' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'スポンサー・広告募集' })).toHaveAttribute('href', '/sponsors');
       expect(screen.getByRole('link', { name: 'OpenPay の YouTube' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'ガイド' })).toHaveAttribute('href', '/guide');
     } finally {

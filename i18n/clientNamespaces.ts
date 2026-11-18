@@ -372,6 +372,12 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'PaymentForm',
     'Scan',
   ],
+  'sponsors': [
+    'ConnectButton',
+    'LocaleSwitcher',
+    'Nav',
+    'News',
+  ],
   'store/library': [
     'ConnectButton',
     'CreatorStoreLibrary',

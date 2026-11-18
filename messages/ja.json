@@ -162,6 +162,7 @@
     "supportTipRequest": "運営を持続させるため、応援いただけると励みになります（お試しにもどうぞ）。",
     "supportProfileTagline": "JPYC・USDC で直接応援できます",
     "supportProfileCta": "応援する",
+    "sponsorsNote": "OpenPay の開発・運営を支える協賛企業・広告掲載企業を募集しています。",
     "benefitsTitle": "お店向け",
     "benefitsFeeFocal": "0円〜",
     "benefitsFeeTitle": "決済の利用料",
@@ -1978,6 +1979,7 @@
       "transparency": "運用透明性",
       "discovery": "AIストア",
       "storeLibrary": "購入済みライブラリ",
+      "sponsors": "スポンサー・広告募集",
       "contact": "お問い合わせ (Discord)"
     },
     "sourceLink": "ソースコード (GitHub)",

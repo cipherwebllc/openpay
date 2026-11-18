@@ -167,6 +167,8 @@ const BUDGETS_KB = {
   '/[locale]/orders/pickup': 228, // 実測 223
   '/[locale]/pricing': 243, // 実測 238
   '/[locale]/privacy': 220, // 実測 215
+  // 2026-11-18 新設 (server だけで描く・client は AppShell とフッターだけ)。PR の CI の表で 237 kB → 予算 242 (実測 + 5)。
+  '/[locale]/sponsors': 242, // 実測 237
   '/[locale]/store/library': 262, // 実測 257
   '/[locale]/store/seller/[address]': 241, // 実測 236
   '/[locale]/terms': 220, // 実測 215

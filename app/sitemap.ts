@@ -23,6 +23,8 @@ const PUBLIC_ROUTES = [
   '/news',
   '/transparency',
   '/pricing',
+  // スポンサー・広告掲載のご案内 (2026-11-18・募集する企業が検索で見つけられるように)。
+  '/sponsors',
   '/guide',
   // ガイドは目次と同じ一覧から作る (ガイドを足したときの載せ忘れを防ぐ)。
   ...GUIDE_SLUGS.map((slug) => `/guide/${slug}` as const),

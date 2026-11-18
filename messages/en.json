@@ -162,6 +162,7 @@
     "supportTipRequest": "If you'd like to help keep OpenPay running, your support means a lot (also handy for a quick try).",
     "supportProfileTagline": "Support directly in JPYC or USDC",
     "supportProfileCta": "Support",
+    "sponsorsNote": "We are looking for sponsors and advertisers to support OpenPay's development and operation.",
     "benefitsTitle": "For shops",
     "benefitsFeeFocal": "From ¥0",
     "benefitsFeeTitle": "Payment fee",
@@ -1978,6 +1979,7 @@
       "transparency": "Operational Transparency",
       "discovery": "AI Store",
       "storeLibrary": "Purchase library",
+      "sponsors": "Sponsorship & ads",
       "contact": "Contact (Discord)"
     },
     "sourceLink": "Source on GitHub",
