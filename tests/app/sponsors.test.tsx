@@ -7,7 +7,7 @@ import { render, screen, within } from '@testing-library/react';
 import SponsorsPage, { generateMetadata } from '@/app/[locale]/sponsors/page';
 import sitemap from '@/app/sitemap';
 import { OPENPAY_DISCORD_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
-import { SPONSOR_BANNER_SPEC, SPONSOR_PLANS } from '@/lib/sponsorPlans';
+import { SPONSOR_ANNUAL_PLAN, SPONSOR_BANNER_SPEC, SPONSOR_PLANS } from '@/lib/sponsorPlans';
 import { SPONSORS } from '@/lib/sponsors';
 
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn() }));
@@ -25,7 +25,7 @@ describe.each(['ja', 'en'] as const)('%s /sponsors', (locale) => {
     return render(await SponsorsPage({ params: Promise.resolve({ locale }) }));
   }
 
-  it('見出しの並び: h1 → 料金 → 掲載イメージ → 入稿仕様 → 掲載条件 → 掲載基準 → 返金 → 歓迎事項 → 流れ', async () => {
+  it('見出しの並び: h1 → 料金 → 掲載イメージ → 入稿仕様 → 掲載条件 → 更新 → 掲載基準 → 返金 → 歓迎事項 → 流れ', async () => {
     await renderPage();
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(c.title);
     expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
@@ -33,14 +33,15 @@ describe.each(['ja', 'en'] as const)('%s /sponsors', (locale) => {
       c.samplesTitle,
       c.specsTitle,
       c.termsTitle,
+      c.renewalTitle,
       c.standardsTitle,
       c.refundTitle,
       c.welcomeTitle,
       c.flowTitle,
     ]);
-    // 料金のカード 2 枚と、掲載イメージの 2 つ (同じ名前)。
+    // 料金のカード 2 枚と年間プランのカード、掲載イメージの 2 つ (料金のカードと同じ名前)。
     const names = c.plans.map((p) => p.name);
-    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([...names, ...names]);
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual([...names, c.annual.name, ...names]);
   });
 
   it('承認の文がすべて描かれる (料金のカード・注記・入稿仕様・条件・基準・返金・歓迎事項・流れ)', async () => {
@@ -58,6 +59,11 @@ describe.each(['ja', 'en'] as const)('%s /sponsors', (locale) => {
       c.standardsNote,
       c.refund,
       c.welcome,
+      c.renewal,
+      c.renewalAnnual,
+      c.annual.focal,
+      c.annual.focalSub,
+      c.annual.body,
       ...c.flow,
       ...c.plans.flatMap((p) => [p.focal, p.focalSub, p.body]),
       ...c.specs.map((s) => (s.body ? `${s.label}: ${s.body}` : s.label)),
@@ -74,6 +80,10 @@ describe.each(['ja', 'en'] as const)('%s /sponsors', (locale) => {
       if (!card) throw new Error(p.id);
       expect(plain(card)).toContain(SPONSOR_PLANS[p.id].priceYen.toLocaleString('en-US'));
     }
+    // 年間プランのカードも料金の節の中 (定数の金額)。
+    const annual = within(plans).getByRole('heading', { level: 3, name: c.annual.name }).parentElement;
+    if (!annual) throw new Error('annual');
+    expect(plain(annual)).toContain(SPONSOR_ANNUAL_PLAN.priceYen.toLocaleString('en-US'));
   });
 
   it('問い合わせのボタン: Discord と X だけ (頭と流れの後の 2 か所)・フッターと同じ URL と rel・名前は見えている文字', async () => {

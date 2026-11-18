@@ -17,7 +17,7 @@ import { keepNumbersTogether } from '@/lib/guideText';
 import { OPENPAY_DISCORD_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
 import { DISCORD_ICON_PATH, X_ICON_PATH } from '@/lib/socialIconPaths';
 import { SPONSOR_BANNER_SPEC, SPONSOR_PLANS } from '@/lib/sponsorPlans';
-import type { SponsorsPlanCard, SponsorsSpecItem } from '@/lib/sponsors';
+import type { SponsorsAnnualCard, SponsorsPlanCard, SponsorsSpecItem } from '@/lib/sponsors';
 
 /** 節 (h2 + 本文)。id は固定 (第 2 段の掲載の欄から #plans などで飛べるように・題名を変えても変わらない)。 */
 export function SponsorsSection({ id, title, children }: { id: string; title: ReactNode; children: ReactNode }) {
@@ -102,6 +102,25 @@ export function SponsorsPlanCards({ plans, locale }: { plans: readonly SponsorsP
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * 年間プランのカード (法人スポンサーだけ)。2 つの料金のカードの下に、横いっぱいで 1 枚。
+ * 30 日のカードと同じ形 (名前・大きい数字 + 期間・本文) で、同じ料金の表の一部と分かるようにする。
+ */
+export function SponsorsAnnualPlanCard({ plan, locale }: { plan: SponsorsAnnualCard; locale: string }) {
+  return (
+    <div className="mt-3 flex flex-col rounded-2xl bg-white p-5 shadow-card ring-1 ring-slate-200/70 sm:mt-4">
+      <h3 className="text-base font-bold text-slate-900">{plan.name}</h3>
+      <p className="mt-3 flex flex-wrap items-baseline gap-x-1.5 gap-y-1">
+        <span className="whitespace-nowrap text-3xl font-extrabold leading-none tracking-tight tabular-nums text-slate-900">
+          {plan.focal}
+        </span>
+        <span className="text-sm font-semibold text-slate-600">{shortLine(plan.focalSub, locale)}</span>
+      </p>
+      <p className="mt-3 text-sm leading-relaxed text-slate-700">{keepNumbersTogether(plan.body)}</p>
+    </div>
   );
 }
 

@@ -25,6 +25,22 @@ export const SPONSOR_PLANS: Readonly<Record<SponsorPlanId, SponsorPlan>> = {
   banner: { priceYen: 11_000, termDays: 30, maxCompanies: 3 },
 };
 
+/**
+ * 法人スポンサーの年間プラン (2026-11-18 user 裁定): 30 日の料金の 11 回分で 365 日 (12 回払いより 1 回分安い)。
+ * バナー広告には無い。料金は 30 日の料金から作る (別の値を持たない)。
+ */
+export const SPONSOR_ANNUAL_PLAN = {
+  termsCharged: 11,
+  termDays: 365,
+  priceYen: SPONSOR_PLANS.sponsor.priceYen * 11,
+} as const;
+
+/**
+ * 掲載は期間ごとに自動で更新する (2026-11-18 user 裁定)。次の期間の請求書を、期間の終わる何日前までに送るか。
+ * term = 30 日のプラン (法人スポンサー・バナー広告)・annual = 年間プラン。
+ */
+export const SPONSOR_RENEWAL_INVOICE_DAYS_BEFORE = { term: 7, annual: 30 } as const;
+
 /** バナーの入稿の決まり (横 4：縦 1)。 */
 export const SPONSOR_BANNER_SPEC = {
   width: 1200,

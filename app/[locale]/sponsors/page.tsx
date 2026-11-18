@@ -14,6 +14,7 @@ import { AppShell } from '@/components/AppShell';
 import { BulletList } from '@/components/guide/PosGuidePieces';
 import { phrased } from '@/components/Phrased';
 import {
+  SponsorsAnnualPlanCard,
   SponsorsContactActions,
   SponsorsFlow,
   SponsorsParagraph,
@@ -71,6 +72,7 @@ export default async function SponsorsPage({
         <SponsorsSection id="plans" title={phrased(c.plansTitle, locale)}>
           <SponsorsParagraph>{c.plansLead}</SponsorsParagraph>
           <SponsorsPlanCards plans={c.plans} locale={locale} />
+          <SponsorsAnnualPlanCard plan={c.annual} locale={locale} />
           <p className="mt-4 text-sm leading-relaxed text-slate-600">{keepNumbersTogether(c.priceNote)}</p>
         </SponsorsSection>
 
@@ -97,6 +99,11 @@ export default async function SponsorsPage({
             {locale === 'en' ? ' ' : ''}
             {keepNumbersTogether(c.bannerTerms)}
           </p>
+        </SponsorsSection>
+
+        <SponsorsSection id="renewal" title={phrased(c.renewalTitle, locale)}>
+          <SponsorsParagraph>{c.renewal}</SponsorsParagraph>
+          <SponsorsParagraph>{c.renewalAnnual}</SponsorsParagraph>
         </SponsorsSection>
 
         <SponsorsSection id="standards" title={phrased(c.standardsTitle, locale)}>
