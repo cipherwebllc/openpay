@@ -29,7 +29,9 @@ globalThis.fetch = async (input, init) => {
   if (init?.redirect !== 'manual') throw new Error('fetch without redirect: manual');
   const res = await realFetch(upstream + url.pathname + url.search, init);
   const aliased = new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers });
-  Object.defineProperty(aliased, 'url', { value: url.href });
+  // DUAL_BUYER_TEST_FOREIGN_STATUS の status の応答だけ、別の origin から届いたことにする (応答の origin の照合の確認)。
+  const foreign = process.env.DUAL_BUYER_TEST_FOREIGN_STATUS === String(res.status);
+  Object.defineProperty(aliased, 'url', { value: foreign ? 'https://elsewhere.test' + url.pathname : url.href });
   return aliased;
 };
 `;
@@ -279,6 +281,42 @@ describe('x402-dual-buyer-example の署名の前の検査 (https・転送・res
     expect(code).toBe(1);
     expect(hits).toBe(2);
     expect(elsewhereHits).toBe(0);
+  });
+
+  it('402 の応答が別の origin から届いたら、署名しない', async () => {
+    accept = { ...accept, asset: BASE_USDC };
+    const url = await listen();
+    const { code, out } = await run({
+      BUYER_PRIVATE_KEY: generatePrivateKey(), RESOURCE_URL: url, MAX_USDC: '0.02', DUAL_BUYER_TEST_FOREIGN_STATUS: '402',
+    });
+    expect(out).toContain(`402 の取得の応答が ${SELLER_ORIGIN} 以外から届きました`);
+    expect(code).toBe(1);
+    expect(hits).toBe(1);
+    expect(paymentHeader).toBeUndefined();
+  });
+
+  it('署名した支払いの再送の応答が別の origin から届いたら、失敗で終わる', async () => {
+    accept = { ...accept, asset: BASE_USDC };
+    const url = await listen();
+    const { code, out } = await run({
+      BUYER_PRIVATE_KEY: generatePrivateKey(), RESOURCE_URL: url, MAX_USDC: '0.02', DUAL_BUYER_TEST_FOREIGN_STATUS: '200',
+    });
+    expect(out).toContain(`以外から届きました`);
+    expect(code).toBe(1);
+    expect(hits).toBe(2);
+  });
+
+  it('EXPECTED_PAY_TO は大文字小文字の違い (checksum と小文字) を同じアドレスとして照合する', async () => {
+    // EIP-55 の checksum 表記 (viem の getAddress で作った正しい大文字小文字)。
+    const CHECKSUM = '0xabCDeF0123456789AbcdEf0123456789aBCDEF01';
+    accept = { ...accept, asset: BASE_USDC, payTo: CHECKSUM };
+    const url = await listen();
+    const { code, out } = await run({
+      BUYER_PRIVATE_KEY: generatePrivateKey(), RESOURCE_URL: url, MAX_USDC: '0.02', EXPECTED_PAY_TO: CHECKSUM.toLowerCase(),
+    });
+    expect(out).toContain('payTo は EXPECTED_PAY_TO と一致');
+    expect(code).toBe(0);
+    expect(hits).toBe(2);
   });
 
   it('EXPECTED_PAY_TO がアドレスの形でなければ 402 を取りに行く前に止まる', async () => {
