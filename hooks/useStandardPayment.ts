@@ -22,6 +22,7 @@ import {
   useWriteContract,
 } from 'wagmi';
 import { classifyTransferReceipt } from '@/lib/replacedTransferReceipt';
+import { isEip1193UserRejection, rejectionCodeIsWalletAnswer } from '@/lib/walletRejectionProof';
 import {
   addStandardWalletRequest,
   removeStandardWalletRequest,
@@ -173,7 +174,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // restoredFromStorageRef は retryFee が false に戻すので、復元した別の支払いの利用料を再送した後は「復元でない」になる。
   // こちらは新しい mutate でだけ false に戻し、retryFee では戻さない (画面が完了の帰属を決めるのに使う)。
   const restoredAttemptRef = useRef(false);
-  const queuedParamsRef = useRef<StandardPaymentParams | null>(null);
+  // 送信待ち (storage の読込の前に押された送信)。送金に足す印 (dataSuffix・K4b) も押した時点の値を対で持つ。
+  const queuedParamsRef = useRef<{ params: StandardPaymentParams; dataSuffix: Hex | undefined } | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const [hasStoredIntent, setHasStoredIntent] = useState(false);
   const restoredMerchantTxHashRef = useRef<Hex | undefined>(undefined);
@@ -189,7 +191,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // useEffect の dep 変化で重複発火しないよう、merchant 成功した直後にのみ true 化。
   const feeStartedRef = useRef(false);
 
-  const { address: customer } = useAccount();
+  // connector は K4b の印の予約だけが読む (下の markReservedRef)。
+  const { address: customer, connector } = useAccount();
   // H-D (第 10 回レビュー): ウォレットの確認が出ている間に画面を離れ (unmount)、その後で承認されると、送金は broadcast
   // されるのに、writeContract の第 2 引数の onSuccess (呼び出しごとの callback) は呼ばれない (TanStack Query は listener の
   // 無い observer の呼び出しごとの callback を呼ばない)。復旧の印が残らないので、開き直した画面からもう一度送れてしまう。
@@ -216,6 +219,29 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     merchantHash: Hex;
     merchantBlockNumber: bigint;
   } | null>(null);
+  // K4b (通常決済の会計の印・その端末だけの試しのスイッチ・hooks/useStdBillMark.ts): 印 (dataSuffix) は writeContract に渡す vars の
+  // 1 つの object の中にだけ置く (Fable の MUST-2: 登録簿と unmount の後の保存は object の同一性で見るので、後から spread した別の
+  // object を渡さない)。
+  // K4b (Fable の MUST-1): 印つきの送信は、この画面で 1 回まで。印つきで merchant の writeContract を呼ぶ直前に、同期で印を予約する
+  // (mutate の中)。予約の後のこの画面の送信は印なし (印つき A の応答待ちの間に始めた B も印なし = 同じ画面で印つきが 2 本出ない)。
+  // 予約を解くのは、印つきの送信が「ウォレットが tx を出さずに断った」と確かめられる形で終わったときだけ (次はまた印つき):
+  //   1. error の cause の連なりの、いちばん奥の error (ウォレットが投げた元の error) の code が EIP-1193 の 4001 で、途中に 4001 で
+  //      ない code が無い (lib/walletRejectionProof の isEip1193UserRejection)。文言では決めない ('Connection request reset' のような code
+  //      の無い失敗は、ウォレットが tx を出した後に hash の応答だけが失われたのかもしれない)。viem が 4001 として包む WalletConnect
+  //      の 5000 でも解かない。
+  //   2. その 4001 がウォレット自身の答えである接続 (injected・WalletConnect) で送った (rejectionCodeIsWalletAnswer)。Coinbase Wallet
+  //      SDK は popup が閉じただけで SDK が 4001 を作るので解かない。接続は予約のとき (送信のとき) のものを予約と一緒に持つ。
+  // hash が返った (ウォレットがチェーンに出した)・それ以外の失敗は予約のまま。解く判定は下の merchant の hook の options の onError
+  // で、送信自身の variables の印の有無を見る (Mutation 自身が呼ぶので、同じ画面で次の送信を始めて wagmi の見ている先が外れた後・
+  // 画面を離れた後に届いた結果も見る)。出ている印つきの送信は同時に 1 つまでなので、onError が見る予約はその送信のもの。
+  // 断つ波及: 余った calldata を拒むウォレット・口座で、この画面から払えなくなること (次は今までどおりの transfer を送る)。
+  // receipt・revert・置換は追わない: 印つきの送信が出た後に同じ画面で送り直すのは、失敗の後か二重払いのときだけで、どちらも
+  // 印なしで困らない。追う状態を持たないので、応答の順・置換の種類・後片付けの順に左右されない。
+  // 限界 (塞いでいない): viem の sendTransaction は、eth_sendTransaction が InvalidInput・InvalidParams・MethodNotFound・
+  // MethodNotSupported で失敗すると、同じ request を wallet_sendTransaction で 1 回送り直す (印の有無を問わない main と同じ動き)。
+  // 1 回の writeContract の中のことで、hook からは見えない。
+  // null = 予約していない。true・false = 予約している (true は、予約した送信の 4001 で解いてよい接続で送った)。
+  const markReservedRef = useRef<boolean | null>(null);
   // H-D (Codex の MUST): 同じタブの中で、結果の出ていないウォレットへの要求を同時に 1 つだけにする登録簿
   // (lib/standardPaymentOutstanding) での、この hook (1 つの画面) の持ち主の印。
   // 登録は hook の options の onMutate (Mutation が mutationFn = ウォレットへの要求を呼ぶ前に、writeContract の中で同期に呼ぶ)。
@@ -246,8 +272,10 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
         if (mountedRef.current && attempt?.vars === variables) return;
         removeStandardWalletRequest(variables);
       },
-      onError: (_error, variables) => {
+      onError: (error, variables) => {
         removeStandardWalletRequest(variables);
+        // K4b (MUST-1): 印つきの送信を、ウォレットが tx を出さずに断った (4001) と確かめられたときだけ、印の予約を解く (次はまた印つき)。
+        if (variables.dataSuffix && markReservedRef.current && isEip1193UserRejection(error)) markReservedRef.current = null;
       },
     },
   });
@@ -609,10 +637,13 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     if (intent) restoreStoredIntent(storage, intent);
   }, [requestElsewhere, restoreStoredIntent]);
 
-  function mutate(params: StandardPaymentParams): void {
+  // dataSuffix (K4b): 受取先への transfer の calldata の後ろに足す会計の印 (試しのスイッチが ON の端末の /pay・/checkout だけが
+  // 渡す・hooks/useStdBillMark.ts)。渡さない呼び出し (ほかの全員・チップ等) の送金は今までと 1 byte も変わらない。
+  // 利用料の transfer (submitFee・retryFee) には付けない。保存する intent・ログ (params) にも入れない。
+  function mutate(params: StandardPaymentParams, dataSuffix?: Hex): void {
     if (!enabled) return;
     if (!storageReady) {
-      queuedParamsRef.current = params;
+      queuedParamsRef.current = { params, dataSuffix };
       return;
     }
     // R: hash ありの receipt 不明中は、同じ送金が成功済みの可能性がある。
@@ -653,12 +684,17 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     feeWrite.reset();
     // H-D: reset で捨てた fee の試みは、後から承認されても保存しない (呼び出しごとの onSuccess が呼ばれなくなるのと同じ意味)。
     feeAttemptRef.current = null;
+    // K4b: 印は、この画面で印つきの送信を予約していないときだけ付け、付けるときは writeContract の前に同期で予約する (MUST-1)。
+    const suffix = dataSuffix !== undefined && markReservedRef.current === null ? dataSuffix : undefined;
+    if (suffix) markReservedRef.current = rejectionCodeIsWalletAnswer(connector?.type);
     const vars = {
       chainId: params.chainId,
       address: params.tokenAddress,
       abi: erc20Abi,
       functionName: 'transfer',
       args: [params.merchant, params.merchantAmount],
+      // 印の無い送信は key ごと無い (今までと同じ object の形)。
+      ...(suffix ? { dataSuffix: suffix } : {}),
     } as const;
     // H-D: unmount の後に承認された merchant の hash を、hook の options の onSuccess が保存できるように置く。
     merchantAttemptRef.current = { vars, params };
@@ -680,7 +716,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     const queued = queuedParamsRef.current;
     if (!queued) return;
     queuedParamsRef.current = null;
-    mutate(queued);
+    mutate(queued.params, queued.dataSuffix);
     // mutate は render ごとに変わるが、storage 読込完了時に queue を 1 度だけ排出する effect。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, hasStoredIntent, storageReady]);

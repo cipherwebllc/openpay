@@ -21,6 +21,7 @@ import { buildOrderSaleEntry, isRecordableOrder } from '@/lib/orderFeedHistory';
 import type { StoredOrder } from '@/lib/orderRelay';
 import { PAYER_RECEIPTS_MAX } from '@/lib/payerReceipt';
 import { QR_SALE_KEEP_AFTER_HIDE_MS } from '@/lib/qrSaleWatch';
+import { isStdBillMarkTrialOn } from '@/lib/stdBillMarkTrial';
 import { deploymentForSlug } from '@/lib/tokens';
 
 const MAX = HISTORY_MAX_ENTRIES.toLocaleString('en-US');
@@ -129,13 +130,21 @@ describe('取引履歴のガイド (content)', () => {
     expect(call).toMatch(/shown: qrModalOpen && /);
   });
 
-  // 「通常決済」が履歴に出ない入金のままである出どころ: 通常決済の QR にも印 (bk) は載るが、払う側の通常決済は印を付けない
-  // (transfer の calldata に通常決済の印を足すのは別の変更)。お店の端末は印の無い通常決済を行にしない
-  // (tests/components/qrSaleHistory.standardParity.test.tsx)。払う側が印を付けるようになったら、このガイドの文も直す。
-  it('通常決済の払う側は、まだ印を付けない (ガイドの「通常決済は履歴に出ない」が今も正しい)', () => {
+  // 「通常決済」が履歴に出ない入金のままである出どころ: 通常決済の QR にも印 (bk) は載るが、払う側の通常決済が transfer の
+  // calldata に印を足すのは、その端末だけの試しのスイッチ (lib/stdBillMarkTrial.ts・K4b) が ON の端末だけ。既定は OFF で、
+  // ほかの全員の通常決済は印を付けない。お店の端末は印の無い通常決済を行にしない (tests/components/qrSaleHistory.standardParity.test.tsx)。
+  // 実機で試して全員に印を付けるようになったら、このガイドの文も直す。
+  it('通常決済の払う側が印を付けるのは試しのスイッチが ON の端末だけ (既定 OFF = ガイドの「通常決済は履歴に出ない」はほかの全員に今も正しい)', () => {
+    window.localStorage.clear();
+    expect(isStdBillMarkTrialOn()).toBe(false);
+    // 印を作るのは印の hook だけで、hook はスイッチを読んでから準備し (OFF なら URL も chunk も読まない)、押した時にも読む
+    // (振る舞いは tests/hooks/useStdBillMark.test.tsx・フォームの OFF の呼び出しは tests/components/stdBillMarkForms.integration.test.tsx)。
     for (const file of ['hooks/useStandardPayment.ts', 'components/PaymentForm.tsx', 'components/CheckoutForm.tsx']) {
-      expect(readFileSync(join(process.cwd(), file), 'utf8')).not.toMatch(/billKeyStdMark|dataSuffix/);
+      expect(readFileSync(join(process.cwd(), file), 'utf8')).not.toMatch(/billKeyStdMark/);
     }
+    const hook = readFileSync(join(process.cwd(), 'hooks/useStdBillMark.ts'), 'utf8');
+    expect(hook).toContain('if (!eligible || !isStdBillMarkTrialOn()) return;');
+    expect(hook).toContain('if (!eligible || !prepared || !isStdBillMarkTrialOn()) return undefined;');
     expect(historyGuideContentFor('ja').notInHistory[0]).toContain('通常決済');
   });
 
