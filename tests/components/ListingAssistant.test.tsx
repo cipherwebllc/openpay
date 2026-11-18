@@ -286,10 +286,10 @@ describe('ListingAssistant: 案の反映', () => {
     renderAssistant();
     await generateWithMemo();
     fireEvent.change(screen.getByRole('textbox', { name: A.fieldDesc }), { target: { value: '  一行目\n二行目  ' } });
-    fireEvent.change(screen.getByRole('textbox', { name: A.fieldTags }), { target: { value: '照明、 照明, 3D素材' } });
+    fireEvent.change(screen.getByRole('textbox', { name: A.fieldTags }), { target: { value: '照明、 照明, 3D素材\nインテリア' } });
     fireEvent.click(screen.getByRole('button', { name: A.applyDesc }));
     fireEvent.click(screen.getByRole('button', { name: A.applyTags }));
-    expect(updates).toEqual([{ desc: '一行目 二行目' }, { tags: '照明, 3D素材' }]);
+    expect(updates).toEqual([{ desc: '一行目 二行目' }, { tags: '照明, 3D素材, インテリア' }]);
   });
 
   it('fits:false の欄は上限の中に切った見本として見せ、入れるボタンを止める・欄で直すと入れられる (PR 1 の 0688fcdc の形)', async () => {

@@ -183,7 +183,8 @@ type FitIssue =
 
 /** 1 行の欄: 保存の sanitizeLine と同じく改行を空白にして前後を除き、UTF-16 の長さで数える。 */
 const lineOf = (value: string) => value.replace(/[\r\n]+/g, ' ').trim();
-const splitTags = (value: string) => value.split(/[,、]/).map((tag) => tag.trim()).filter(Boolean);
+// タグはフォームと同じく 、と , で区切る (案の欄は textarea なので改行も区切りにする)。
+const splitTags = (value: string) => value.split(/[,、\r\n]/).map((tag) => tag.trim()).filter(Boolean);
 
 function lineIssue(value: string, max: number): FitIssue | null {
   const line = lineOf(value);
@@ -203,6 +204,8 @@ const FIELD_MAX: Record<Exclude<TextField, 'tags'>, number> = {
   en: LISTING_ASSISTANT_EN_MAX,
   x: LISTING_ASSISTANT_X_MAX,
 };
+
+const FIELD_ROWS: Record<TextField, number> = { title: 2, desc: 4, tags: 2, en: 4, x: 3 };
 
 const patchOf = (field: ApplyField, value: string): Partial<ProductForm> =>
   field === 'title' ? { title: value } : field === 'desc' ? { desc: value } : { tags: value };
@@ -369,7 +372,6 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
     const value = valueOf(current, field);
     const issue = issueOf(current, field);
     const copyOnly = field === 'en' || field === 'x';
-    const multiline = field === 'desc' || field === 'en' || field === 'x';
     const onChange = (next: string) => setEdited((entries) => ({ ...entries, [field]: next }));
     const appliedEntry = copyOnly ? undefined : applied[field as ApplyField];
     const showApplied = appliedEntry !== undefined && productForm[field as ApplyField] === appliedEntry.after;
@@ -378,25 +380,15 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
         <label htmlFor={id} className="block text-sm font-medium text-slate-700">
           {t(FIELD_LABEL_KEYS[field])}
         </label>
-        {multiline ? (
-          <textarea
-            id={id}
-            rows={field === 'x' ? 3 : 4}
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            aria-describedby={issue ? `${id}-issue` : undefined}
-            className={inputClass}
-          />
-        ) : (
-          <input
-            id={id}
-            type="text"
-            value={value}
-            onChange={(event) => onChange(event.target.value)}
-            aria-describedby={issue ? `${id}-issue` : undefined}
-            className={inputClass}
-          />
-        )}
+        {/* 商品名とタグも 1 行の input にしない (390px で 60 字の案が切れて読めないため)。改行は入れるときに空白へ寄せる。 */}
+        <textarea
+          id={id}
+          rows={FIELD_ROWS[field]}
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          aria-describedby={issue ? `${id}-issue` : undefined}
+          className={inputClass}
+        />
         {issue ? (
           <p id={`${id}-issue`} className="mt-1 text-xs leading-relaxed text-amber-800">
             {issueText(issue, copyOnly)}
