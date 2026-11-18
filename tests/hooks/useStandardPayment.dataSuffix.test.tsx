@@ -752,12 +752,12 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
 
   // 4001 がウォレット自身の答えである接続 (injected・WalletConnect) のときだけ、4001 で予約を解く。Coinbase Wallet SDK は、popup が
   // 閉じただけで SDK が 4001 を作る (承認の後に閉じると、tx が出ていても 4001 が届きうる) ので解かない。知らない接続も解かない。
-  it.each<[string, { type: string } | undefined, number]>([
-    ['WalletConnect', { type: 'walletConnect' }, 100],
-    ['Coinbase Wallet SDK', { type: 'coinbaseWallet' }, 68],
-    ['知らない接続', { type: 'mock' }, 68],
-    ['接続を読めない', undefined, 68],
-  ])('接続が %s のときの 4001 の後に、印を渡して送り直すと %d byte', async (_name, connector, bytes) => {
+  it.each<[string, number, { type: string } | undefined]>([
+    ['WalletConnect', 100, { type: 'walletConnect' }],
+    ['Coinbase Wallet SDK', 68, { type: 'coinbaseWallet' }],
+    ['知らない接続', 68, { type: 'mock' }],
+    ['接続を読めない', 68, undefined],
+  ])('接続が %s のときの 4001 の後に、印を渡して送り直すと %d byte', async (_name, bytes, connector) => {
     useAccountMock.mockReturnValue({ address: CUSTOMER, connector });
     const out = await settleThenResend(async () => {
       await act(async () => {
