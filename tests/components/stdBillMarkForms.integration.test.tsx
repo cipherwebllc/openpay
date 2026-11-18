@@ -4,7 +4,8 @@
 // 境界の mock は wagmi・ほかの決済 hook・見積り・fetch だけ (tests/components/billKeyForms.integration.test.tsx と同じ形)。
 //   - 対象の外 (bk の無い URL・対象でない会計): mutate の呼び出し (引数の全体) が、main 31d74ea4 (全員に付ける前) の code で採った
 //     GOLDEN (tests/fixtures/stdBillMarkGoldenForms.json) と 1 byte も同じ (引数 1 つ・第 2 引数の印が無い)・印の計算もしない。
-//     対象でない会計 (金額なし・USDC・注文に結び付く会計) は、URL に bk を足した形で比べる (受取先・額・保存の key が変わったら落ちる)。
+//     対象でない会計 (金額なし・USDC・注文に結び付く会計・お店の handle つき・お店の端末で送る) は、URL に bk を足した形で比べる
+//     (受取先・額・保存の key が変わったら落ちる)。
 //     GOLDEN の採り方: main 31d74ea4 の tree (git archive で書き出すか、hooks/・lib/・components/ を 31d74ea4 のものにする) に
 //     この test file だけを置いて
 //     STD_BILL_MARK_GOLDEN_CAPTURE=<書き出す dir> npx vitest run tests/components/stdBillMarkForms.integration.test.tsx -t 'GOLDEN を採る'
@@ -156,6 +157,12 @@ function renderCheckout(query: string) {
   return render(wrap(<CheckoutForm params={parsed.params} />));
 }
 
+// CheckoutForm に params を直接渡して描く (ページの振り分けを通さない)。query は画面の URL (払う側が bk を読む所)。
+function renderCheckoutParams(params: CheckoutParams, query: string) {
+  window.history.replaceState(null, '', `/ja/checkout?${query}`);
+  return render(wrap(<CheckoutForm params={params} />));
+}
+
 const FORMS = { '/pay': renderPay, '/checkout': renderCheckout } as const;
 type FormName = keyof typeof FORMS;
 const FORM_NAMES = Object.keys(FORMS) as FormName[];
@@ -217,11 +224,16 @@ const NOT_REGISTER: [string, Partial<CheckoutParams>][] = [
   ['自社の受注 notify (webhook)', { webhook: `${location.origin}/api/order/notify?h=alice` }],
   // 利用料つきの URL は値引きを載せられない (parse が止める) ので、値引きを外す。
   ['モバイル注文の利用料 (fee_kind)', { feeKind: 'storefront', discount: undefined }],
+  // お店の handle だけが付いた URL (fee_kind が無いので、署名の前の受付の照会はしない = 通常決済の送金まで進む)。
+  // handle つきの URL も、fee_kind が無いと値引きを載せられない (parse が止める) ので、値引きを外す。
+  ['お店の handle つきの注文 (store_handle)', { storeHandle: 'alice', discount: undefined }],
 ];
-// /pay の、押す前に入力や別の mock が要る会計。
-async function payFromPay(query: string, before: () => Promise<void>, button?: RegExp) {
+// お店の端末で送る QR の受け渡しの ID (22 字の base64url・lib/storeDevicePayment.ts の形)。
+const HANDOFF_ID = 'AbCdEfGhIjKlMnOpQrStUv';
+// 開いた画面で (押す前の入力があればしてから) 押し、通常決済の mutate の呼び出し (引数の配列) を 1 つ返す。
+async function payFromView(open: () => ReturnType<typeof render>, before: () => Promise<void> = async () => {}, button?: RegExp) {
   standardMutate.mockClear();
-  const view = renderPay(query);
+  const view = open();
   await before();
   await clickPay(button);
   expect(standardMutate).toHaveBeenCalledOnce();
@@ -229,6 +241,9 @@ async function payFromPay(query: string, before: () => Promise<void>, button?: R
   view.unmount();
   return call;
 }
+// /pay の、押す前に入力や別の mock が要る会計。
+const payFromPay = (query: string, before: () => Promise<void>, button?: RegExp) =>
+  payFromView(() => renderPay(query), before, button);
 const OUTSIDE: Record<string, () => Promise<unknown[]>> = {
   '/pay・金額なしの QR (お店の端末が照合しない)': () =>
     payFromPay(`to=${MERCHANT}&token=jpyc&mode=standard&bk=${BK}`, async () => {
@@ -248,6 +263,15 @@ const OUTSIDE: Record<string, () => Promise<unknown[]>> = {
       () => payStandard('/checkout', `${queryOf(buildCheckoutUrl('https://shop.test', { ...REGISTER, ...extra }))}&bk=${BK}`),
     ]),
   ),
+  // お店の端末で送る QR (submit=store) は、/checkout のページが専用の画面 (StoreDeviceCheckoutForm) に渡すので、CheckoutForm には
+  // 届かない (app/[locale]/checkout/page.tsx)。CheckoutForm の対象の条件 (!params.submit) は、届いたとしても印を付けないための
+  // もの。その条件の振る舞いを、parse を通さず params を直接渡して見る (parse は、お店の端末で送る機能の flag が OFF だと止める)。
+  '/checkout・お店の端末で送る (submit=store・CheckoutForm に直接渡す)': () => {
+    const parsed = parseCheckoutParams(new URLSearchParams(CHECKOUT_STD));
+    if (!parsed.ok) throw new Error(`checkout の URL を読めない: ${parsed.error}`);
+    const params: CheckoutParams = { ...parsed.params, submit: 'store', handoffId: HANDOFF_ID };
+    return payFromView(() => renderCheckoutParams(params, `${CHECKOUT_STD}&submit=store&hs=${HANDOFF_ID}&bk=${BK}`));
+  },
 };
 const OUTSIDE_NAMES = Object.keys(OUTSIDE);
 
@@ -336,7 +360,7 @@ describe('bk の無い URL (= 対象の外): 通常決済の mutate は main と
 describe('対象でない会計 (URL に bk を足しても): 通常決済の mutate は main と 1 byte も同じ', () => {
   it('GOLDEN には、この file が比べる会計がちょうど入っている (名前の付け替え・足し忘れで、比べない会計を作らない)', () => {
     expect(Object.keys(GOLDEN).sort()).toEqual([...FORM_NAMES, RELAY_GOLDEN, ...OUTSIDE_NAMES].sort());
-    expect(OUTSIDE_NAMES).toHaveLength(6);
+    expect(OUTSIDE_NAMES).toHaveLength(8);
   });
 
   it.each(OUTSIDE_NAMES)('%s: mutate の引数の全体が main の GOLDEN と同じ (引数 1 つ)・印を計算しない', async (name) => {

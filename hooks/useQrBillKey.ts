@@ -3,7 +3,7 @@
 // お店の画面 (/create の決済QR・レジ) が、画面に表示中の QR に会計ごとの印 (bill key) を載せ、その会計を入金の見張り
 // (lib/qrSaleWatch.ts) に伝える。払う側は bill key から署名の intentSalt を作り (lib/relay/billKeySalt.ts)、お店の端末は
 // チェーンの `Settled` の nonce を計算し直して「この会計の入金」と確かめ、取引履歴に書く。通常決済の QR の会計は、JPYC の
-// `Transfer` の tx の input にある印 (billKeyStdMark) で確かめる (払う側が印を付けるのは別の変更から)。
+// `Transfer` の tx の input にある印 (billKeyStdMark) で確かめる (払う側が印を付けるのは hooks/useStdBillMark.ts)。
 //
 // 載せる QR を決めるのは呼ぶ側: JPYC・forwarder のあるチェーンのガスレス (回収) と、JPYC の通常決済で、金額のある通常の
 // QR だけ (それ以外は url に空文字を渡す)。お店負担の QR・金額なし・EIP-681・USDC・forwarder の無いチェーンのガスレスには
