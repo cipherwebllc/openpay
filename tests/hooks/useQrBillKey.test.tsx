@@ -5,19 +5,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { StrictMode, type ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 
-type Recorded = { billKey: string; count: number; amount: string };
+type Recorded = { billKey: string; count: number; amount: string; notSaved?: true };
 const watch = vi.hoisted(() => ({
   calls: [] as string[],
   shown: [] as { billKey: string; kind: string; url: string; itemName: string }[],
   // bill key ごとの、最後に渡された受け手 (見張りが行を書いたときに呼ぶもの)。
-  listeners: new Map<string, (event: { billKey: string; count: number; amount: string }) => void>(),
+  listeners: new Map<string, (event: { billKey: string; count: number; amount: string; notSaved?: true }) => void>(),
   throwOnShow: false,
 }));
 vi.mock('@/lib/qrSaleWatch', () => ({
   showQrBill: (
     input: { billKey: string; kind: string; url: string; itemName: string },
     _shownAt: number,
-    onRecorded?: (event: { billKey: string; count: number; amount: string }) => void,
+    onRecorded?: (event: { billKey: string; count: number; amount: string; notSaved?: true }) => void,
   ) => {
     watch.calls.push(`show:${input.billKey}`);
     watch.shown.push(input);
@@ -32,7 +32,8 @@ vi.mock('@/lib/qrSaleWatch', () => ({
   },
 }));
 
-import { useQrBillKey, useQrSaleWatchScope, type QrBillKeyArgs } from '@/hooks/useQrBillKey';
+import { qrBillNotices, useQrBillKey, useQrSaleWatchScope, type QrBillKeyArgs } from '@/hooks/useQrBillKey';
+import ja from '@/messages/ja.json';
 import { billKeySalt } from '@/lib/relay/billKeySalt';
 
 const URL_A = 'https://shop.test/pay?to=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913&token=jpyc&gas=merchant&amount=1000';
@@ -279,5 +280,55 @@ describe('useQrBillKey — 入金の確認 (見張りが行を書いた知らせ
     await flush();
     record({ billKey, count: 1, amount: amount(1_000n) });
     expect(result.current.confirmed).toEqual({ count: 1, amount: amount(1_000n) });
+  });
+
+  it('書けなかったかもしれない (notSaved) は巻き戻さない: 1 件目が書けず 2 件目が書けたら、count 2 と notSaved の両方が残る', async () => {
+    const { result } = renderHook(() => useQrBillKey(args()));
+    const billKey = keyOf(result.current.screenUrl);
+    await flush();
+    record({ billKey, count: 1, amount: amount(1_000n), notSaved: true });
+    expect(result.current.confirmed).toEqual({ count: 1, amount: amount(1_000n), notSaved: true });
+    record({ billKey, count: 2, amount: amount(1_000n) });
+    expect(result.current.confirmed).toEqual({ count: 2, amount: amount(1_000n), notSaved: true });
+    // 何件目かは大きい方 (小さい数の知らせが後から届いても戻さない)。
+    record({ billKey, count: 1, amount: amount(1_000n) });
+    expect(result.current.confirmed).toEqual({ count: 2, amount: amount(1_000n), notSaved: true });
+  });
+
+  it('前の会計の notSaved は、新しい会計の QR に持ち越さない', async () => {
+    const { result, rerender } = renderHook((p: QrBillKeyArgs) => useQrBillKey(p), { initialProps: args() });
+    const first = keyOf(result.current.screenUrl);
+    await flush();
+    record({ billKey: first, count: 1, amount: amount(1_000n), notSaved: true });
+    rerender(args({ url: URL_B }));
+    const second = keyOf(result.current.screenUrl, URL_B);
+    await flush();
+    record({ billKey: second, count: 1, amount: amount(1_200n) });
+    expect(result.current.confirmed).toEqual({ count: 1, amount: amount(1_200n) });
+  });
+});
+
+describe('qrBillNotices — QR の画面に渡す確認の文と注意', () => {
+  const Q = ja.QrGenerator;
+  // next-intl の t と同じ置き換え ({amount} だけ)。
+  const t = (key: 'billPaymentRecorded' | 'billPaymentAnother' | 'billPaymentNotSaved', values?: { amount: string }) =>
+    Q[key].replace('{amount}', values?.amount ?? '');
+  const AMOUNT = (1_000n * 10n ** 18n).toString();
+
+  it('書けた 1 件目 → 緑の確認だけ (今までどおり)', () => {
+    expect(qrBillNotices(t, { count: 1, amount: AMOUNT })).toEqual({
+      billConfirmed: Q.billPaymentRecorded.replace('{amount}', '1000 JPYC'),
+    });
+  });
+
+  it('1 件目が書けなかったかもしれない → 注意だけ (「取引履歴に記録しました」と言わない)', () => {
+    expect(qrBillNotices(t, { count: 1, amount: AMOUNT, notSaved: true })).toEqual({ billNotSaved: Q.billPaymentNotSaved });
+  });
+
+  it('2 件目以降と notSaved の両方 → 「二重のお支払いかもしれません」と注意の両方', () => {
+    expect(qrBillNotices(t, { count: 2, amount: AMOUNT, notSaved: true })).toEqual({
+      billConfirmed: Q.billPaymentAnother.replace('{amount}', '1000 JPYC'),
+      billNotSaved: Q.billPaymentNotSaved,
+    });
   });
 });

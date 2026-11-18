@@ -530,6 +530,7 @@
     "paymentReceivedNote": "This may not be this payment. Check the merchant wallet or the explorer.",
     "billPaymentRecorded": "Payment for this bill confirmed ({amount}). Recorded in your transaction history.",
     "billPaymentAnother": "Another payment arrived for this bill ({amount}). The customer may have paid twice.",
+    "billPaymentNotSaved": "The payment was confirmed, but it may not have been saved to this device's history. Open the history to check, and if it isn't there, check the customer's payment receipt.",
     "printPoster": "Print",
     "posterEyebrow": "OpenPay stablecoin payment QR",
     "posterDefaultStoreName": "Scan to pay",

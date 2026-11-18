@@ -26,7 +26,7 @@ import { env } from '@/lib/env';
 import { loadHistory } from '@/lib/history';
 import { ORDER_SALE_MARKS_KEY, createOrderSaleRecorder } from '@/lib/orderFeedHistoryRecorder';
 import type { StoredOrder } from '@/lib/orderRelay';
-import { ORDER_FEED_MARKS_KEY, QR_SALE_MARKS_KEY, addQrSaleMark, readTxMarks } from '@/lib/qrSaleMarks';
+import { ORDER_FEED_MARKS_KEY, QR_SALE_MARKS_KEY, addQrSaleMark, putQrSaleMark, readTxMarks } from '@/lib/qrSaleMarks';
 import { deploymentForSlug } from '@/lib/tokens';
 
 const FORWARDER: Address = '0x1111111111111111111111111111111111111111';
@@ -73,6 +73,35 @@ describe('2 つの書き手の印の key', () => {
     expect(addQrSaleMark(tx(2))).toBe(true);
     expect([...readTxMarks(ORDER_SALE_MARKS_KEY)!.keys()]).toEqual([tx(1)]);
     expect([...readTxMarks(QR_SALE_MARKS_KEY)!.keys()]).toEqual([tx(2)]);
+  });
+});
+
+describe('QR の会計の印を足す (addQrSaleMark の値は今までと同じ・putQrSaleMark は書いたかを返す)', () => {
+  it('印が無い → 書く: addQrSaleMark は true・putQrSaleMark は added', () => {
+    expect(addQrSaleMark(tx(1))).toBe(true);
+    expect(putQrSaleMark(tx(2))).toBe('added');
+    expect([...readTxMarks(QR_SALE_MARKS_KEY)!.keys()].sort()).toEqual([tx(1), tx(2)]);
+  });
+
+  it('印がもうある → 書かない: addQrSaleMark は true のまま・putQrSaleMark は present (印は書き換えない)', () => {
+    const before = JSON.stringify([[tx(1), 1]]);
+    window.localStorage.setItem(QR_SALE_MARKS_KEY, before);
+    expect(addQrSaleMark(tx(1))).toBe(true);
+    expect(putQrSaleMark(tx(1))).toBe('present');
+    expect(stored(QR_SALE_MARKS_KEY)).toBe(before);
+  });
+
+  it('印を読めない・書けない → addQrSaleMark は false・putQrSaleMark は null', () => {
+    window.localStorage.setItem(QR_SALE_MARKS_KEY, '{broken');
+    expect(addQrSaleMark(tx(1))).toBe(false);
+    expect(putQrSaleMark(tx(1))).toBeNull();
+    window.localStorage.removeItem(QR_SALE_MARKS_KEY);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    expect(addQrSaleMark(tx(1))).toBe(false);
+    expect(putQrSaleMark(tx(1))).toBeNull();
+    setItem.mockRestore();
   });
 });
 

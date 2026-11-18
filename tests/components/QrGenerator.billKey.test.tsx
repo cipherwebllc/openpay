@@ -162,7 +162,7 @@ vi.mock('@/hooks/useQrBillKey', async (importOriginal) => {
 
 import { QrGenerator } from '@/components/QrGenerator';
 import { useQrSaleWatchScope } from '@/hooks/useQrBillKey';
-import { loadHistory } from '@/lib/history';
+import { HISTORY_STORAGE_KEY, loadHistory } from '@/lib/history';
 import { stopQrSaleWatch } from '@/lib/qrSaleWatch';
 import { formatStoreDeviceAmount } from '@/lib/storeDevicePayment';
 import { deploymentForSlug } from '@/lib/tokens';
@@ -704,6 +704,31 @@ describe('決済QR: 入金の確認の表示 (見張りが表示中の会計の�
     await tick();
     expect(loadHistory()).toHaveLength(3);
     expect(dialog()!.textContent).not.toContain(another('1400 JPYC'));
+  });
+
+  it('この端末の履歴に書けなかった (黙った失敗) → 緑の「記録しました」は出さず amber の注意を出す。2 件目が書けても注意は残り、2 件目の文と両方を出す', async () => {
+    const { dialog: d } = await openQr('1400');
+    const billKey = billKeyOf(d);
+    rpc.head.mockResolvedValue(1_010n);
+    rpc.logs.mockResolvedValue([payment(billKey, 1_003n, TX1)]);
+    // 履歴の key への書き込みだけが失敗する (容量の上限・appendHistory は握りつぶして返る)。
+    const real = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === HISTORY_STORAGE_KEY) throw new Error('QuotaExceededError');
+      real.call(this, key, value);
+    });
+    await tick();
+    setItem.mockRestore();
+    expect(loadHistory()).toEqual([]);
+    expect(status().textContent).toBe(L.billPaymentNotSaved);
+    expect(within(status()).getByText(L.billPaymentNotSaved)).toHaveClass('border-amber-200', 'bg-amber-50', 'text-amber-900');
+    expect(dialog()!.textContent).not.toContain(first('1400 JPYC'));
+    expect(status()).not.toHaveAttribute('aria-label');
+    // 同じ会計への 2 件目は書ける: 2 件目の文 (二重のお支払いかもしれない) と、1 件目の注意の両方 (巻き戻さない)。
+    rpc.logs.mockResolvedValue([payment(billKey, 1_003n, TX1), payment(billKey, 1_004n, TX2)]);
+    await tick();
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${TX2}`]);
+    expect(status().textContent).toBe(`${another('1400 JPYC')}${L.billPaymentNotSaved}`);
   });
 
   it('通常決済の QR: 印の付いた transfer の入金の行 (払った側の通常決済の行と同じ欄) を書いたら、同じ緑の文を出す (額 = 請求額)', async () => {
