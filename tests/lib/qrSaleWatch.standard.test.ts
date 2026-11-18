@@ -496,11 +496,13 @@ describe('1 tx 1 行・払った側の行', () => {
     expect(rpc.tx).not.toHaveBeenCalled();
   });
 
+  // Settled の照合・保存は Transfer の読み取りを待たずに先に終える (lib/qrSaleWatch.ts の頭の注記)。log の番号が Transfer の方が
+  // 小さくても、行は Settled の会計の行 (前は、log の番号の小さい方の会計の行だった)。
   it.each([
-    ['Settled が先', 0, 1, [`batch-${tx(1)}`, 'G-1']],
-    ['Transfer が先', 1, 0, [stdId(tx(1)), 'S-1']],
+    ['log の番号は Settled が先', 0, 1, [`batch-${tx(1)}`, 'G-1']],
+    ['log の番号は Transfer が先', 1, 0, [`batch-${tx(1)}`, 'G-1']],
   ] as const)(
-    '1 つの tx に、ガスレスの会計の Settled と、通常決済の会計の印の付いた Transfer の両方 (%s) → 1 行 (先に見た log の会計)',
+    '1 つの tx に、ガスレスの会計の Settled と、通常決済の会計の印の付いた Transfer の両方 (%s) → 1 行 (Settled の会計の行)',
     async (_name, settledIndex, transferIndex, row) => {
       showQrBill(
         { billKey: BK, kind: 'pay', url: payUrl({ mode: 'gasless', gas: 'merchant', receiptNo: 'G-1' }), itemName: '' },

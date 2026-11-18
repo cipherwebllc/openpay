@@ -5,6 +5,8 @@
 // RPC の読み取り (lib/qrSaleRpc.ts) と nonce の式 (軽い差し替え) を差し替え、照合・行の組み立て・履歴と印 (localStorage) は実物。
 // 時間は fake timer で進める。ガスレスの入金だけの回し方は tests/lib/qrSaleWatch.test.ts、通常決済の QR の会計は
 // tests/lib/qrSaleWatch.standard.test.ts が確かめる (この file は、2 つの経路が 1 つの会計に重なる所を見る)。
+// 決まり: ガスレスの入金 (Settled) の読み取り・照合・保存は、Transfer の RPC を 1 つも待たない。同じ tx を両方が拾ったら
+// ガスレスの行。Transfer の側の遅れ・失敗は、Transfer の行が遅れる・出ないだけ。
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
@@ -338,6 +340,24 @@ describe('ガスレスの会計: 読むもの', () => {
     expect(transferRanges()[3]).toEqual([922n, 1_009n]);
   });
 
+  it('同じ受取先の新しいガスレスの会計: Settled の位置だけ戻す (今までどおり)。Transfer は読み直さず、続きから読む', async () => {
+    showGasless(BK);
+    await tick();
+    chain.head = 1_004n;
+    await tick();
+    chain.head = 1_008n;
+    showGasless(BK2);
+    await tick();
+    expect(settledRanges()).toEqual([[910n, 997n], [987n, 1_001n], [918n, 1_005n]]);
+    // その受取先の Transfer は、もう読んで照合してある (出し直すたびに先頭 − 90 へ戻さない)。
+    expect(transferRanges()).toEqual([[910n, 997n], [987n, 1_001n], [991n, 1_005n]]);
+    // 新しい会計への切り替えた入金は、続きの範囲で拾う。
+    chain.head = 1_012n;
+    pay(1_008n, 1, { billKey: BK2 });
+    await tick();
+    expect(rows()).toEqual([[stdId(tx(1)), 'G-1']]);
+  });
+
   it('通常決済の QR とガスレスの QR が同じチェーンに同時にある: Transfer の getLogs は 1 回で、両方の会計の受取先を読む', async () => {
     showGasless(BK);
     showStd(BK2, { to: OTHER_SHOP });
@@ -507,6 +527,8 @@ describe('印・額・受取先・時刻・送り手がそろわなければ書�
   it('block の時刻が、会計の生きていた間 (表示を始めてから、やめて 60 秒まで・時計のずれ 30 秒) の外なら書かない (tx も読まない)', async () => {
     showGasless(BK, {}, NOW);
     hideQrBill(BK, NOW);
+    // 読み取りが遅れて、先頭がもう 1,050 (Settled は 1,047 まで照合し終える)。
+    chain.head = 1_050n;
     rpc.transfers.mockImplementation(async () => chain.transfers);
     pay(984n, 1); // NOW − 32 秒: 外
     pay(985n, 2); // NOW − 30 秒: 内 (端)
@@ -559,23 +581,24 @@ describe('会計の件数・明細・1 tx 1 行・知らせは、Settled の入�
   });
 
   it.each([
-    ['Settled の入金が先', 994n, 995n, 'G-1', null],
-    ['通常決済の入金が先 (到着の順を逆に)', 996n, 995n, null, 'G-1'],
+    ['チェーンの順も Settled の入金が先', 994n, 995n],
+    ['チェーンの順は通常決済の入金が先', 996n, 995n],
   ] as const)(
-    '同じ会計に、ガスレスの入金と通常決済の入金が別の tx で 2 つ (%s) → 2 行・count 1 と 2・明細は先の 1 件だけ',
-    async (_name, settledBlock, transferBlock, settledReceipt, transferReceipt) => {
+    '同じ回に、同じ会計のガスレスの入金と通常決済の入金が別の tx で見つかる (%s) → 2 行・count 1 と 2・1 件目 (明細つき) は Settled の入金',
+    async (_name, settledBlock, transferBlock) => {
       const seen: QrBillRecorded[] = [];
       showGasless(BK, {}, NOW, (e) => seen.push(e));
       settle(settledBlock, 1);
       pay(transferBlock, 2);
       await tick();
-      const byId = Object.fromEntries(loadHistory().map((e) => [e.id, e]));
-      expect(Object.keys(byId).sort()).toEqual([gaslessId(tx(1)), stdId(tx(2))].sort());
-      expect(byId[gaslessId(tx(1))]).toMatchObject({ payMode: 'gasless', receiptNo: settledReceipt, saleAmount: BILL.toString() });
-      expect(byId[stdId(tx(2))]).toMatchObject({ payMode: 'standard', receiptNo: transferReceipt, saleAmount: BILL.toString() });
-      // 明細の無い方は、明細・商品名も無い (同じ会計への 2 件目の入金)。
-      const second = settledReceipt === null ? byId[gaslessId(tx(1))] : byId[stdId(tx(2))];
-      expect(second).toMatchObject({ lineItems: null, storeName: '' });
+      // Settled の照合・保存は Transfer を待たずに先に終える。同じ回なら、チェーンの順に関わらず Settled の入金が 1 件目
+      // (受け入れている限界: lib/qrSaleWatch.ts の頭の注記)。
+      expect(rows()).toEqual([
+        [stdId(tx(2)), null],
+        [gaslessId(tx(1)), 'G-1'],
+      ]);
+      expect(loadHistory()[0]).toMatchObject({ payMode: 'standard', saleAmount: BILL.toString(), lineItems: null, storeName: '' });
+      expect(loadHistory()[1]).toMatchObject({ payMode: 'gasless', saleAmount: BILL.toString(), merchantAmount: NET.toString() });
       expect(seen).toEqual([
         { billKey: BK, count: 1, amount: BILL.toString() },
         { billKey: BK, count: 2, amount: BILL.toString() },
@@ -584,21 +607,28 @@ describe('会計の件数・明細・1 tx 1 行・知らせは、Settled の入�
     },
   );
 
-  it('同じ block の中では、種類をまたいで log の番号の小さい方が 1 件目 (RPC が新しい順に返しても)', async () => {
-    showGasless();
-    settle(995n, 1, { logIndex: 9 });
-    pay(995n, 2, { logIndex: 4 });
-    rpc.transfers.mockImplementation(async () => [...chain.transfers].reverse());
+  it('回が分かれれば、先に見つかった方が 1 件目: 通常決済の入金 (明細つき) → 次の回のガスレスの入金は 2 件目 (明細なし)', async () => {
+    const seen: QrBillRecorded[] = [];
+    showGasless(BK, {}, NOW, (e) => seen.push(e));
+    pay(995n, 1);
     await tick();
-    expect(rows().sort()).toEqual([[gaslessId(tx(1)), null], [stdId(tx(2)), 'G-1']].sort());
+    expect(rows()).toEqual([[stdId(tx(1)), 'G-1']]);
+    chain.head = 1_004n;
+    settle(1_000n, 2);
+    await tick();
+    expect(rows()).toEqual([
+      [gaslessId(tx(2)), null],
+      [stdId(tx(1)), 'G-1'],
+    ]);
+    expect(seen.map((e) => e.count)).toEqual([1, 2]);
   });
 
   it.each([
-    ['Settled が先', 0, 1, gaslessId(tx(1)), 0],
-    ['Transfer が先', 1, 0, stdId(tx(1)), 1],
+    ['log の番号は Settled が先', 0, 1],
+    ['log の番号は Transfer が先', 1, 0],
   ] as const)(
-    '1 つの tx を、同じ会計の Settled と印の付いた Transfer の両方が拾う (%s) → 1 行・知らせ 1 回・件数は 1 つだけ進む',
-    async (_name, settledIndex, transferIndex, id, txReads) => {
+    '1 つの tx を、同じ会計の Settled と印の付いた Transfer の両方が拾う (%s) → ガスレスの行 1 つ・知らせ 1 回・件数は 1 つだけ進む・tx は読まない',
+    async (_name, settledIndex, transferIndex) => {
       const seen: QrBillRecorded[] = [];
       showGasless(BK, {}, NOW, (e) => seen.push(e));
       settle(995n, 1, { logIndex: settledIndex });
@@ -606,12 +636,15 @@ describe('会計の件数・明細・1 tx 1 行・知らせは、Settled の入�
         logIndex: transferIndex, input: handleOps(execute(markedTransfer(BK, SHOP, BILL))), txFrom: BUNDLER, txTo: ENTRY_POINT,
       });
       await tick();
-      expect(rows()).toEqual([[id, 'G-1']]);
+      // 行はガスレスの行 (着金額・利用料は Settled の値)。通常決済の行に変わらない。
+      expect(rows()).toEqual([[gaslessId(tx(1)), 'G-1']]);
+      expect(loadHistory()[0]).toMatchObject({
+        payMode: 'gasless', gasMode: 'merchant', merchantAmount: NET.toString(), networkFeeEquivalent: FEE.toString(),
+      });
       expect(marks()).toEqual([tx(1)]);
       expect(hold.appends).toBe(1);
       expect(seen).toEqual([{ billKey: BK, count: 1, amount: BILL.toString() }]);
-      // Settled で数えた tx の Transfer は、tx を読まない。
-      expect(rpc.tx).toHaveBeenCalledTimes(txReads);
+      expect(rpc.tx).not.toHaveBeenCalled();
       // 次の別の tx の入金は 2 件目 (同じ tx を 2 つの経路で二重に数えていない)。
       chain.head = 1_004n;
       pay(1_000n, 2);
@@ -620,6 +653,65 @@ describe('会計の件数・明細・1 tx 1 行・知らせは、Settled の入�
       expect(loadHistory()[0]).toMatchObject({ id: stdId(tx(2)), receiptNo: null, lineItems: null });
     },
   );
+
+  it('Transfer が先に読めて Settled がまだの回 (Settled の getLogs の失敗) でも、同じ tx の行はガスレスの行: Transfer は Settled を待ち (RPC も読まない)、数えない', async () => {
+    const seen: QrBillRecorded[] = [];
+    showGasless(BK, {}, NOW, (e) => seen.push(e));
+    settle(995n, 1, { logIndex: 1 });
+    pay(995n, 1, {
+      logIndex: 0, input: handleOps(execute(markedTransfer(BK, SHOP, BILL))), txFrom: BUNDLER, txTo: ENTRY_POINT,
+    });
+    rpc.logs.mockImplementationOnce(async () => {
+      throw down();
+    });
+    await tick();
+    expect(rpc.transfers).toHaveBeenCalledTimes(1);
+    expect(loadHistory()).toEqual([]);
+    expect(rpc.time).not.toHaveBeenCalled();
+    expect(rpc.tx).not.toHaveBeenCalled();
+    await tick();
+    expect(rows()).toEqual([[gaslessId(tx(1)), 'G-1']]);
+    expect(loadHistory()[0]).toMatchObject({
+      payMode: 'gasless', merchantAmount: NET.toString(), networkFeeEquivalent: FEE.toString(),
+    });
+    expect(seen).toEqual([{ billKey: BK, count: 1, amount: BILL.toString() }]);
+    expect(rpc.tx).not.toHaveBeenCalled();
+    expect(hold.appends).toBe(1);
+  });
+
+  it('両方が一致する tx で、Settled の行の印を書けなかった (1 回だけの失敗) → Settled だけの tx と同じ結果 (行なし・知らせなし)。同じ tx の Transfer で通常決済の行に変えず、件数も 1 つだけ', async () => {
+    const seen: QrBillRecorded[] = [];
+    showGasless(BK, {}, NOW, (e) => seen.push(e));
+    settle(995n, 1, { logIndex: 0 });
+    pay(995n, 1, {
+      logIndex: 1, input: handleOps(execute(markedTransfer(BK, SHOP, BILL))), txFrom: BUNDLER, txTo: ENTRY_POINT,
+    });
+    const real = Storage.prototype.setItem;
+    let failed = false;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === QR_SALE_MARKS_KEY && !failed) {
+        failed = true;
+        throw new Error('QuotaExceededError');
+      }
+      real.call(this, key, value);
+    });
+    await tick();
+    setItem.mockRestore();
+    expect(failed).toBe(true);
+    expect(rows()).toEqual([]);
+    expect(hold.appends).toBe(0);
+    expect(seen).toEqual([]);
+    expect(rpc.tx).not.toHaveBeenCalled();
+    // 重ねて読んでも、同じ tx の Transfer が後から通常決済の行を書くことは無い。
+    await tick(2);
+    expect(rows()).toEqual([]);
+    // 件数は Settled の 1 回だけ: 次の別の tx の入金は 2 件目。
+    chain.head = 1_008n;
+    pay(1_004n, 2);
+    await tick();
+    expect(rows()).toEqual([[stdId(tx(2)), null]]);
+    expect(seen).toEqual([{ billKey: BK, count: 2, amount: BILL.toString() }]);
+  });
 
   it('通常決済の QR とガスレスの QR が、同じ受取先・同じ額で同時にある: 入金は input にある印の会計の行になり、件数は会計ごと', async () => {
     const gasless: QrBillRecorded[] = [];
@@ -634,10 +726,11 @@ describe('会計の件数・明細・1 tx 1 行・知らせは、Settled の入�
     await tick();
     expect(rpc.logs).toHaveBeenCalledTimes(1);
     expect(rpc.transfers).toHaveBeenCalledTimes(1);
+    // 同じ回なので、ガスレスの会計の 1 件目は Settled の入金 (995)。切り替えた入金 (994) は 2 件目。
     expect(rows()).toEqual([
-      [gaslessId(tx(3)), null],
-      [stdId(tx(2)), 'G-1'],
+      [stdId(tx(2)), null],
       [stdId(tx(1)), 'S-1'],
+      [gaslessId(tx(3)), 'G-1'],
     ]);
     expect(gasless).toEqual([
       { billKey: BK, count: 1, amount: BILL.toString() },
@@ -698,28 +791,48 @@ describe('読み取りの失敗・上限: 片方の種類の失敗を、もう�
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('Settled の getLogs だけ失敗 → Transfer は読んで進める。Settled は次の回に同じ所から読む', async () => {
+  it('Settled の getLogs だけ失敗 → ガスレスの会計の期待値に合う Transfer は、Settled を照合し終えるまで待つ (RPC も読まない)。通常決済の QR の会計の Transfer は進む', async () => {
     showGasless();
+    showStd(BK2, { to: OTHER_SHOP });
     settle(994n, 1);
+    pay(993n, 3, { billKey: BK2, to: OTHER_SHOP });
     pay(995n, 2);
     rpc.logs.mockImplementationOnce(async () => {
       throw down();
     });
     await tick();
-    expect(rows()).toEqual([[stdId(tx(2)), 'G-1']]);
+    // 通常決済の QR の会計 (別の受取先) の入金は書く。ガスレスの会計の 995 は、Settled をまだ照合していないので待つ。
+    expect(rows()).toEqual([[stdId(tx(3)), 'S-1']]);
+    expect(rpc.tx.mock.calls.map(([, hash]) => hash)).toEqual([tx(3)]);
     chain.head = 1_004n;
     await tick();
+    // Settled (994) が先に 1 件目。待たせていた Transfer (995) は 2 件目。
     expect(rows()).toEqual([
-      [gaslessId(tx(1)), null],
-      [stdId(tx(2)), 'G-1'],
+      [stdId(tx(2)), null],
+      [gaslessId(tx(1)), 'G-1'],
+      [stdId(tx(3)), 'S-1'],
     ]);
     expect(settledRanges()).toEqual([[910n, 997n], [914n, 1_001n]]);
-    expect(transferRanges()).toEqual([[910n, 997n], [987n, 1_001n]]);
+    // Transfer は、待たせた log (995) の手前 (994) まで照合し終えた = その続き − 10 から。
+    expect(transferRanges()).toEqual([[910n, 997n], [984n, 1_001n]]);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it.each([
     ['tx を読めない', () => rpc.tx.mockImplementationOnce(() => Promise.reject(new Error('rpc down')))],
-    ['block の時刻を読めない', () => rpc.time.mockImplementationOnce(() => Promise.reject(new Error('rpc down')))],
+    [
+      'block の時刻 (993) を読めない',
+      () => {
+        let failed = false;
+        rpc.time.mockImplementation(async (_chainId: number, block: bigint) => {
+          if (block === 993n && !failed) {
+            failed = true;
+            throw new Error('rpc down');
+          }
+          return blockTime(block);
+        });
+      },
+    ],
   ])('%s Transfer から後ろの Transfer は次の回に回す。同じ回の Settled の照合は続ける', async (_name, breakOnce) => {
     showGasless();
     pay(993n, 1);
@@ -767,6 +880,96 @@ describe('読み取りの失敗・上限: 片方の種類の失敗を、もう�
     await vi.advanceTimersByTimeAsync(0);
     expect(loadHistory()).toEqual([]);
     expect(window.localStorage.getItem(QR_SALE_MARKS_KEY)).toBeNull();
+  });
+});
+
+describe('ガスレスの入金 (Settled) の記録は、Transfer の RPC を待たない', () => {
+  const never = <T>() => new Promise<T>(() => {});
+
+  it('Transfer の getLogs が返らなくても、同じ回の Settled の行と知らせは確定している。その間に /create を離れても残る', async () => {
+    const seen: QrBillRecorded[] = [];
+    showGasless(BK, {}, NOW, (e) => seen.push(e));
+    settle(995n, 1);
+    rpc.transfers.mockImplementation(() => never<QrSaleLog[]>());
+    await tick();
+    expect(rpc.transfers).toHaveBeenCalledTimes(1);
+    expect(rows()).toEqual([[gaslessId(tx(1)), 'G-1']]);
+    expect(seen).toEqual([{ billKey: BK, count: 1, amount: BILL.toString() }]);
+    stopQrSaleWatch();
+    expect(rows()).toEqual([[gaslessId(tx(1)), 'G-1']]);
+    expect(marks()).toEqual([tx(1)]);
+  });
+
+  it('log の順で先にある Transfer の tx の読み取りを待たない: tx が返る前に Settled の入金が確定し、返った後の Transfer は 2 件目', async () => {
+    let release!: (value: QrSaleTx) => void;
+    const seen: QrBillRecorded[] = [];
+    showGasless(BK, {}, NOW, (e) => seen.push(e));
+    pay(994n, 2);
+    settle(995n, 1);
+    rpc.tx.mockImplementationOnce(() => new Promise<QrSaleTx>((resolve) => { release = resolve; }));
+    await tick();
+    expect(rpc.tx).toHaveBeenCalledTimes(1);
+    expect(rows()).toEqual([[gaslessId(tx(1)), 'G-1']]);
+    expect(seen).toEqual([{ billKey: BK, count: 1, amount: BILL.toString() }]);
+    release(chain.txs.get(tx(2))!);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(rows()).toEqual([
+      [stdId(tx(2)), null],
+      [gaslessId(tx(1)), 'G-1'],
+    ]);
+    expect(seen.map((e) => e.count)).toEqual([1, 2]);
+  });
+
+  it('前の回の Transfer がまだ返らない間も、次の回の Settled は 6 秒おきに読んで入金を書く (Transfer は重ねて読まない)。切れた後の回から Transfer もまた読む', async () => {
+    showGasless();
+    rpc.transfers.mockImplementationOnce(() => never<QrSaleLog[]>());
+    await tick();
+    chain.head = 1_004n;
+    settle(1_000n, 1);
+    // 6 秒後の回: Transfer の getLogs は 7 秒で切れるので、まだ待っている。
+    await tick();
+    expect(rows()).toEqual([[gaslessId(tx(1)), 'G-1']]);
+    expect(rpc.logs).toHaveBeenCalledTimes(2);
+    expect(rpc.transfers).toHaveBeenCalledTimes(1);
+    chain.head = 1_008n;
+    pay(1_004n, 2);
+    await tick();
+    expect(rpc.logs).toHaveBeenCalledTimes(3);
+    expect(rpc.transfers).toHaveBeenCalledTimes(2);
+    expect(rows()).toEqual([
+      [stdId(tx(2)), null],
+      [gaslessId(tx(1)), 'G-1'],
+    ]);
+  });
+
+  it('止めた後に終わった古い回 (block の時刻を待っていた) が、開き直した後の見張りの Transfer を止めない', async () => {
+    showGasless(BK);
+    settle(995n, 1);
+    // Settled の block の時刻が返らない (7 秒で切れる)。その間に /create を離れて、開き直す。
+    rpc.time.mockImplementationOnce(() => never<bigint>());
+    await tick();
+    stopQrSaleWatch();
+    showGasless(BK2);
+    chain.head = 1_010n;
+    pay(1_005n, 2, { billKey: BK2 });
+    await tick(3);
+    // 古い回は何も書かない (止めた後)。新しい見張りは Transfer も読み、切り替えた入金を書く。
+    expect(rpc.transfers).toHaveBeenCalled();
+    expect(rows()).toEqual([[stdId(tx(2)), 'G-1']]);
+  });
+
+  it('あるチェーンの Transfer が返らなくても、同じ回の、後ろのチェーンの Settled は待たずに読んで書く', async () => {
+    const kaiaFee = recoverFeeValue(BILL, 'merchant', KAIA.chainId);
+    showGasless(BK);
+    showGasless(BK2, { chain: 'kaia', receiptNo: 'K-1' });
+    settle(995n, 1, { billKey: BK2, chainId: KAIA.chainId, merchantValue: BILL - kaiaFee, feeValue: kaiaFee });
+    // Polygon (先に読むチェーン) の Transfer だけ返らない。
+    rpc.transfers.mockImplementation((chainId: number) =>
+      chainId === POLYGON.chainId ? never<QrSaleLog[]>() : Promise.resolve([]),
+    );
+    await tick();
+    expect(rows()).toEqual([[gaslessId(tx(1)), 'K-1']]);
+    expect(loadHistory()[0].chainId).toBe(KAIA.chainId);
   });
 });
 
@@ -846,5 +1049,57 @@ describe('getLogs の範囲に制限のある RPC (10 block ずつ・Avalanche �
     expect(settledRanges()).toEqual(chunks(989n, 1_002n));
     expect(transferRanges()).toEqual(chunks(989n, 1_002n));
     expect(calls()).toBe(4);
+  });
+
+  it('Settled が 10 回を使い切った最初の回の後、先頭が進んでいても、Transfer は最初の回の範囲の始まりから読む (最初の回の対象だった入金を飛ばさない)', async () => {
+    limitedRpc();
+    showGasless(BK, { chain: 'kaia' }, NOW - 240_000);
+    // 最初の回 (先頭 1,000) の範囲 910〜999 にある入金。次の回の先頭 − 90 (914) より前。
+    pay(912n, 1, { token: KAIA.address });
+    await tick();
+    expect(rpc.logs).toHaveBeenCalledTimes(10);
+    expect(rpc.transfers).not.toHaveBeenCalled();
+    clear();
+    chain.head = 1_004n;
+    await tick();
+    // Settled は 2 回 (989〜1,003)。Transfer は残りの 8 回で、最初の回の始まり (910) から 80 block。
+    expect(settledRanges()).toEqual(chunks(989n, 1_003n));
+    expect(transferRanges()).toEqual(chunks(910n, 989n));
+    expect(rows()).toEqual([[stdId(tx(1)), 'G-1']]);
+    // 続きは、読めた所 (989) − 10 から先頭 − 1 まで。
+    clear();
+    await tick();
+    expect(transferRanges()).toEqual(chunks(979n, 1_003n));
+  });
+
+  it('新しいガスレスの QR (同じ受取先) を回ごとに出し直し続けても、Transfer は残りの 1 回で続きを 10 block ずつ進み、直近の入金を、その会計が生きている間に拾う (Settled の枠は削らない)', async () => {
+    limitedRpc();
+    const key = (i: number) => `K${String(i).padStart(10, '0')}`;
+    showGasless(key(1), { chain: 'kaia' });
+    // 1 回目: Settled が範囲の制限を知る 1 回 + 9 回。Transfer は読めない。
+    await tick();
+    expect(rpc.transfers).not.toHaveBeenCalled();
+    const transferReads: bigint[][] = [];
+    let pickedAt = 0;
+    for (let pass = 2; pass <= 13 && pickedAt === 0; pass += 1) {
+      // 6 秒で 3 block 進む。出し直し: 前の QR をやめて、新しい QR を出す (同じ受取先・同じ額)。
+      chain.head += 3n;
+      hideQrBill(key(pass - 1), Date.now());
+      showGasless(key(pass), { chain: 'kaia' });
+      // 2 回目に出した QR へ、払う側で通常決済に切り替えた入金 (その時の先頭の 2 つ手前 = 1,001)。
+      if (pass === 2) pay(chain.head - 2n, 1, { billKey: key(2), token: KAIA.address });
+      clear();
+      await tick();
+      // Settled は毎回、先頭 − 90 から 9 回 (今までどおり・枠を削られていない)。Transfer は残りの 1 回。
+      expect(rpc.logs).toHaveBeenCalledTimes(9);
+      expect(rpc.transfers).toHaveBeenCalledTimes(1);
+      transferReads.push(...transferRanges());
+      if (loadHistory().length > 0) pickedAt = pass;
+    }
+    // Transfer は、最初の回の始まり (910) から、重ねを読まずに 10 block ずつ続きを読む (先頭 − 90 へ戻らない)。
+    expect(transferReads.slice(0, 4)).toEqual([[910n, 919n], [920n, 929n], [930n, 939n], [940n, 949n]]);
+    // 2 回目に出した QR の会計は、やめてから 60 秒 (13 回目の前まで) 生きている。その前に拾う。
+    expect(pickedAt).toBe(11);
+    expect(rows()).toEqual([[stdId(tx(1)), 'G-1']]);
   });
 });
