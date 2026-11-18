@@ -273,6 +273,36 @@ describe('HistoryView', () => {
     );
   });
 
+  // 履歴に出ない入金 (モバイルオーダー以外の通常決済・USDC など) の 1 行と、取引履歴のガイドへのリンク。リンクの名前は可視の文字 (掟 8)。
+  // 空のとき (払われたのに出ない) こそ要るので、件数によらず出す。entries ありは browserScopeNote の直後。
+  it('「履歴に出ない入金もあります」の 1 行は、空でも entries ありでも出て、取引履歴のガイドへリンクする', async () => {
+    const { unmount } = render(<HistoryView />);
+    await screen.findByText(/履歴はまだありません/);
+    const emptyLink = screen.getByRole('link', { name: '「取引履歴と会計 CSV」のガイド' });
+    expect(emptyLink).toHaveAttribute('href', '/ja/guide/history');
+    expect(emptyLink).not.toHaveAttribute('aria-label');
+    expect(emptyLink.closest('p')).toHaveTextContent(
+      '履歴に出ない入金もあります（モバイルオーダー以外の通常決済・USDC など）。くわしくは「取引履歴と会計 CSV」のガイドへ。',
+    );
+    unmount();
+
+    appendHistory(entry({ id: 'g1' }));
+    render(<HistoryView />);
+    const scope = await screen.findByText(/履歴はこのブラウザにのみ保存されています/);
+    const link = screen.getByRole('link', { name: '「取引履歴と会計 CSV」のガイド' });
+    expect(link).toHaveAttribute('href', '/ja/guide/history');
+    expect(scope.nextElementSibling).toBe(link.closest('p'));
+  });
+
+  it('en: 「履歴に出ない入金」の 1 行とガイドへのリンク', async () => {
+    render(<HistoryView />, { locale: 'en' });
+    const link = await screen.findByRole('link', { name: '“History & accounting CSV” guide' });
+    expect(link).toHaveAttribute('href', '/en/guide/history');
+    expect(link.closest('p')).toHaveTextContent(
+      'Some incoming payments do not show up in your history (standard payments other than mobile orders, USDC and others). For details, see the “History & accounting CSV” guide.',
+    );
+  });
+
   // 旧 back link assertion は AppShell.AppHeader の logo (/[locale]) に移管された
   // ため、HistoryView 内で個別 assertion は不要。
 

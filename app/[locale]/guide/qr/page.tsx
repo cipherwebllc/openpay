@@ -13,7 +13,7 @@ import Link from 'next/link';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { guideNavFor } from '@/lib/guideNav';
+import { guideLinkFor, guideNavFor } from '@/lib/guideNav';
 import { GuideFeeList } from '@/components/guide/GuideFee';
 import { GUIDE_PRIMARY_ACTION, GUIDE_SECONDARY_ACTION, GuideLead, GuideSubtitle, GuideTitle, GuideAudience, GuideFeatureList } from '@/components/guide/GuideHeader';
 import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
@@ -89,7 +89,10 @@ export default async function GuideQrPage({
         <GuideToc title={guideNavFor(locale).tocTitle} />
 
         <Section title={c.featuresTitle}>
-          <GuideFeatureList items={c.features} />
+          {/* 「売上履歴」の項目は、履歴に出ない入金をまとめたガイド (/guide/history) へ続く。 */}
+          <GuideFeatureList
+            items={c.features.map(({ guide, ...f }) => (guide ? { ...f, link: guideLinkFor(locale, guide) } : f))}
+          />
         </Section>
 
         {/* 動画は「できること」の後 (ページの頭は文字と行動ボタンだけにして軽くする・P5)。 */}

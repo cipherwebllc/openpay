@@ -19,6 +19,8 @@ const F11_PAGES: Array<[string, number]> = [
   ['/[locale]/guide', 236],
   ['/[locale]/guide/agent', 238],
   ['/[locale]/guide/ai-pay', 239],
+  // 2026-11-18 /guide/history を新設 (予算はほかのガイドと同じ 242・見本の行は order-link と同じ 237)。
+  ['/[locale]/guide/history', 237],
   ['/[locale]/guide/image-url', 237],
   ['/[locale]/guide/mobile-order', 237],
   // 2026-11-03 /guide/order-link を新設 (mobile-order と同じ形・手元の build で 238 = CI の 237 + 1)。
@@ -107,6 +109,7 @@ ${CHECKOUT_ROW}
 ├ ● /[locale]/guide                               2.46 kB         236 kB
 ├ ● /[locale]/guide/agent                         1.04 kB         238 kB
 ├ ● /[locale]/guide/ai-pay                        2.23 kB         239 kB
+├ ● /[locale]/guide/history                         429 B         237 kB
 ├ ● /[locale]/guide/image-url                       428 B         237 kB
 ├ ● /[locale]/guide/mobile-order                    427 B         237 kB
 ├ ● /[locale]/guide/order-link                      429 B         237 kB

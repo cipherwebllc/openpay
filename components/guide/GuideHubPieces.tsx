@@ -10,6 +10,7 @@ import {
   Calculator,
   ChevronRight,
   ClipboardCheck,
+  History as HistoryIcon,
   Image as ImageIcon,
   Languages,
   Link2,
@@ -28,12 +29,14 @@ import type { GuideNav, GuideRelatedItem, GuideSlug } from '@/lib/guideNav';
 
 // store の Palette・qr の QrCode・shop の Store は LP の入口 (components/LandingEntryPoints.tsx) と同じ。
 // pay の ScanLine は下のナビの「決済」(/scan・components/navItems.tsx) と同じ。
+// history の History は、トップの「あなたの OpenPay」とマイページの「履歴」(/history) と同じ。
 const GUIDE_ICONS: Record<GuideSlug, LucideIcon> = {
   start: ClipboardCheck,
   qr: QrCode,
   shop: Store,
   pos: Calculator,
   'order-link': Link2,
+  history: HistoryIcon,
   pay: ScanLine,
   wallet: Wallet,
   'mobile-order': Smartphone,

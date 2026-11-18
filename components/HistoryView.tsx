@@ -251,6 +251,24 @@ export function HistoryView() {
           </p>
         )}
 
+        {/* 履歴に出ない入金 (モバイルオーダー以外の通常決済・USDC など) があることと、その一覧のガイド (/guide/history) への 1 行。
+            履歴が空のときこそ要る (払われたのに出ない) ので、件数によらず hydrate 後に出す。リンクの名前は可視の文字 (掟 8)。 */}
+        {hydrated && (
+          <p className="text-[11px] text-slate-500">
+            {t.rich('notInHistoryNote', {
+              link: (chunks) => (
+                <Link
+                  href={`/${locale}/guide/history`}
+                  prefetch={false}
+                  className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                >
+                  {chunks}
+                </Link>
+              ),
+            })}
+          </p>
+        )}
+
         {/* 閲覧は無料。CSV ダウンロードのみ csvLocked で toolbar 内ロック + paywall を出す。 */}
         {!hydrated ? (
           <div className="h-32" aria-hidden />

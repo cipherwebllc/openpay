@@ -6,6 +6,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { keepNumbersTogether } from '@/lib/guideText';
+import { GuideMoreLink } from '@/components/guide/GuideLink';
 import { withUiNames } from '@/components/guide/GuideUiNames';
 
 /** 文字の子は数字と単位を離さない (keepNumbersTogether)。要素の子はそのまま。 */
@@ -118,13 +119,18 @@ function isLongText(text: string): boolean {
  * 「できること」の一覧。機能ごとに影付きのカードを並べず、1 枚の白い箱にチェック付きの行を並べる
  * (PC は 2 列)。スマホで 1 機能 = 1 枚のカードが縦に続き、同じ形の箱で疲れていたのを軽くする
  * (plans/guide-ux-polish-2.md P3)。見出しは h3 (節の h2 の下)。
+ * 項目の link は、説明の下に 1 行で置く続きのリンク (GuideMoreLink・名前は可視の文字だけ)。
  */
 export function GuideFeatureList({
   items,
   columns = 2,
   uiNames = false,
 }: {
-  items: readonly { readonly title: string; readonly body: string }[];
+  items: readonly {
+    readonly title: string;
+    readonly body: string;
+    readonly link?: { readonly href: string; readonly label: string };
+  }[];
   /** 1 = PC でも 1 列 (発送の前の確認など、上から順に読ませる短い一覧)。 */
   columns?: 1 | 2;
   /** 本文の「…」(画面の名前) を太くする (GuideUiNames)。 */
@@ -143,6 +149,11 @@ export function GuideFeatureList({
           <div className="min-w-0">
             <h3 className="text-sm font-bold text-slate-900">{f.title}</h3>
             <p className="mt-1 text-sm leading-relaxed text-slate-600">{uiNames ? withUiNames(f.body) : f.body}</p>
+            {f.link ? (
+              <GuideMoreLink href={f.link.href} className="mt-1.5">
+                {f.link.label}
+              </GuideMoreLink>
+            ) : null}
           </div>
         </li>
       ))}

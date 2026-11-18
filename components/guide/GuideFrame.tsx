@@ -26,7 +26,9 @@ import { guideNavFor, guidePagerFor, type GuideNav, type GuideSlug } from '@/lib
 // (2026-10-12: /guide/pay を足して en が 566px になり、py-1 (28px) から詰めた。
 // 2026-10-13: /guide/wallet を足して en が 568px になったので、2 行に折れていた en の「How to prepare an image URL」を
 // 1 行に収まる「Preparing an image URL」に縮めた。
-// 2026-11-03: /guide/order-link を足して en が 574px になったので、PC だけ py-[2px] (24px) に詰めた (en 546px・ja 506px)。)
+// 2026-11-03: /guide/order-link を足して en が 574px になったので、PC だけ py-[2px] (24px) に詰めた (en 546px・ja 506px)。
+// 2026-11-18: /guide/history を足して ja 530px・en 570px (1366x768 の実測・en の名前は 1 行に収まる「History & accounting CSV」)。
+// en は 550px を超え、低い画面では目次の中を縦に送る (nav の max-h と overflow-y-auto)。)
 const LIST_CLASS =
   'space-y-2.5 text-sm [&_a]:block [&_a]:rounded-r-lg [&_a]:border-l-2 [&_a]:border-transparent [&_a]:px-3 [&_a]:py-[3px] lg:[&_a]:py-[2px] [&_a]:leading-5 [&_a]:text-slate-700 [&_a:hover]:bg-slate-50 [&_a:hover]:text-slate-900 [&_a:focus-visible]:outline-none [&_a:focus-visible]:ring-2 [&_a:focus-visible]:ring-emerald-500 [&_a[aria-current=page]]:border-emerald-600 [&_a[aria-current=page]]:bg-emerald-50 [&_a[aria-current=page]]:font-semibold [&_a[aria-current=page]]:text-emerald-800';
 

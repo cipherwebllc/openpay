@@ -7,6 +7,7 @@
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import type { GuideSlug } from '@/lib/guideNav';
 
 export type QrGuideContent = {
   readonly metaTitle: string;
@@ -25,6 +26,8 @@ export type QrGuideContent = {
   readonly features: readonly {
     readonly title: string;
     readonly body: string;
+    /** 説明の下に続きのガイドへのリンクを出す (名前は目次と同じ・page が guideNav から引く)。 */
+    readonly guide?: GuideSlug;
   }[];
 
   readonly receiveFlowTitle: string;
@@ -90,7 +93,8 @@ const JA: QrGuideContent = {
     },
     {
       title: '売上履歴',
-      body: '受け取りの履歴をいつでも確認できます。日付・通貨・チェーンでの絞り込みにも対応。',
+      body: '受け取りの履歴を確認できます (履歴に出ない入金もあります)。日付・通貨・チェーンでの絞り込みにも対応。',
+      guide: 'history',
     },
     {
       title: '電子レシート',
@@ -182,7 +186,8 @@ const EN: QrGuideContent = {
     },
     {
       title: 'Sales history',
-      body: 'Check your receiving history anytime, with filters by date, currency, and chain.',
+      body: 'Check your receiving history (some incoming payments do not show up in it), with filters by date, currency, and chain.',
+      guide: 'history',
     },
     {
       title: 'Digital receipts',

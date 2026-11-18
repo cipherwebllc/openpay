@@ -38,6 +38,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'shop-history-sales-2026-11-18',
+    date: '2026-11-18',
+    category: 'feature',
+    title: {
+      ja: 'お客様が払った売上が、お店の取引履歴に残るようになりました',
+      en: 'Sales your customers pay now stay in your shop’s transaction history',
+    },
+    body: {
+      ja: 'お客様がお店の QR を JPYC のガス代不要の払い方で払ったとき、お店がガス代を肩代わりして送ったとき、モバイルオーダーの受注が、お店の取引履歴・集計・会計 CSV に残るようになりました。レジの QR では、会計の明細と税額も入ります。履歴に出ない払い方もあるので、ガイドで確かめてください。',
+      en: 'When a customer pays your shop’s QR in JPYC with the no-gas-fee method, when a payment is sent with the store paying gas, and for mobile orders you receive, the sale now stays in your shop’s transaction history, summary and accounting CSV. For Register QRs, the bill’s line items and tax are included too. Some payment methods do not show up in the history, so check the guide.',
+    },
+    link: { href: '/guide/history', labelJa: '取引履歴のガイドを見る', labelEn: 'See the transaction history guide' },
+  },
+  {
     id: 'accounting-accounts-2026-11-16',
     date: '2026-11-16',
     category: 'feature',

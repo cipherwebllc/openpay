@@ -8,6 +8,7 @@
 
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
+import type { GuideSlug } from '@/lib/guideNav';
 
 export type ShopGuideContent = {
   readonly metaTitle: string;
@@ -27,6 +28,8 @@ export type ShopGuideContent = {
   readonly features: readonly {
     readonly title: string;
     readonly body: string;
+    /** 説明の下に続きのガイドへのリンクを出す (名前は目次と同じ・page が guideNav から引く)。 */
+    readonly guide?: GuideSlug;
   }[];
 
   readonly flowTitle: string;
@@ -85,7 +88,8 @@ const JA: ShopGuideContent = {
     },
     {
       title: '売上・注文履歴',
-      body: '売上と注文の履歴をいつでも確認。会計ソフト向けの CSV (freee/弥生形式) も出力できます。',
+      body: '売上と注文の履歴を確認できます (履歴に出ない入金もあります)。会計ソフト向けの CSV (freee/弥生形式) も出力できます。',
+      guide: 'history',
     },
     {
       title: '電子レシート',
@@ -120,7 +124,7 @@ const JA: ShopGuideContent = {
   startSteps: [
     'ウォレットを接続して、商品・メニューを登録する',
     '店頭ではレジタブで会計。モバイルオーダーは公開して QR を印刷・掲示する',
-    '届いた注文と売上履歴を確認する — 必要なら会計 CSV を出力',
+    '届いた注文と売上履歴を確認する (履歴に出ない入金もあります) — 必要なら会計 CSV を出力',
   ],
 
   guideLinkDiscount: 'JPYC 払いで割引する',
@@ -169,7 +173,8 @@ const EN: ShopGuideContent = {
     },
     {
       title: 'Sales & order history',
-      body: 'Check sales and order history anytime, and export accounting CSV (freee/Yayoi formats).',
+      body: 'Check sales and order history (some incoming payments do not show up in it), and export accounting CSV (freee/Yayoi formats).',
+      guide: 'history',
     },
     {
       title: 'Digital receipts',
@@ -204,7 +209,7 @@ const EN: ShopGuideContent = {
   startSteps: [
     'Connect a wallet and register products and menus',
     'Use the POS tab at the counter; publish mobile ordering and print/post the QR',
-    'Check incoming orders and sales history — export accounting CSV if needed',
+    'Check incoming orders and sales history (some incoming payments do not show up in it) — export accounting CSV if needed',
   ],
 
   guideLinkDiscount: 'Discounts for paying with JPYC',

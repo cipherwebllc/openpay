@@ -18,6 +18,7 @@ export const GUIDE_SLUGS = [
   'shop',
   'pos',
   'order-link',
+  'history',
   'pay',
   'wallet',
   'mobile-order',
@@ -34,7 +35,7 @@ type GuideGroupId = 'shops' | 'customers' | 'creators' | 'ai' | 'more';
 
 // グループと並びは ja/en 共通 (文言だけをロケールごとに持つ)。
 const GUIDE_GROUPS: readonly { id: GuideGroupId; slugs: readonly GuideSlug[] }[] = [
-  { id: 'shops', slugs: ['start', 'qr', 'shop', 'pos', 'order-link'] },
+  { id: 'shops', slugs: ['start', 'qr', 'shop', 'pos', 'order-link', 'history'] },
   { id: 'customers', slugs: ['pay', 'wallet', 'mobile-order', 'agent'] },
   { id: 'creators', slugs: ['store'] },
   { id: 'ai', slugs: ['ai-pay', 'sell'] },
@@ -115,6 +116,10 @@ const JA: GuideNavCopy = {
     'order-link': {
       label: '注文リンク (通販)',
       summary: '通販の注文ごとに支払いリンクを作って、DM やメールで送る。住所は預かりません。',
+    },
+    history: {
+      label: '取引履歴と会計 CSV',
+      summary: '履歴に売上が出る払い方と出ない入金、会計 CSV の書き出しと保存の注意。',
     },
     pay: {
       label: 'JPYC で支払う',
@@ -198,6 +203,10 @@ const EN: GuideNavCopy = {
     'order-link': {
       label: 'Order links (online sales)',
       summary: 'Make a payment link for each online order and send it by DM or email. No addresses are stored.',
+    },
+    history: {
+      label: 'History & accounting CSV',
+      summary: 'Which payments show up in your history and which do not, exporting the accounting CSV, and storage notes.',
     },
     pay: {
       label: 'Pay with JPYC',
@@ -288,6 +297,11 @@ const NAV_EN = build(EN);
 /** 未知ロケールは ja (既存 guide の contentFor と同じ規約)。 */
 export function guideNavFor(locale: string): GuideNav {
   return locale === 'en' ? NAV_EN : NAV_JA;
+}
+
+/** ほかのガイドへのリンク (名前は目次と同じ・同じページを場所ごとに別の名前で呼ばない)。本文の項目から続きのガイドを指すときに使う。 */
+export function guideLinkFor(locale: string, slug: GuideSlug): { readonly href: string; readonly label: string } {
+  return { href: `/${locale}/guide/${slug}`, label: guideNavFor(locale).items[slug].label };
 }
 
 /** hub = true: 行き先はガイド一覧 (グループの端・GuidePager は「前へ / 次へ」でなく「ガイド一覧」と出す)。 */
