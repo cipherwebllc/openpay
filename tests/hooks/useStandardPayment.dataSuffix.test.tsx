@@ -6,6 +6,8 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   concatHex,
+  encodeAbiParameters,
+  encodeEventTopics,
   encodeFunctionData,
   erc20Abi,
   numberToHex,
@@ -42,10 +44,19 @@ import goldenFromMain from '../fixtures/stdBillMarkGoldenHook.json';
 //   - 渡した送金は transfer(受取先, 額) + 印 の 100 byte で、お店の端末の照合 (lib/qrSaleHistory.ts) の calldata と同じ。
 //   - 利用料の transfer・保存する intent には印が無い。
 //   - MUST-2: 印は writeContract に渡す 1 つの object の中 (登録簿と unmount の後の保存は object の同一性で見る)・送信待ちも対。
-//   - MUST-1: 印つきの送信が確定して失敗したら (ウォレットの拒否を除く)、その画面の以後の送信は印なし。
+//   - MUST-1: 印つきの送信が hash を返した (チェーンに出た) か、ウォレットの拒否以外で失敗したら、その画面の以後の送信は印なし
+//     (印つきがその画面で実際に出るのは 1 回まで)。receipt・revert・置換は追わない。
 // 兄弟の useStandardPayment.unmount.test.tsx と同じ形の harness (この file の分だけを写した)。
 type ReceiptState = {
-  data: { status: 'success' | 'reverted'; blockNumber: bigint; transactionHash: Hex; from: Address; logs: [] } | undefined;
+  data:
+    | {
+        status: 'success' | 'reverted';
+        blockNumber: bigint;
+        transactionHash: Hex;
+        from: Address;
+        logs: { address: Address; topics: Hex[]; data: Hex }[];
+      }
+    | undefined;
   error: Error | null;
   isSuccess: boolean;
   isError: boolean;
@@ -531,121 +542,125 @@ describe('useStandardPayment の dataSuffix (K4b): 印を渡した送金', () =>
   });
 });
 
-describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信が確定して失敗したら、その画面の以後の送信は印なし', () => {
-  // 印つきで送り、失敗させ (fail)、同じ画面から印つきでもう一度送る。2 本目のウォレットへの calldata を返す。
-  // firstMark = 1 本目に渡す印 (null = 渡さない)。
-  async function failThenResend(fail: (view: Screen) => Promise<void>, firstMark: Hex | null = MARK) {
+// 置換 (同じ nonce の別の tx が mine された) の receipt。same = 同内容 (受取先への同じ Transfer がある = 高速化)・それ以外は
+// 取消・別内容 (元の送金は mine されない)。
+function replacedReceipt(minedHash: Hex, same: boolean): ReceiptState {
+  const transfer = {
+    address: TOKEN,
+    topics: encodeEventTopics({ abi: erc20Abi, eventName: 'Transfer', args: { from: CUSTOMER, to: BILL.merchant } }) as Hex[],
+    data: encodeAbiParameters([{ type: 'uint256' }], [BILL.expected.value]),
+  };
+  return {
+    data: { status: 'success', blockNumber: 100n, transactionHash: minedHash, from: CUSTOMER, logs: same ? [transfer] : [] },
+    error: null,
+    isSuccess: true,
+    isError: false,
+    refetch: () => {},
+  };
+}
+
+describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信が出たら (hash・拒否以外の失敗)、その画面の以後の送信は印なし', () => {
+  // 1 本目を送り、settle で結果を出して、同じ画面からもう一度送れる状態 (phase = waitPhase) にし、印つきでもう一度送る。
+  // 2 本目のウォレットへの calldata を返す。firstMark = 1 本目に渡す印 (null = 渡さない)。
+  async function settleThenResend(
+    settle: (view: Screen) => Promise<void>,
+    waitPhase: string,
+    firstMark: Hex | null = MARK,
+  ) {
     const tab = await makeTab();
     const view = await tab.mountScreen();
     act(() => view.result.current.mutate(PARAMS_NO_FEE, firstMark ?? undefined));
     await waitForWalletSends(1);
-    await fail(view);
-    await waitFor(() => expect(view.result.current.phase).toBe('merchant-error'));
-    const failedError = errorTexts(view.result.current.error);
+    await settle(view);
+    await waitFor(() => expect(view.result.current.phase).toBe(waitPhase));
+    const settledError = errorTexts(view.result.current.error);
     act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
     await waitForWalletSends(2);
     const second = walletSends[1].tx.data;
     view.unmount();
-    return { first: walletSends[0].tx.data, second, failedError };
+    return { first: walletSends[0].tx.data, second, settledError };
+  }
+  // 1 本目のウォレットが hash を返し、mine を待つ所まで。
+  async function approveFirst(view: Screen) {
+    await act(async () => {
+      walletSends[0].approve(MERCHANT_TX);
+    });
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-mining'));
+  }
+  async function failFirst() {
+    await act(async () => {
+      walletSends[0].fail();
+    });
+  }
+  async function settleReceipt(view: Screen, state: ReceiptState) {
+    await approveFirst(view);
+    receiptByHash.set(MERCHANT_TX, state);
+    view.rerender();
   }
 
-  it('hash の返らない送信の失敗 (ユーザーの拒否でない) → 次は今までどおりの transfer (68 byte)', async () => {
-    const out = await failThenResend(async () => {
-      await act(async () => {
-        walletSends[0].fail();
-      });
-    });
+  it('hash の返らない送信の失敗 (ウォレットの拒否でない) → 次は今までどおりの transfer (68 byte)', async () => {
+    const out = await settleThenResend(failFirst, 'merchant-error');
     expect(byteLength(out.first)).toBe(100);
     expect(out.second).toBe(MERCHANT_CALLDATA);
     expect(byteLength(out.second)).toBe(68);
     // 送信の失敗の error (画面・決済のログ・Sentry に渡る文と cause の連なり) に印は入らない (viem の error は印を足す前の data を出す)。
-    expect(out.failedError).toContain('Internal JSON-RPC error');
+    expect(out.settledError).toContain('Internal JSON-RPC error');
     // cause の連なりの Request Arguments の data は、印を足す前の transfer の 68 byte (行の終わりまで)。
-    expect(out.failedError).toMatch(new RegExp(`data:\\s+${MERCHANT_CALLDATA}\\n`));
-    expect(out.failedError).not.toContain(MARK.slice(2));
+    expect(out.settledError).toMatch(new RegExp(`data:\\s+${MERCHANT_CALLDATA}\\n`));
+    expect(out.settledError).not.toContain(MARK.slice(2));
     await waitFor(() => expect(loggedText()).toContain('Internal JSON-RPC error'));
     expect(loggedText()).not.toContain(MARK.slice(2));
   });
 
-  it('revert の確定 (receipt が reverted) → 次は 68 byte', async () => {
-    const out = await failThenResend(async (view) => {
-      await act(async () => {
-        walletSends[0].approve(MERCHANT_TX);
-      });
-      await waitFor(() => expect(view.result.current.phase).toBe('merchant-mining'));
-      receiptByHash.set(MERCHANT_TX, receipt(MERCHANT_TX, 'reverted'));
-      view.rerender();
-    });
+  // 印つきの送信が hash を返した (チェーンに出た) 後は、その結果を追わずに次は印なし。mine を待っている間 (保存の印がある間) は、
+  // 今までどおり送り直せない (二重払いの止め)。
+  const AFTER_HASH: [string, (view: Screen) => Promise<void>, string][] = [
+    ['成功 (receipt の success)', (view) => settleReceipt(view, receipt(MERCHANT_TX, 'success')), 'success'],
+    ['revert の確定 (receipt が reverted)', (view) => settleReceipt(view, receipt(MERCHANT_TX, 'reverted')), 'merchant-error'],
+    [
+      'revert の確定 (receipt の照会の error の後、生の receipt で reverted を確かめた)',
+      async (view) => {
+        publicClientMock.getTransactionReceipt = vi.fn().mockResolvedValue({ status: 'reverted' });
+        await settleReceipt(view, { ...NO_RECEIPT, error: new Error('execution reverted'), isError: true });
+      },
+      'merchant-error',
+    ],
+    ['同内容の置換 (高速化) の成功', (view) => settleReceipt(view, replacedReceipt(NEXT_TX, true)), 'success'],
+    ['取消・別内容の取引への置換', (view) => settleReceipt(view, replacedReceipt(NEXT_TX, false)), 'merchant-error'],
+  ];
+  it.each(AFTER_HASH)('印つきの送信が hash を返した後: %s → 次は 68 byte', async (_name, settle, waitPhase) => {
+    const out = await settleThenResend(settle, waitPhase);
     expect(byteLength(out.first)).toBe(100);
     expect(out.second).toBe(MERCHANT_CALLDATA);
   });
 
-  it('revert の確定 (receipt の照会の error の後、生の receipt で reverted を確かめた) → 次は 68 byte', async () => {
-    const out = await failThenResend(async (view) => {
-      await act(async () => {
-        walletSends[0].approve(MERCHANT_TX);
-      });
-      await waitFor(() => expect(view.result.current.phase).toBe('merchant-mining'));
-      publicClientMock.getTransactionReceipt = vi.fn().mockResolvedValue({ status: 'reverted' });
-      receiptByHash.set(MERCHANT_TX, { ...NO_RECEIPT, error: new Error('execution reverted'), isError: true });
-      view.rerender();
-    });
-    expect(out.second).toBe(MERCHANT_CALLDATA);
-  });
-
-  it('ウォレットでの拒否 (お客様が自分で取り消した) は失敗に数えない → 次も印つき (100 byte)', async () => {
-    const out = await failThenResend(async () => {
+  it('ウォレットでの拒否 (tx が出ない・お客様が自分で取り消した) は数えない → 次も印つき (100 byte)', async () => {
+    const out = await settleThenResend(async () => {
       await act(async () => {
         walletSends[0].reject();
       });
-    });
+    }, 'merchant-error');
     expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
   });
 
-  it('印なしの送信の失敗は数えない → 次の印つきの送信は印つき', async () => {
-    const out = await failThenResend(async () => {
-      await act(async () => {
-        walletSends[0].fail();
-      });
-    }, null);
+  const UNMARKED: [string, (view: Screen) => Promise<void>, string][] = [
+    ['拒否以外の失敗', failFirst, 'merchant-error'],
+    ['hash を返して成功', (view) => settleReceipt(view, receipt(MERCHANT_TX, 'success')), 'success'],
+    ['hash を返して revert', (view) => settleReceipt(view, receipt(MERCHANT_TX, 'reverted')), 'merchant-error'],
+  ];
+  it.each(UNMARKED)('印なしの送信の結果は数えない (%s) → 次の印つきの送信は印つき', async (_name, settle, waitPhase) => {
+    const out = await settleThenResend(settle, waitPhase, null);
     expect(out.first).toBe(MERCHANT_CALLDATA);
     expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
   });
 
-  it('印なしに戻すのは、その画面だけ (開き直した画面は印つきで送る)・成功した印つきの送信は数えない', async () => {
-    const tab = await makeTab();
-    const first = await tab.mountScreen();
-    act(() => first.result.current.mutate(PARAMS_NO_FEE, MARK));
-    await waitForWalletSends(1);
-    await act(async () => {
-      walletSends[0].fail();
-    });
-    await waitFor(() => expect(first.result.current.phase).toBe('merchant-error'));
-    first.unmount();
-
-    const second = await tab.mountScreen();
-    act(() => second.result.current.mutate(PARAMS_NO_FEE, MARK));
-    await waitForWalletSends(2);
-    expect(walletSends[1].tx.data).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
-    await act(async () => {
-      walletSends[1].approve(MERCHANT_TX);
-    });
-    receiptByHash.set(MERCHANT_TX, receipt(MERCHANT_TX, 'success'));
-    second.rerender();
-    await waitFor(() => expect(second.result.current.phase).toBe('success'));
-    // 成功の後の次の支払い (同じ画面) も印つき。
-    act(() => second.result.current.mutate(PARAMS_NO_FEE, MARK));
-    await waitForWalletSends(3);
-    expect(walletSends[2].tx.data).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
-    await act(async () => {
-      walletSends[2].approve(NEXT_TX);
-    });
-    second.unmount();
-  });
-
-  // Codex のレビュー (MUST): 同じ画面で印つき A の応答待ちの間に B を始めると、reset で wagmi の見ている先が A から外れる。A の
-  // 失敗はその後で届くので、画面の state (merchantWrite.error) には出ない。失敗した送信自身の variables で数える。
-  it('印つき A の応答待ちの間に印なし B を始め、A の失敗 (拒否でない) が B の開始の後に届く → A の失敗を数える (次の C は 68 byte)', async () => {
+  // Codex のレビュー (MUST 2 回): 同じ画面で印つき A の応答待ちの間に B を始めると、reset で wagmi の見ている先が A から外れ、
+  // A の結果 (失敗・hash) は画面の state にも receipt の見張りにも入らない。送信自身の variables で、hook の options の
+  // onSuccess / onError が数える。
+  it.each([
+    ['A の失敗 (拒否でない)', () => walletSends[0].fail()],
+    ['A の hash (チェーンに出た)', () => walletSends[0].approve(MERCHANT_TX)],
+  ])('印つき A の応答待ちの間に印なし B を始め、%s が B の開始の後に届き、B は拒否 → 次の C は 68 byte', async (_name, resolveA) => {
     const tab = await makeTab();
     const view = await tab.mountScreen();
     act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
@@ -653,9 +668,9 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     act(() => view.result.current.mutate(PARAMS_NO_FEE));
     await waitForWalletSends(2);
     await act(async () => {
-      walletSends[0].fail();
+      resolveA();
     });
-    await waitFor(() => expect(tab.mutationStatuses()).toEqual(['error', 'pending']));
+    await waitFor(() => expect(tab.mutationStatuses()[0]).not.toBe('pending'));
     await act(async () => {
       walletSends[1].reject();
     });
@@ -688,17 +703,33 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     view.unmount();
   });
 
-  // revert は「印を付けて送った hash」に結び付けて数える (今の試みの印の有無では見ない)。
-  it('印なしで送った hash の revert は数えない (次の印つきの送信は印つき)', async () => {
-    const out = await failThenResend(async (view) => {
-      await act(async () => {
-        walletSends[0].approve(MERCHANT_TX);
-      });
-      await waitFor(() => expect(view.result.current.phase).toBe('merchant-mining'));
-      receiptByHash.set(MERCHANT_TX, receipt(MERCHANT_TX, 'reverted'));
-      view.rerender();
-    }, null);
-    expect(out.first).toBe(MERCHANT_CALLDATA);
-    expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+  it('印なしに戻すのは、その画面だけ (開き直した画面は印つきで送る・そこで出たら次は印なし)', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    act(() => first.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(1);
+    await act(async () => {
+      walletSends[0].fail();
+    });
+    await waitFor(() => expect(first.result.current.phase).toBe('merchant-error'));
+    first.unmount();
+
+    const second = await tab.mountScreen();
+    act(() => second.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(2);
+    expect(walletSends[1].tx.data).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+    await act(async () => {
+      walletSends[1].approve(MERCHANT_TX);
+    });
+    receiptByHash.set(MERCHANT_TX, receipt(MERCHANT_TX, 'success'));
+    second.rerender();
+    await waitFor(() => expect(second.result.current.phase).toBe('success'));
+    act(() => second.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(3);
+    expect(walletSends[2].tx.data).toBe(MERCHANT_CALLDATA);
+    await act(async () => {
+      walletSends[2].approve(NEXT_TX);
+    });
+    second.unmount();
   });
 });
