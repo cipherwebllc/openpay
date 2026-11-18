@@ -22,7 +22,7 @@ import {
   useWriteContract,
 } from 'wagmi';
 import { classifyTransferReceipt } from '@/lib/replacedTransferReceipt';
-import { isEip1193UserRejection, rejectionCodeIsWalletAnswer } from '@/lib/walletErrors';
+import { isEip1193UserRejection, rejectionCodeIsWalletAnswer } from '@/lib/walletRejectionProof';
 import {
   addStandardWalletRequest,
   removeStandardWalletRequest,
@@ -226,7 +226,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // (mutate の中)。予約の後のこの画面の送信は印なし (印つき A の応答待ちの間に始めた B も印なし = 同じ画面で印つきが 2 本出ない)。
   // 予約を解くのは、印つきの送信が「ウォレットが tx を出さずに断った」と確かめられる形で終わったときだけ (次はまた印つき):
   //   1. error の cause の連なりの、いちばん奥の error (ウォレットが投げた元の error) の code が EIP-1193 の 4001 で、途中に 4001 で
-  //      ない code が無い (lib/walletErrors の isEip1193UserRejection)。文言では決めない ('Connection request reset' のような code
+  //      ない code が無い (lib/walletRejectionProof の isEip1193UserRejection)。文言では決めない ('Connection request reset' のような code
   //      の無い失敗は、ウォレットが tx を出した後に hash の応答だけが失われたのかもしれない)。viem が 4001 として包む WalletConnect
   //      の 5000 でも解かない。
   //   2. その 4001 がウォレット自身の答えである接続 (injected・WalletConnect) で送った (rejectionCodeIsWalletAnswer)。Coinbase Wallet
@@ -240,8 +240,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // 限界 (塞いでいない): viem の sendTransaction は、eth_sendTransaction が InvalidInput・InvalidParams・MethodNotFound・
   // MethodNotSupported で失敗すると、同じ request を wallet_sendTransaction で 1 回送り直す (印の有無を問わない main と同じ動き)。
   // 1 回の writeContract の中のことで、hook からは見えない。
-  // null = 予約していない。releaseOn4001 = 予約した送信の 4001 で解いてよい接続か。
-  const markReservedRef = useRef<{ releaseOn4001: boolean } | null>(null);
+  // null = 予約していない。true・false = 予約している (true は、予約した送信の 4001 で解いてよい接続で送った)。
+  const markReservedRef = useRef<boolean | null>(null);
   // H-D (Codex の MUST): 同じタブの中で、結果の出ていないウォレットへの要求を同時に 1 つだけにする登録簿
   // (lib/standardPaymentOutstanding) での、この hook (1 つの画面) の持ち主の印。
   // 登録は hook の options の onMutate (Mutation が mutationFn = ウォレットへの要求を呼ぶ前に、writeContract の中で同期に呼ぶ)。
@@ -275,9 +275,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       onError: (error, variables) => {
         removeStandardWalletRequest(variables);
         // K4b (MUST-1): 印つきの送信を、ウォレットが tx を出さずに断った (4001) と確かめられたときだけ、印の予約を解く (次はまた印つき)。
-        if (variables.dataSuffix && markReservedRef.current?.releaseOn4001 && isEip1193UserRejection(error)) {
-          markReservedRef.current = null;
-        }
+        if (variables.dataSuffix && markReservedRef.current && isEip1193UserRejection(error)) markReservedRef.current = null;
       },
     },
   });
@@ -687,8 +685,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     // H-D: reset で捨てた fee の試みは、後から承認されても保存しない (呼び出しごとの onSuccess が呼ばれなくなるのと同じ意味)。
     feeAttemptRef.current = null;
     // K4b: 印は、この画面で印つきの送信を予約していないときだけ付け、付けるときは writeContract の前に同期で予約する (MUST-1)。
-    const suffix = dataSuffix !== undefined && !markReservedRef.current ? dataSuffix : undefined;
-    if (suffix) markReservedRef.current = { releaseOn4001: rejectionCodeIsWalletAnswer(connector?.type) };
+    const suffix = dataSuffix !== undefined && markReservedRef.current === null ? dataSuffix : undefined;
+    if (suffix) markReservedRef.current = rejectionCodeIsWalletAnswer(connector?.type);
     const vars = {
       chainId: params.chainId,
       address: params.tokenAddress,
