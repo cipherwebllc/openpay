@@ -517,4 +517,63 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     });
     second.unmount();
   });
+
+  // Codex のレビュー (MUST): 同じ画面で印つき A の応答待ちの間に B を始めると、reset で wagmi の見ている先が A から外れる。A の
+  // 失敗はその後で届くので、画面の state (merchantWrite.error) には出ない。失敗した送信自身の variables で数える。
+  it('印つき A の応答待ちの間に印なし B を始め、A の失敗 (拒否でない) が B の開始の後に届く → A の失敗を数える (次の C は 68 byte)', async () => {
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(1);
+    act(() => view.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(2);
+    await act(async () => {
+      walletSends[0].fail();
+    });
+    await waitFor(() => expect(tab.mutationStatuses()).toEqual(['error', 'pending']));
+    await act(async () => {
+      walletSends[1].reject();
+    });
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-error'));
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(3);
+    expect(walletSends[0].tx.data).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+    expect(walletSends[1].tx.data).toBe(MERCHANT_CALLDATA);
+    expect(walletSends[2].tx.data).toBe(MERCHANT_CALLDATA);
+    view.unmount();
+  });
+
+  it('印つき A の応答待ちの間に B を始め、A がウォレットの拒否で後から解決しても数えない (次の C は印つき)', async () => {
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(1);
+    act(() => view.result.current.mutate(PARAMS_NO_FEE));
+    await waitForWalletSends(2);
+    await act(async () => {
+      walletSends[0].reject();
+    });
+    await act(async () => {
+      walletSends[1].reject();
+    });
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-error'));
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(3);
+    expect(walletSends[2].tx.data).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+    view.unmount();
+  });
+
+  // revert は「印を付けて送った hash」に結び付けて数える (今の試みの印の有無では見ない)。
+  it('印なしで送った hash の revert は数えない (次の印つきの送信は印つき)', async () => {
+    const out = await failThenResend(async (view) => {
+      await act(async () => {
+        walletSends[0].approve(MERCHANT_TX);
+      });
+      await waitFor(() => expect(view.result.current.phase).toBe('merchant-mining'));
+      receiptByHash.set(MERCHANT_TX, receipt(MERCHANT_TX, 'reverted'));
+      view.rerender();
+    }, null);
+    expect(out.first).toBe(MERCHANT_CALLDATA);
+    expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+  });
 });

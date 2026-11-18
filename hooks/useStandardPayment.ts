@@ -218,13 +218,16 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     merchantHash: Hex;
     merchantBlockNumber: bigint;
   } | null>(null);
-  // K4b (通常決済の会計の印・その端末だけの試しのスイッチ・hooks/useStdBillMark.ts): 印 (dataSuffix) を付けて送った merchant の
-  // 試みの vars (付けなかった試みでは null)。印は vars の 1 つの object の中にだけ置く (Fable の MUST-2: 登録簿と unmount の後の
-  // 保存は object の同一性で見るので、後から spread した別の object を渡さない)。
-  const markedVarsRef = useRef<object | null>(null);
+  // K4b (通常決済の会計の印・その端末だけの試しのスイッチ・hooks/useStdBillMark.ts): 印 (dataSuffix) は writeContract に渡す vars の
+  // 1 つの object の中にだけ置く (Fable の MUST-2: 登録簿と unmount の後の保存は object の同一性で見るので、後から spread した別の
+  // object を渡さない)。
   // K4b (Fable の MUST-1): 印つきの送信が確定して失敗した (ウォレットの拒否を除く) 後は、この画面の以後の送信に印を付けない。
   // 断つ波及: 余った calldata を拒むウォレット・口座で、この画面から払えなくなること (次は今までどおりの transfer を送る)。
+  // 失敗は、失敗した送信自身で数える (画面の今の試みでは見ない): hash の返らない失敗は下の hook の options の onError が、その送信の
+  // variables (印の有無) で数える (同じ画面で次の送信を始めた後に届いた失敗も数える・Codex のレビュー)。revert の確定は、印を
+  // 付けて送った hash (markedHashesRef・hook の options の onSuccess が覚える) に結び付けて数える。
   const markFailedRef = useRef(false);
+  const markedHashesRef = useRef(new Set<string>());
   // H-D (Codex の MUST): 同じタブの中で、結果の出ていないウォレットへの要求を同時に 1 つだけにする登録簿
   // (lib/standardPaymentOutstanding) での、この hook (1 つの画面) の持ち主の印。
   // 登録は hook の options の onMutate (Mutation が mutationFn = ウォレットへの要求を呼ぶ前に、writeContract の中で同期に呼ぶ)。
@@ -243,6 +246,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
         addStandardWalletRequest(variables, requestOwner, 'merchant');
       },
       onSuccess: (hash, variables) => {
+        // K4b (MUST-1): 印を付けて送った hash を覚える (revert の確定をこの hash に結び付ける)。
+        if (variables.dataSuffix) markedHashesRef.current.add(hash.toLowerCase());
         const attempt = merchantAttemptRef.current;
         if (!mountedRef.current && attempt && attempt.vars === variables) {
           persistIntent('merchant', attempt.params, hash);
@@ -255,7 +260,10 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
         if (mountedRef.current && attempt?.vars === variables) return;
         removeStandardWalletRequest(variables);
       },
-      onError: (_error, variables) => {
+      onError: (error, variables) => {
+        // K4b (MUST-1): 印つきの送信が hash を返さずに失敗した (ウォレットの拒否を除く)。Mutation 自身が呼ぶので、同じ画面で次の
+        // 送信を始めて wagmi の見ている先が外れた後に届いた失敗も数える。
+        if (variables.dataSuffix && !isUserRejection(error)) markFailedRef.current = true;
         removeStandardWalletRequest(variables);
       },
     },
@@ -678,7 +686,6 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     } as const;
     // H-D: unmount の後に承認された merchant の hash を、hook の options の onSuccess が保存できるように置く。
     merchantAttemptRef.current = { vars, params };
-    markedVarsRef.current = suffix ? vars : null;
     merchantWrite.writeContract(
       vars,
       {
@@ -865,22 +872,19 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     submitFee,
   ]);
 
-  // K4b (Fable の MUST-1): 印つきの merchant の試みが確定して失敗したら、この画面の以後の送信は印なしにする。確定した失敗 =
-  // hash の返らない送信の失敗 (ウォレットの拒否 isUserRejection を除く) と、revert の確定 (上の effect が merchant-error に
-  // する revert の 3 つの分岐と同じ条件)。取消・別内容の置換 (お客様がウォレットで取り消した) は数えない。
-  // 上の phase の遷移・後片付けには触れない (印の有無だけを決める ref)。
-  const merchantWriteError = merchantWrite.error;
+  // K4b (Fable の MUST-1): 印を付けて送った hash の revert が確定したら、この画面の以後の送信は印なしにする。revert の確定 = 上の
+  // effect が merchant-error にする revert の 3 つの分岐と同じ条件。印なしで送った hash (復元した別の画面の送金を含む) の revert は
+  // 数えない。取消・別内容の置換 (お客様がウォレットで取り消した) も数えない。hash の返らない失敗は merchant の hook の options の
+  // onError が数える。上の phase の遷移・後片付けには触れない (印の有無だけを決める ref)。
   const merchantRevertConfirmed =
     !!merchantReplacedRevertedBy ||
     (!!merchantTxHash && merchantRevertedHash === merchantTxHash) ||
     (merchantReceipt.isSuccess && merchantReceipt.data?.status === 'reverted');
   useEffect(() => {
-    const marked = markedVarsRef.current;
-    if (!marked || merchantAttemptRef.current?.vars !== marked) return;
-    if ((merchantWriteError && !isUserRejection(merchantWriteError)) || merchantRevertConfirmed) {
+    if (merchantRevertConfirmed && merchantTxHash && markedHashesRef.current.has(merchantTxHash.toLowerCase())) {
       markFailedRef.current = true;
     }
-  }, [merchantWriteError, merchantRevertConfirmed]);
+  }, [merchantRevertConfirmed, merchantTxHash]);
 
   useEffect(() => {
     if (!enabled) return;
