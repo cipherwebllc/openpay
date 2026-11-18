@@ -12,10 +12,12 @@
 import type { Metadata } from 'next';
 import { guidePageMetadata } from './guideMetadata';
 import {
+  SPONSOR_ANNUAL_PLAN,
   SPONSOR_BANNER_SPEC,
   SPONSOR_BLURB_MAX_CHARS,
   SPONSOR_LOGO_MIN_WIDTH,
   SPONSOR_PLANS,
+  SPONSOR_RENEWAL_INVOICE_DAYS_BEFORE,
   formatSponsorYen,
   sponsorBannerRatio,
   type SponsorPlanId,
@@ -26,6 +28,14 @@ export type SponsorsLocale = 'ja' | 'en';
 /** 料金のカード。focal + focalSub が承認の文の頭 (料金・期間・社数)、body がその後ろの文。 */
 export type SponsorsPlanCard = {
   readonly id: SponsorPlanId;
+  readonly name: string;
+  readonly focal: string;
+  readonly focalSub: string;
+  readonly body: string;
+};
+
+/** 年間プランのカード (法人スポンサーだけ)。name・focal + focalSub・body をつなぐと承認の文に戻る。 */
+export type SponsorsAnnualCard = {
   readonly name: string;
   readonly focal: string;
   readonly focalSub: string;
@@ -52,6 +62,7 @@ export type SponsorsContent = {
   /** いただいた料金の使いみちと、協賛の内容 (目的)。 */
   readonly plansLead: string;
   readonly plans: readonly SponsorsPlanCard[];
+  readonly annual: SponsorsAnnualCard;
   readonly priceNote: string;
 
   readonly samplesTitle: string;
@@ -67,6 +78,11 @@ export type SponsorsContent = {
   readonly terms: string;
   readonly bannerTermsLabel: string;
   readonly bannerTerms: string;
+
+  /** 自動の更新 (30 日のプラン・年間プラン)。 */
+  readonly renewalTitle: string;
+  readonly renewal: string;
+  readonly renewalAnnual: string;
 
   readonly standardsTitle: string;
   readonly standardsIntro: string;
@@ -85,6 +101,8 @@ export type SponsorsContent = {
 
 const SPONSOR = SPONSOR_PLANS.sponsor;
 const BANNER = SPONSOR_PLANS.banner;
+const ANNUAL = SPONSOR_ANNUAL_PLAN;
+const RENEW = SPONSOR_RENEWAL_INVOICE_DAYS_BEFORE;
 const RATIO = sponsorBannerRatio();
 const BANNER_PX = `${SPONSOR_BANNER_SPEC.width}×${SPONSOR_BANNER_SPEC.height} px`;
 
@@ -120,6 +138,12 @@ const ja: SponsorsContent = {
       body: 'トップページ（主な機能の紹介の後）・Store（商品一覧の手前）・AI ストア（カタログの手前）に掲載します。',
     },
   ],
+  annual: {
+    name: '年間プラン（法人スポンサー）',
+    focal: `${formatSponsorYen(ANNUAL.priceYen)} 円`,
+    focalSub: `／${ANNUAL.termDays} 日`,
+    body: `${SPONSOR.termDays} 日の料金の ${ANNUAL.termsCharged} 回分で、1 年間掲載します。お支払いは期間の初めに一括です。広告主様のご都合で途中で止める場合、返金はありません。`,
+  },
   priceNote:
     '表示の金額のほかに、消費税等をいただくことはありません。請求書を発行します（適格請求書ではありません）。お支払いは、日本円の銀行振込か JPYC で承ります。',
 
@@ -147,6 +171,13 @@ const ja: SponsorsContent = {
   bannerTerms:
     '複数の広告主様で共有する広告枠です。ページ表示時に、掲載中の広告から 1 件をランダムに表示します。閲覧中の自動切り替えは行いません。表示回数・表示割合の保証はありません。',
 
+  renewalTitle: '更新',
+  renewal:
+    `掲載は期間ごとに自動で更新します。期間の終わる ${RENEW.term} 日前までに、次の期間の請求書をお送りします。` +
+    '更新しない場合は、期間の終わる日までに Discord か X でお知らせください（お送りした請求書は取り消します）。' +
+    '次の期間の始まる日までにお支払いを確かめられない場合は、掲載を止めます。',
+  renewalAnnual: `年間プランも同じく自動で更新し、請求書は期間の終わる ${RENEW.annual} 日前までにお送りします。`,
+
   standardsTitle: '掲載基準',
   standardsIntro: '次のものは掲載しません:',
   standards: [
@@ -172,7 +203,8 @@ const ja: SponsorsContent = {
     '掲載の可否・空き枠・開始日のご連絡',
     '素材のご入稿',
     '請求書の発行とお支払い',
-    `掲載開始（${SPONSOR.termDays} 日）`,
+    `掲載開始（${SPONSOR.termDays} 日・年間プランは 1 年）`,
+    '期間ごとに自動で更新',
   ],
 };
 
@@ -209,6 +241,12 @@ const en: SponsorsContent = {
       body: 'Shown on the home page (after the overview of the main features), the Store (before the product list) and the AI Store (before the catalog).',
     },
   ],
+  annual: {
+    name: 'Annual plan (corporate sponsors)',
+    focal: `¥${formatSponsorYen(ANNUAL.priceYen)}`,
+    focalSub: `/ ${ANNUAL.termDays} days`,
+    body: `One year of placement for the price of ${ANNUAL.termsCharged} terms of ${SPONSOR.termDays} days. Paid in full at the start of the term. No refund if you end the placement early for your own reasons.`,
+  },
   priceNote:
     "We do not charge consumption tax or any other amount on top of the prices shown. We issue an invoice (it is not a qualified invoice under Japan's invoice system). You can pay by bank transfer in Japanese yen or in JPYC.",
 
@@ -239,6 +277,13 @@ const en: SponsorsContent = {
   bannerTerms:
     'The ad slot is shared by multiple advertisers. Each time a page is displayed, one of the current ads is shown at random. Ads do not switch automatically while the page is being viewed. The number of impressions and the share of impressions are not guaranteed.',
 
+  renewalTitle: 'Renewal',
+  renewal:
+    `Placements renew automatically each term. We send the invoice for the next term at least ${RENEW.term} days before the current term ends. ` +
+    'If you do not wish to renew, let us know on Discord or X by the last day of the term (we will cancel the invoice). ' +
+    'If we cannot confirm payment by the first day of the next term, the placement stops.',
+  renewalAnnual: `The annual plan also renews automatically; we send its invoice at least ${RENEW.annual} days before the term ends.`,
+
   standardsTitle: 'Placement standards',
   standardsIntro: 'We do not accept the following:',
   standards: [
@@ -265,7 +310,8 @@ const en: SponsorsContent = {
     'We let you know whether we can accept the placement, which slots are open, and the start date',
     'You send us your materials',
     'We issue an invoice and you pay',
-    `Your placement starts (${SPONSOR.termDays} days)`,
+    `Your placement starts (${SPONSOR.termDays} days, or one year on the annual plan)`,
+    'Renews automatically each term',
   ],
 };
 
