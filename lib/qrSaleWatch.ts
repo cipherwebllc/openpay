@@ -71,37 +71,22 @@
 //     Settled が 2 つ以上ある場合 (OpenPay の relayer は 1 つの tx に settle を 1 つしか送らないので、第三者がまとめて
 //     送ったときだけ)、行は最初に見つけた 1 つだけ。払った側の行も 1 tx 1 行。
 //
-// 保存の決まり (受注の書き手 lib/orderFeedHistoryRecorder.ts と同じ。行を読み直せなかったときの書き直しだけが違う):
+// 保存の決まり (受注の書き手 lib/orderFeedHistoryRecorder.ts と同じ):
 //   - 同じ tx の行が履歴にあれば書かない (txHash・大文字小文字を無視)。
 //   - 印 (lib/qrSaleMarks.ts) を先に書けたときだけ行を書く。印は外さない。印 (自分の印と、受注の書き手の印) を読めない
 //     端末では書かない。確かめるのは保存の直前 (block の時刻を待った後)。
-//   - 印を書こうとしたら、確かめた後に別のタブがこの tx の印をもう書いていた ('present') ときは、行を書かない (そのタブが
-//     書く。そのタブが書いて店主が消した行を戻さない)。
-//   - 行の書き直し: このタブが印を書けて ('added')、行を履歴に読み直せなかった (localStorage の書き込みの失敗: 容量の上限・
-//     private mode の拒否・一時的な throw。appendHistory は失敗を握りつぶして返る) tx だけを memory に持ち、次の回 (6 秒後) に
-//     その行を書き直す。印はこのタブが書いたものなので、書き直しでは印に触れない。印だけが残って行が無いままだと、次の回も
-//     印を見て書かず、その入金は永久に履歴から欠けるため。書き直しは照合し終えた行を書くだけで、RPC は読み直さない。
-//     書き直す前に、同じ tx の行が履歴にある・受注の書き手の印がある (ほかのタブ・受注の書き手が書いた) ときは、書かずに
-//     やめる。店主が消せるのは書けた行だけで、書けたことの無い行を書き直しても、消した行を戻すことにはならない。一度
-//     書けたら持つのをやめる (その後に店主が消しても戻さない)。
-//   - 書き直しを待っている tx に、同じ回の後ろの log (同じ tx の別の会計への一致) が当たっても書かない (1 tx 1 行は、先に
-//     見た log の会計の行)。
-//   - 書き直しは同じ tx に QR_SALE_SAVE_RETRY_MAX 回まで (上限の理由は定数の注記)。書き直しの中の失敗 (書けない・読み取りの
-//     throw) も 1 回に数え、残りの回数で次の回に続ける。上限を超えたら止め、警告を 1 回 (/create を開いている間)。印は
-//     残るので、その tx は後から当たっても書かない。書き直すのは、その会計を見張っている間 (表示をやめて 60 秒まで) だけ。
-//     タブが裏のあいだは、読み取りと同じく書き直しも待つ。
-//   - 受け入れている限界: 書き直しの上限まで書けなかった入金と、その会計を見張らなくなるまで (表示をやめて 60 秒・/create を
-//     離れる・タブを閉じる) に書けなかった入金は、この端末の履歴に入らない (印は残る)。行は書けたのに、直後の読み直しだけが
-//     失敗したときは、次の回にその行が見つかるので書かない (その 6 秒の間に店主がその行を消すと、書き直しで戻る)。
-//     localStorage には、タブをまたいで読み書きの順を守らせる仕組みが無いので、別のタブが「読む → 書く」のあいだに割り込んだ
-//     結果は受け入れる (既存の appendHistory・受注の書き手と同じ性質)。
+//   - 受け入れている限界: 印を書いた後に履歴の保存が失敗した入金は、この端末の履歴に入らない (自動では書き直さない。
+//     その会計の QR を出した画面に、書けなかったかもしれないことを知らせる = 下の「画面への知らせ」)。localStorage には、タブを
+//     またいで読み書きの順を守らせる仕組みが無いので、別のタブが「読む → 書く」のあいだに割り込んだ結果は受け入れる
+//     (既存の appendHistory・受注の書き手と同じ性質)。
 //
-// 画面への知らせ (行を書いた後だけ):
-//   - この書き手が行を書き、その行が履歴にあると読み直せたときだけ、その会計を出した画面 (showQrBill に渡した受け手) に
-//     bill key・何件目か・額を知らせる。行を書かなかった入金 (同じ tx の行・印が先にあった・保存の失敗) は知らせない。
-//     行の書き直しで書けた行は、書けた回に知らせる。
-//   - 何件目か = 上の「行にするもの」の数え方 (1 = 明細つきの行・2 以上 = 明細なしの行)。照合したときに決めた数 (書き直しで
-//     後から書けた行も、その行の明細の有無と同じ数)。
+// 画面への知らせ (この書き手が印を書いた後だけ):
+//   - この書き手が行を書き、その行が履歴にあると読み直せたときに、その会計を出した画面 (showQrBill に渡した受け手) に
+//     bill key・何件目か・額を知らせる。行を書かなかった入金 (同じ tx の行・印が先にあった・印を書けなかった) は知らせない。
+//   - この書き手が印を書いた後に、行を履歴に読み直せなかった (保存の失敗: 容量の上限・private mode の拒否・throw。
+//     appendHistory は失敗を握りつぶして返る) ときは、同じ知らせに notSaved を付ける (「入金を確かめたが、この端末の履歴に
+//     書けなかったかもしれない」)。印は残るので、その tx は後から当たっても書かない (書き直しはしない)。
+//   - 何件目か = 上の「行にするもの」の数え方 (1 = 明細つきの行・2 以上 = 明細なしの行)。
 //   - 額 = 書いた行の売上総額 (saleAmount = 着金額 + 利用料 = お客様が払った請求額 = QR の画面に出している金額)。
 //   - 表示中か (閉じた後・出し直した後の会計か) は、受け手 (hooks/useQrBillKey.ts) が決める。ここは書いた行をそのまま知らせる。
 //   - 知らせは書き込みの後に足しただけ: 行を書く条件・順・印・RPC の読み方は変えない。
@@ -133,7 +118,7 @@ import {
   type StdTx,
   type TransferLog,
 } from './qrSaleHistory';
-import { addQrSaleMark, ORDER_FEED_MARKS_KEY, putQrSaleMark, QR_SALE_MARKS_KEY, readTxMarks } from './qrSaleMarks';
+import { addQrSaleMark, ORDER_FEED_MARKS_KEY, QR_SALE_MARKS_KEY, readTxMarks } from './qrSaleMarks';
 import {
   QR_SALE_RPC_TIMEOUT_MS,
   readBlockTime,
@@ -168,13 +153,6 @@ export const QR_SALE_MAX_GETLOGS_PER_PASS = 10;
  * 1 回に最低 1 つは読む (上限が 1 以上)。
  */
 export const QR_SALE_MAX_TX_READS_PER_PASS = 4;
-/**
- * 行を読み直せなかった入金の、同じ tx の行の書き直しの回数の上限 (頭の注記の「保存の決まり」)。超えたら止める (印は残る)。
- * 上限を持つ理由: 書き込みの失敗の多く (容量の上限・private mode の拒否) は続くもので、書き直しても通らない。上限が無いと、
- * 会計を見張っている間ずっと、6 秒おきに行を書いては失敗する (そのたびに履歴の最大 1,000 件を読み直す)。3 回 = 一時的な
- * 失敗 (一時的な throw など) を約 18 秒の間に拾い直せて、続く失敗では早く止まる回数。
- */
-export const QR_SALE_SAVE_RETRY_MAX = 3;
 
 // getLogs の「1 回の範囲が広すぎる」の error か (RPC の提供者ごとに文面が違うので、部分一致)。範囲を小さくすれば通る
 // error だけを拾う。rate limit を先に見て外す (時間を置けば同じ範囲が通る・範囲を小さくしても通らない)。JSON-RPC の
@@ -230,6 +208,11 @@ export type QrBillRecorded = {
   count: number;
   /** 書いた行の売上総額 (saleAmount・wei の 10 進文字列) = お客様が払った請求額 = QR の画面に出している金額。 */
   amount: string;
+  /**
+   * 印を書いた後に、行を履歴に読み直せなかった (この端末の履歴に書けなかったかもしれない)。書けたときは付けない。
+   * count と amount は、書けたときと同じ数え方・額。
+   */
+  notSaved?: true;
 };
 export type QrBillRecordedListener = (event: QrBillRecorded) => void;
 
@@ -254,23 +237,6 @@ type ChainCursor = {
   /** 前回、照合し終えた最後の block (null = 次の回は先頭 − 90 から読む: 初めての回・新しい会計が加わった後)。 */
   lastTo: bigint | null;
 };
-/** 照合し終えた入金の、書く行と知らせ (保存のやり直しのときも、照合したときの値を使う)。 */
-type SaleRow = {
-  w: WatchedBill;
-  /** この会計に一致した入金の何件目か (照合したときに決めた数・行の明細の有無と同じ)。 */
-  count: number;
-  /** 書く行の saleAmount と同じ値。 */
-  amount: bigint;
-  /** 書く行 (印を書けた後にだけ組む)。 */
-  build: () => HistoryEntry;
-};
-/**
- * 保存の結果。recorded = この書き手が行を書き、読み直せた・retry = このタブが印を書けたが、行を読み直せなかった (次の回に
- * 行を書き直す)・skipped = 書かない。
- */
-type SaveOutcome = 'recorded' | 'retry' | 'skipped';
-/** 行の書き直しを待つ入金。retries = 書き直した回数 (上限 QR_SALE_SAVE_RETRY_MAX)。 */
-type PendingRow = { row: SaleRow; retries: number };
 
 const bills = new Map<string, WatchedBill>();
 // 読む位置は、チェーンと log の種類ごと (`チェーン:種類`)。
@@ -285,16 +251,11 @@ const txMarkUses = new Map<string, number>();
 // getLogs の範囲に制限のある RPC と分かったチェーン (10 block ずつ読む)。/create を離れるまで持つ (会計が無くなって
 // 読むのをやめた間も、同じ画面の RPC は変わらない = もう一度 1 回で読もうとして失敗しない)。
 const smallRangeChains = new Set<number>();
-// このタブが印を書けたが、行を読み直せなかった入金 (tx (小文字) ごとに 1 つ・次の回に行を書き直す)。
-const pendingRows = new Map<string, PendingRow>();
 let timer: ReturnType<typeof setInterval> | null = null;
 let running = false;
 // stopQrSaleWatch のたびに進める。RPC を待っている間に止められた回は、戻った後に何も書かない。
 let generation = 0;
 let warned = false;
-// 書き直しの上限の警告 (/create を開いている間に 1 回)。ほかの警告 (warnOnce) とは別に数える: 上限は、入金が 1 つ
-// 履歴から欠けたことを示すので、先に別の警告が出ていても残す。
-let retryLimitWarned = false;
 
 function warnOnce(event: string, error?: unknown): void {
   if (warned) return;
@@ -311,10 +272,15 @@ function clearState(): void {
   blockTimes.clear();
   txs.clear();
   txMarkUses.clear();
-  pendingRows.clear();
 }
 
 const cursorKey = (chainId: number, kind: LogKind) => `${chainId}:${kind}`;
+
+/**
+ * 保存の結果。recorded = この書き手が行を書き、読み直せた・notSaved = この書き手が印を書いた後に、行を読み直せなかった
+ * (画面に「書けなかったかもしれない」を知らせる)・skipped = 書かなかった (知らせない)。
+ */
+type SaveOutcome = 'recorded' | 'notSaved' | 'skipped';
 
 function cursorFor(chainId: number, kind: LogKind): ChainCursor {
   const key = cursorKey(chainId, kind);
@@ -404,8 +370,12 @@ function stdBillsFitting(chainId: number, transfer: TransferLog): WatchedTransfe
   );
 }
 
-// 保存の決まりの本体 (ガスレスの行と通常決済の行で同じ・頭の注記の「保存の決まり」)。直前の確認 → 印 → 行 → 読み直し。
-// build = 書く行 (印を書けた後にだけ組む)。
+// 保存の直前の確認 → 印 → 行 (頭の注記の「保存の決まり」)。
+function save(bill: QrBill, settled: SettledLog, txHash: string, blockTime: bigint, withDetail: boolean): SaveOutcome {
+  return saveRow(txHash, () => buildQrSaleEntry(bill, settled, txHash, blockTime, withDetail));
+}
+
+// 保存の決まりの本体 (ガスレスの行と通常決済の行で同じ)。build = 書く行 (印を書けた後にだけ組む)。
 function saveRow(txHash: string, build: () => HistoryEntry): SaveOutcome {
   const hash = txHash.toLowerCase();
   const own = readTxMarks(QR_SALE_MARKS_KEY);
@@ -419,93 +389,34 @@ function saveRow(txHash: string, build: () => HistoryEntry): SaveOutcome {
     addQrSaleMark(hash);
     return 'skipped';
   }
-  // 先に印を書く。書けなければ行を書かない (この書き手が書いた行には、必ず印がある)。確かめた後に別のタブがこの tx の印を
-  // 書いていた ('present') ときも書かない (そのタブが書く。そのタブが書いて店主が消した行を戻さない)。
-  if (putQrSaleMark(hash) !== 'added') return 'skipped';
-  return appendAndReadBack(hash, build) ? 'recorded' : 'retry';
-}
-
-// 行を書いて、履歴にあると読み直せたら true。appendHistory は localStorage の書き込みの失敗 (容量の上限など) を握りつぶして
-// 返る。画面に「取引履歴に記録しました」と出すのは、行が履歴にあると読み直せたときだけ (書けていない行を「記録した」と言う
-// 偽の成功を断つ・掟 13)。
-function appendAndReadBack(hash: string, build: () => HistoryEntry): boolean {
+  // 先に印を書く。書けなければ行を書かない (この書き手が書いた行には、必ず印がある)。
+  if (!addQrSaleMark(hash)) return 'skipped';
   try {
     appendHistory(build());
+    // appendHistory は localStorage の書き込みの失敗 (容量の上限など) を握りつぶして返る。画面に「取引履歴に記録しました」と
+    // 出すのは、行が履歴にあると読み直せたときだけ (書けていない行を「記録した」と言う偽の成功を断つ・掟 13)。
+    if (historyHasTx(hash)) return 'recorded';
   } catch (error) {
-    // 1 件の行の組み立て・保存の throw を、残りの入金の記録と見張りの次の回へ波及させない (掟 13)。下の読み直しで、
-    // 黙った失敗と同じに扱う (次の回に書き直す)。
+    // 1 件の行の組み立て・保存・読み直しの throw を、残りの入金の記録へ波及させない (掟 13)。印はもう書いてあるので、
+    // 黙った失敗と同じに「書けなかったかもしれない」を画面に知らせる (偽の成功も、知らせの欠けも作らない)。
     warnOnce('qrSale.save_failed', error);
   }
-  return historyHasTx(hash);
+  // tx・bill key は出さない。
+  warnOnce('qrSale.row_not_confirmed');
+  return 'notSaved';
 }
 
-// 1 件を保存し、書けたら画面に知らせ、このタブが印を書けたのに行を読み直せなかったら、次の回の書き直しに回す。1 件の保存の
-// 失敗 (履歴と印の読み書き・行の組み立て) を、残りの入金の記録と見張りの次の回へ波及させない (掟 13)。
-function saveAndNotify(txHash: string, row: SaleRow): void {
-  const hash = txHash.toLowerCase();
-  // 書き直しを待っている tx には、同じ回の後ろの log (同じ tx の別の会計への一致) から書かない (1 tx 1 行は、先に見た log の
-  // 会計の行)。普段は自分の印で止まるが、別のタブが印の一覧を書き戻した (印の読み書きはタブをまたいで順が守られない) 後でも
-  // 止める。
-  if (pendingRows.has(hash)) return;
-  let outcome: SaveOutcome = 'skipped';
-  try {
-    outcome = saveRow(hash, row.build);
-  } catch (error) {
-    warnOnce('qrSale.save_failed', error);
-  }
-  if (outcome === 'recorded') notifyRecorded(row);
-  else if (outcome === 'retry') pendingRows.set(hash, { row, retries: 0 });
-}
-
-// 書き直しの 1 回 (印には触れない)。同じ tx の行が履歴にある・受注の書き手の印がある (ほかのタブ・受注の書き手が書いた・
-// 前の回に書けていて読み直しだけが失敗した) ときは 'present' (書かない)。受注の書き手の印を読めないときは 'failed'
-// (書かない・次の回に続ける)。
-function rewriteRow(hash: string, build: () => HistoryEntry): 'recorded' | 'present' | 'failed' {
-  const feed = readTxMarks(ORDER_FEED_MARKS_KEY);
-  if (!feed) return 'failed';
-  if (feed.has(hash) || historyHasTx(hash)) return 'present';
-  return appendAndReadBack(hash, build) ? 'recorded' : 'failed';
-}
-
-// 前の回に行を読み直せなかった入金の行を書き直す (RPC は読まない)。その会計を見張らなくなった (表示をやめて 60 秒を
-// 過ぎた) 行は捨てる (会計の写しを memory に持つのは、見張っている間だけ)。
-function retryPendingRows(): void {
-  for (const [hash, pending] of [...pendingRows]) {
-    if (bills.get(pending.row.w.bill.billKey) !== pending.row.w) {
-      pendingRows.delete(hash);
-      continue;
-    }
-    let outcome: 'recorded' | 'present' | 'failed' = 'failed';
-    try {
-      outcome = rewriteRow(hash, pending.row.build);
-    } catch (error) {
-      // 書き直しの中の一時的な失敗 (履歴の読み取りの throw など) を、残りの入金の記録と見張りの次の回へ波及させない
-      // (掟 13)。書けなかった 1 回に数え、残りの回数で次の回に続ける。
-      warnOnce('qrSale.save_failed', error);
-    }
-    if (outcome === 'failed') {
-      pending.retries += 1;
-      if (pending.retries < QR_SALE_SAVE_RETRY_MAX) continue;
-      if (!retryLimitWarned) {
-        retryLimitWarned = true;
-        logger.warn('qrSale.save_retry_exhausted', { retries: QR_SALE_SAVE_RETRY_MAX });
-      }
-    } else if (outcome === 'recorded') {
-      notifyRecorded(pending.row);
-    }
-    pendingRows.delete(hash);
-  }
-}
-
-// 書いた行を、その会計を出した画面に知らせる (頭の注記の「画面への知らせ」)。受け手の失敗 (画面の側の throw) を、
-// 残りの入金の記録と見張りの回へ波及させない (掟 13)。行はもう書いてあり、知らせられなくても履歴は変わらない。
-function notifyRecorded({ w, count, amount }: SaleRow): void {
-  if (!w.onRecorded) return;
+// 保存の結果を、その会計を出した画面に知らせる (頭の注記の「画面への知らせ」)。受け手の失敗 (画面の側の throw) を、
+// 残りの入金の記録と見張りの回へ波及させない (掟 13)。知らせられなくても履歴は変わらない。
+// amount = 書く行の saleAmount と同じ値。
+function notifyRecorded(w: WatchedBill, amount: bigint, outcome: SaveOutcome): void {
+  if (outcome === 'skipped' || !w.onRecorded) return;
   try {
     w.onRecorded({
       billKey: w.bill.billKey,
-      count,
+      count: w.matched,
       amount: amount.toString(),
+      ...(outcome === 'notSaved' ? { notSaved: true as const } : {}),
     });
   } catch (error) {
     warnOnce('qrSale.notify_failed', error);
@@ -643,13 +554,15 @@ async function checkTransfer(
     // 明細を付けるのは、その会計の 1 件目の一致だけ (ガスレスと同じ)。
     const withDetail = w.matched === 0;
     w.matched += 1;
-    saveAndNotify(txHash, {
-      w,
-      count: w.matched,
-      // 額は書いた行の saleAmount (lib/qrSaleHistory.ts の buildQrStdSaleEntry: 請求額)。
-      amount: w.bill.expected.saleAmount,
-      build: () => buildQrStdSaleEntry(w.bill, transfer, txHash, blockNumber, blockTime, withDetail),
-    });
+    let outcome: SaveOutcome = 'skipped';
+    try {
+      outcome = saveRow(txHash, () => buildQrStdSaleEntry(w.bill, transfer, txHash, blockNumber, blockTime, withDetail));
+    } catch (error) {
+      // 1 件の保存の失敗 (履歴の読み書き・行の組み立て) を、残りの入金の記録へ波及させない (ガスレスと同じ)。
+      warnOnce('qrSale.save_failed', error);
+    }
+    // 額は書いた行の saleAmount (lib/qrSaleHistory.ts の buildQrStdSaleEntry: 請求額)。
+    notifyRecorded(w, w.bill.expected.saleAmount, outcome);
     // 1 つの Transfer に一致する会計は 1 つまで。
     break;
   }
@@ -786,13 +699,15 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
       // 明細を付けるのは、その会計の 1 件目の一致だけ (2 件目以降 = 同じ会計への 2 回目の入金)。
       const withDetail = w.matched === 0;
       w.matched += 1;
-      saveAndNotify(txHash, {
-        w,
-        count: w.matched,
-        // 額は書いた行の saleAmount と同じ式 (lib/qrSaleHistory.ts の buildQrSaleEntry: 着金額 + 利用料)。
-        amount: settled.merchantValue + settled.feeValue,
-        build: () => buildQrSaleEntry(w.bill, settled, txHash, blockTime, withDetail),
-      });
+      let outcome: SaveOutcome = 'skipped';
+      try {
+        outcome = save(w.bill, settled, txHash, blockTime, withDetail);
+      } catch (error) {
+        // 1 件の保存の失敗 (履歴の読み書き・行の組み立て) を、残りの入金の記録へ波及させない。
+        warnOnce('qrSale.save_failed', error);
+      }
+      // 額は書いた行の saleAmount と同じ式 (lib/qrSaleHistory.ts の buildQrSaleEntry: 着金額 + 利用料)。
+      notifyRecorded(w, settled.merchantValue + settled.feeValue, outcome);
       // bill key は会計ごとに違う乱数なので、1 つの Settled が一致する会計は多くても 1 つ。
       break;
     }
@@ -820,8 +735,6 @@ async function tick(): Promise<void> {
   running = true;
   const startedGeneration = generation;
   try {
-    // 前の回に行を読み直せなかった入金の行の書き直し (RPC を読む前・同期)。新しい入金より先に書く (古い入金が下に並ぶ)。
-    retryPendingRows();
     for (const chainId of chainIds) {
       try {
         await pollChain(chainId, startedGeneration);
@@ -894,5 +807,4 @@ export function stopQrSaleWatch(): void {
   smallRangeChains.clear();
   // 警告は /create を開いている間に 1 回 (開き直したら、また 1 回は残す)。
   warned = false;
-  retryLimitWarned = false;
 }

@@ -15,7 +15,7 @@ import { downloadPng, downloadSvg } from '@/components/qr/qrDownload';
 import type { StoreDeviceMode } from '@/components/StoreDeviceProvider';
 import type { QrSettings } from '@/hooks/useQrSettings';
 import type { IncomingPaymentStatus } from '@/hooks/useIncomingPaymentWatch';
-import { qrBillConfirmedText, type QrBillConfirmed } from '@/hooks/useQrBillKey';
+import { qrBillNotices, type QrBillConfirmed } from '@/hooks/useQrBillKey';
 import { env } from '@/lib/env';
 import type { GasMode, PayMode } from '@/lib/fee';
 import { formatTokenAmount, shortAddress } from '@/lib/format';
@@ -98,7 +98,10 @@ export function PaymentQrModal({
   recoverGasMode: GasMode;
   incomingStatus: IncomingPaymentStatus;
   receivedWei: bigint;
-  /** 表示中の会計の入金を、お店の端末が確かめて取引履歴に書いた (bill key・hooks/useQrBillKey.ts の confirmed)。 */
+  /**
+   * 表示中の会計の入金を、お店の端末が確かめた (bill key・hooks/useQrBillKey.ts の confirmed)。取引履歴に書けなかったかも
+   * しれないときは notSaved が付く。
+   */
   billConfirmed: QrBillConfirmed | null;
 }) {
   const t = useTranslations('QrGenerator');
@@ -221,8 +224,9 @@ export function PaymentQrModal({
             ? { state: 'watching' as const, text: t('paymentWatching'), note: t('paymentWatchingNote') }
             : undefined
       }
-      // 入金の確認 (bill key)。出している間は、上の残高のヒントの代わりに出す (QrPreviewModal)。
-      {...(billConfirmed ? { billConfirmed: qrBillConfirmedText(t, billConfirmed) } : {})}
+      // 入金の確認 (bill key) と、履歴に書けなかったかもしれない注意。出している間は、上の残高のヒントの代わりに出す
+      // (QrPreviewModal)。
+      {...(billConfirmed ? qrBillNotices(t, billConfirmed) : {})}
     />
   );
 }

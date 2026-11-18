@@ -49,26 +49,17 @@ export function readTxMarks(key: string): Map<string, number> | null {
   }
 }
 
-/**
- * QR の会計の印を 1 つ足す (hash は小文字)。'added' = この呼び出しが書いた・'present' = もうあった (別のタブが先に書いた)・
- * null = 読めない・書けない。lib/qrSaleWatch.ts は 'added' のときだけ行を書く (行を読み直せなければ、次の回に行だけを
- * 書き直す)。
- */
-export function putQrSaleMark(hash: string): 'added' | 'present' | null {
+/** QR の会計の印を 1 つ足す (hash は小文字)。読めない・書けないときは false (呼び出し側は、その入金の行を書かない)。 */
+export function addQrSaleMark(hash: string): boolean {
   const marks = readTxMarks(QR_SALE_MARKS_KEY);
-  if (!marks) return null;
-  if (marks.has(hash)) return 'present';
+  if (!marks) return false;
+  if (marks.has(hash)) return true;
   marks.set(hash, Date.now());
   try {
     const kept = [...marks].sort((a, b) => a[1] - b[1]).slice(-QR_SALE_MARKS_MAX);
     window.localStorage.setItem(QR_SALE_MARKS_KEY, JSON.stringify(kept));
-    return 'added';
+    return true;
   } catch {
-    return null;
+    return false;
   }
-}
-
-/** QR の会計の印を 1 つ足す (hash は小文字)。読めない・書けないときは false (呼び出し側は、その入金の行を書かない)。 */
-export function addQrSaleMark(hash: string): boolean {
-  return putQrSaleMark(hash) !== null;
 }

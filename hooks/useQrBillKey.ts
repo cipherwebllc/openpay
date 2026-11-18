@@ -15,9 +15,11 @@
 // (state に持つ)。作った bill key と会計の写し (元の URL) は見張りに渡し、memory だけに持つ (保存しない)。
 //
 // 入金の確認 (confirmed): 見張りが、この会計の入金を取引履歴に書いたら知らせてくる (lib/qrSaleWatch.ts の頭の注記の
-// 「画面への知らせ」)。返すのは、いま表示している会計 (bill key) の最後の知らせだけ。QR を閉じた後・出し直した後に
-// 見つけた前の会計の入金 (見張りは閉じた後も 60 秒読む) は、履歴には入るが、ここでは受けない・返さない。新しい会計の QR を
-// 出したら、前の会計の知らせは返さない (画面から消える)。
+// 「画面への知らせ」)。書けなかったかもしれない (notSaved) ときも知らせてくる。返すのは、いま表示している会計 (bill key) の
+// 知らせを合わせたもの: 同じ会計の知らせは巻き戻さない (何件目かは大きい方・notSaved は一度付いたら付いたまま = 2 件目が
+// 書けても、1 件目が書けなかったかもしれないことは消さない)。QR を閉じた後・出し直した後に見つけた前の会計の入金
+// (見張りは閉じた後も 60 秒読む) は、履歴には入るが、ここでは受けない・返さない。新しい会計の QR を出したら、前の会計の
+// 知らせは返さない (画面から消える)。
 //
 // 付帯の処理 (掟 13): 見張りの読み込み (dynamic import) と見張りの中の失敗は、QR の表示・開閉・レジの操作へ波及させない
 // (Promise は必ずここで受け止め、画面には何も返さない)。見張れなくても QR は bill key つきで出る (払う側の動きは同じ)。
@@ -30,8 +32,11 @@ import { newBillKey, withBillKey } from '@/lib/url/billKeyQr';
 type QrSaleWatch = typeof import('@/lib/qrSaleWatch');
 type QrBillRecorded = import('@/lib/qrSaleWatch').QrBillRecorded;
 
-/** 表示中の会計の入金を、見張りが取引履歴に書いた (count = 何件目か・amount = 書いた行の売上総額 = 請求額 (wei))。 */
-export type QrBillConfirmed = Pick<QrBillRecorded, 'count' | 'amount'>;
+/**
+ * 表示中の会計の入金を、見張りが確かめた (count = 何件目か・amount = 行の売上総額 = 請求額 (wei)・notSaved = その会計の
+ * 入金のどれかを、この端末の履歴に書けなかったかもしれない)。
+ */
+export type QrBillConfirmed = Pick<QrBillRecorded, 'count' | 'amount' | 'notSaved'>;
 
 /**
  * QR の画面 (決済QR・レジ) に出す入金の確認の文 (QrPreviewModal の billConfirmed)。t は QrGenerator の namespace のもの。
@@ -46,6 +51,34 @@ export function qrBillConfirmedText(
   return t(confirmed.count === 1 ? 'billPaymentRecorded' : 'billPaymentAnother', {
     amount: formatStoreDeviceAmount(confirmed.amount),
   });
+}
+
+/**
+ * QR の画面 (QrPreviewModal) に渡す、入金の確認 (緑・billConfirmed) と、履歴に書けなかったかもしれない注意 (amber・
+ * billNotSaved)。1 件目だけで書けなかったかもしれないときは、緑の「取引履歴に記録しました」を出さない (注意だけ)。
+ * 2 件目以降の「二重のお支払いかもしれません」と注意は、両方が当たれば両方出す。
+ */
+export function qrBillNotices(
+  t: (key: 'billPaymentRecorded' | 'billPaymentAnother' | 'billPaymentNotSaved', values?: { amount: string }) => string,
+  confirmed: QrBillConfirmed,
+): { billConfirmed?: string; billNotSaved?: string } {
+  const notSavedOnly = confirmed.notSaved === true && confirmed.count === 1;
+  return {
+    ...(notSavedOnly ? {} : { billConfirmed: qrBillConfirmedText(t, confirmed) }),
+    ...(confirmed.notSaved ? { billNotSaved: t('billPaymentNotSaved') } : {}),
+  };
+}
+
+// 同じ会計の知らせを合わせる (巻き戻さない): 何件目かは大きい方 (額はその知らせの額)・notSaved は一度付いたら付いたまま。
+function mergeRecorded(prev: QrBillRecorded | null, event: QrBillRecorded): QrBillRecorded {
+  if (prev?.billKey !== event.billKey) return event;
+  const latest = event.count >= prev.count ? event : prev;
+  return {
+    billKey: event.billKey,
+    count: latest.count,
+    amount: latest.amount,
+    ...(prev.notSaved || event.notSaved ? { notSaved: true as const } : {}),
+  };
 }
 
 // 見張りの chunk (この画面で 1 回だけ読む)。読めなかったら捨てて、次に QR を出したときにもう一度読む。
@@ -76,7 +109,7 @@ export type QrBillKeyArgs = {
 export type QrBillKeyResult = {
   /** 画面の QR に描く URL (bill key つき)。載せないときは undefined (呼ぶ側は元の URL を描く)。 */
   screenUrl: string | undefined;
-  /** 表示中の会計の入金を、見張りが取引履歴に書いた (まだ無い・表示していないときは null)。 */
+  /** 表示中の会計の入金を、見張りが確かめた (まだ無い・表示していないときは null)。 */
   confirmed: QrBillConfirmed | null;
 };
 
@@ -106,7 +139,7 @@ export function useQrBillKey({ kind, url, shown, itemName = '' }: QrBillKeyArgs)
     // 読み込みが遅いとき「やめてから 60 秒」の数え始めが後ろへずれる。
     const shownAt = Date.now();
     const onRecorded = (event: QrBillRecorded) => {
-      if (shownKeyRef.current === event.billKey) setRecorded(event);
+      if (shownKeyRef.current === event.billKey) setRecorded((prev) => mergeRecorded(prev, event));
     };
     withWatch((watch) =>
       watch.showQrBill({ billKey, kind, url: issued.url, itemName: itemNameRef.current }, shownAt, onRecorded),
@@ -119,8 +152,14 @@ export function useQrBillKey({ kind, url, shown, itemName = '' }: QrBillKeyArgs)
     };
   }, [issued, kind]);
   // 返すのは、いま描く会計の知らせだけ (閉じた・出し直した = current が変わったら、前の会計の知らせは返さない)。
-  const confirmed =
-    current && recorded?.billKey === current.billKey ? { count: recorded.count, amount: recorded.amount } : null;
+  const confirmed: QrBillConfirmed | null =
+    current && recorded?.billKey === current.billKey
+      ? {
+          count: recorded.count,
+          amount: recorded.amount,
+          ...(recorded.notSaved ? { notSaved: recorded.notSaved } : {}),
+        }
+      : null;
   return { screenUrl: current ? withBillKey(current.url, current.billKey) : undefined, confirmed };
 }
 

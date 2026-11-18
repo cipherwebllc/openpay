@@ -30,7 +30,7 @@ import { QrPreviewModal } from './QrPreviewModal';
 import { StoreGasWalletPanel } from './StoreGasWalletPanel';
 import { StoreDeviceRegisterStatus } from './StoreDeviceRegisterStatus';
 import { useStoreDeviceMode } from './StoreDeviceProvider';
-import { qrBillConfirmedText, useQrBillKey } from '@/hooks/useQrBillKey';
+import { qrBillNotices, useQrBillKey } from '@/hooks/useQrBillKey';
 import {
   STORE_DEVICE_MIN_AMOUNT_WEI,
   formatStoreDeviceAmount,
@@ -1288,7 +1288,7 @@ function RegisterModeContent({
           deviceStatus={env.enableStoreGasWallet && sdState.phase !== 'idle' ? storeDeviceStatus : undefined}
           qrValue={qrValue}
           {...(screenQrValue !== undefined ? { screenQrValue } : {})}
-          {...(billConfirmed ? { billConfirmed: qrBillConfirmedText(tQr, billConfirmed) } : {})}
+          {...(billConfirmed ? qrBillNotices(tQr, billConfirmed) : {})}
           qrRef={qrRef}
           storeName={settings.storeName.trim() || t('qrPosterDefaultStoreName')}
           amountText={`${groupAmountDigits(totalHuman)} ${symbol}`}
