@@ -836,15 +836,15 @@ describe('画面への知らせ (通常決済の行も、ガスレスの行と�
   });
 });
 
-describe('保存のやり直し (通常決済の行も、ガスレスの行と同じ)', () => {
-  it('履歴の保存が throw → 行なし・印は外れる → 次の回に書けたら、tx を読み直さずに明細つきの行を書き、知らせる。その後に店主が消しても書き戻さない', async () => {
+describe('行の書き直し (通常決済の行も、ガスレスの行と同じ)', () => {
+  it('履歴の保存が throw → 行なし・印は残る → 次の回に、tx を読み直さずに明細つきの行を書き、知らせる。その後に店主が消しても書き戻さない', async () => {
     const events: QrBillRecorded[] = [];
     show(BK, {}, NOW, (e) => events.push(e));
     pay(995n, 1);
     hold.failAppend = true;
     await tick();
     expect(rows()).toEqual([]);
-    expect(marks()).toEqual([]);
+    expect(marks()).toEqual([tx(1)]);
     expect(events).toEqual([]);
     hold.failAppend = false;
     await tick();
@@ -863,7 +863,7 @@ describe('保存のやり直し (通常決済の行も、ガスレスの行と�
     expect(hold.appends).toBe(2);
   });
 
-  it('失敗が続くと、やり直しは 3 回で止める (印を残し、行は書かない・上限の警告は 1 回)', async () => {
+  it('失敗が続くと、書き直しは 3 回で止める (印は残り、行は書かない・上限の警告は 1 回)', async () => {
     const listener = vi.fn();
     show(BK, {}, NOW, listener);
     pay(995n, 1);

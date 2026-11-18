@@ -2,9 +2,7 @@
 // 受注の書き手 (lib/orderFeedHistoryRecorder.ts) の印と同じ形 ([txHash (小文字), 付けた時刻 (ms)] の配列) で、key は分ける。
 // 2 つの書き手は互いの印も読む (片方が書いて店主が消した tx を、もう片方が書き戻さない)。
 //
-// 印は履歴 (openpay:history:v1) とは別の key で、履歴の行の削除・全て削除では消えない。行が書けた tx の印は外さない。
-// 外すのは 1 つの場面だけ: lib/qrSaleWatch.ts が自分で書いた印の直後に、行を履歴に読み直せなかったとき (行の無い印を残すと、
-// その入金は次の回も書かれず、永久に履歴から欠ける)。やり直しの回数の上限と、その理由は lib/qrSaleWatch.ts の保存の決まり。
+// 印は履歴 (openpay:history:v1) とは別の key で、履歴の行の削除・全て削除では消えない。一度付けたら外さない。
 
 import { HISTORY_MAX_ENTRIES } from './history';
 import { isTxHashLike } from './orderRelay';
@@ -53,8 +51,8 @@ export function readTxMarks(key: string): Map<string, number> | null {
 
 /**
  * QR の会計の印を 1 つ足す (hash は小文字)。'added' = この呼び出しが書いた・'present' = もうあった (別のタブが先に書いた)・
- * null = 読めない・書けない (呼び出し側は、その入金の行を書かない)。lib/qrSaleWatch.ts は、自分が書いた印 ('added') だけを
- * 外す (別の書き手の印は外さない)。
+ * null = 読めない・書けない。lib/qrSaleWatch.ts は 'added' のときだけ行を書く (行を読み直せなければ、次の回に行だけを
+ * 書き直す)。
  */
 export function putQrSaleMark(hash: string): 'added' | 'present' | null {
   const marks = readTxMarks(QR_SALE_MARKS_KEY);
@@ -73,20 +71,4 @@ export function putQrSaleMark(hash: string): 'added' | 'present' | null {
 /** QR の会計の印を 1 つ足す (hash は小文字)。読めない・書けないときは false (呼び出し側は、その入金の行を書かない)。 */
 export function addQrSaleMark(hash: string): boolean {
   return putQrSaleMark(hash) !== null;
-}
-
-/**
- * QR の会計の印を 1 つ外す (hash は小文字)。呼ぶのは lib/qrSaleWatch.ts の保存だけ (頭の注記)。true = 外した (もう無かった
- * ときも)・false = 読めない・書けない (印は残る = その入金はやり直さない側に倒す)。
- */
-export function removeQrSaleMark(hash: string): boolean {
-  const marks = readTxMarks(QR_SALE_MARKS_KEY);
-  if (!marks) return false;
-  if (!marks.delete(hash)) return true;
-  try {
-    window.localStorage.setItem(QR_SALE_MARKS_KEY, JSON.stringify([...marks]));
-    return true;
-  } catch {
-    return false;
-  }
 }
