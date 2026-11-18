@@ -504,6 +504,7 @@ function SignedInSellerPanel({
         cancelEdit={cancelEdit}
         saveProduct={saveProduct}
         loadProduct={loadProduct}
+        listingAssistant={sellerQuery.data?.listingAssistant === true}
         onSubmit={(event) => {
           event.preventDefault();
           if (isLicense && !validLicenseForm(productForm, productForm.priceJpyc)) {

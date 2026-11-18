@@ -3,11 +3,14 @@
 // 商品 editor の表示部品。本文 (content) を含むフォーム値・編集対象・送信処理 (onSubmit) は親
 // (SignedInSellerPanel) が持つ — 親は sessionAddress を key に wallet 単位で remount される。本文を
 // この境界の外 (より長寿命の component や共有 cache) に置くとアカウント切替後に旧本文が残り得るため、
-// ここには state を持たせない。
+// ここには state を持たせない。AI 出品アシスタントの開閉と、その画像・メモ・案は、この部品の子
+// (ListingAssistantEntry・ListingAssistant) が持つ — 親の key の内側なので、アカウントを切り替えると一緒に消える。
 
-import type { FormEventHandler } from 'react';
+import { useState, type FormEventHandler } from 'react';
 import { useTranslations } from 'next-intl';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { Sparkles } from 'lucide-react';
 import { env } from '@/lib/env';
 import { DELIVERY_FORMATS, deliveryFormatFields, type DeliveryFormatId } from '@/lib/store/deliveryFormat';
 import { MAX_USAGE_NOTE_LEN, type UsagePermission } from '@/lib/store/usageTerms';
@@ -15,6 +18,55 @@ import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { CreatorStoreLicenseFields } from '@/components/CreatorStoreLicenseFields';
 import { errorCode, errorDetailKey, errorMessageKey } from './request';
 import { inputClass, type EditingProductState, type MutationView, type ProductForm } from './shared';
+
+function ListingAssistantLoading() {
+  const t = useTranslations('CreatorStoreSeller.assistant');
+  return <p role="status" className="text-sm text-slate-500">{t('loading')}</p>;
+}
+
+// 押したときだけ読み込む (押す前は chunk を読まない)。ブラウザの画像の描き直しと出品者の認証の後だけ使うので SSR しない。
+const ListingAssistant = dynamic(
+  () => import('./ListingAssistant').then((module) => module.ListingAssistant),
+  { ssr: false, loading: ListingAssistantLoading },
+);
+
+const LISTING_ASSISTANT_PANEL_ID = 'creator-store-listing-assistant';
+
+/** 「AIで出品文を作る」の入口。初めて開いたときに本体を読み込み、閉じても本体 (画像・メモ・案) は残す。 */
+function ListingAssistantEntry({
+  productForm,
+  updateProduct,
+}: {
+  productForm: ProductForm;
+  updateProduct: (patch: Partial<ProductForm>) => void;
+}) {
+  const t = useTranslations('CreatorStoreSeller.assistant');
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={loaded ? LISTING_ASSISTANT_PANEL_ID : undefined}
+        onClick={() => {
+          setLoaded(true);
+          setOpen((current) => !current);
+        }}
+        className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-brand bg-white px-4 py-2 text-sm font-semibold text-brand hover:bg-brand/5"
+      >
+        <Sparkles className="h-4 w-4" aria-hidden />
+        {t('open')}
+      </button>
+      <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('openHint')}</p>
+      {loaded ? (
+        <div id={LISTING_ASSISTANT_PANEL_ID} hidden={!open} className="mt-4">
+          <ListingAssistant productForm={productForm} updateProduct={updateProduct} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 const USAGE_FIELDS = [
   { field: 'usageCommercial', labelKey: 'usageCommercialLabel' },
@@ -41,12 +93,14 @@ type Props = {
   onSubmit: FormEventHandler<HTMLFormElement>;
   saveProduct: Pick<MutationView<unknown>, 'isPending' | 'isError' | 'error' | 'submittedAt'>;
   loadProduct: Pick<MutationView<unknown>, 'isError' | 'error' | 'submittedAt'>;
+  /** 出品者の GET の listingAssistant (server のフラグ ON かつ運営者)。true のときだけ AI 出品アシスタントの入口を出す。 */
+  listingAssistant?: boolean;
 };
 
 export function ProductEditorSection({
   productForm, editingId, editingProductState, isLicense, licenseReadOnly, deliveryFormat,
   handle, locale, sellerComplete, canChangeUsdc, atLimit, licenseValidationError,
-  productSaved, updateProduct, cancelEdit, onSubmit, saveProduct, loadProduct,
+  productSaved, updateProduct, cancelEdit, onSubmit, saveProduct, loadProduct, listingAssistant = false,
 }: Props) {
   const t = useTranslations('CreatorStoreSeller');
   const tCatalog = useTranslations('StoreCatalog');
@@ -62,6 +116,8 @@ export function ProductEditorSection({
       >
         {editingId ? t('editProductHeading') : t('newProductHeading')}
       </h3>
+      {/* フォームの外に置く (案の欄で Enter を押しても商品の保存を送らない)。 */}
+      {listingAssistant ? <ListingAssistantEntry productForm={productForm} updateProduct={updateProduct} /> : null}
 
       <form
         className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"
