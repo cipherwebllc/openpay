@@ -1269,10 +1269,17 @@ describe('切り替えた入金が読むのは、その回の Settled が読ん�
     await tick();
     expect(rpc.tx).toHaveBeenCalledTimes(4);
     expect(loadHistory()).toEqual([]);
+    // block の時刻も、切り替えた入金の段の置き場だけに入る: 2 回目の通常決済の会計は、同じ block の時刻を自分で読み直す
+    // (時刻の置き場だけが再び共有される退行を見つける・Codex の SHOULD)。
+    const timeReads = (block: bigint) => rpc.time.mock.calls.filter(([, n]) => n === block).length;
+    const blocks = [990n, 991n, 992n, 993n];
+    const before = blocks.map(timeReads);
+    expect(before.every((n) => n >= 1)).toBe(true);
     // 2 回目: 通常決済の会計は、今までどおり tx を 4 つ読んで 4 件を書く。5 件目は次の回 (切り替えた入金の段が読んだ tx を使って、
     // 1 回の上限を越えて先へ進まない)。
     await tick();
     expect(rpc.tx).toHaveBeenCalledTimes(8);
+    expect(blocks.map(timeReads)).toEqual(before.map((n) => n + 1));
     expect(rows()).toEqual([
       [stdId(tx(4)), null],
       [stdId(tx(3)), null],
