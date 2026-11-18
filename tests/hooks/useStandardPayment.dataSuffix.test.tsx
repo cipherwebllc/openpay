@@ -29,6 +29,7 @@ import { standardWalletRequestElsewhere } from '@/lib/standardPaymentOutstanding
 import { readQrStdBill, stdMarkCount, stdTransferCalldata } from '@/lib/qrSaleHistory';
 import { buildPayUrl } from '@/lib/url';
 import { logPaymentEvent } from '@/lib/paymentLog';
+import { isUserRejection } from '@/lib/walletErrors';
 import { jsonWithBigint } from '../_helpers/relayAttemptCapture';
 import goldenFromMain from '../fixtures/stdBillMarkGoldenHook.json';
 
@@ -45,7 +46,9 @@ import goldenFromMain from '../fixtures/stdBillMarkGoldenHook.json';
 //   - 利用料の transfer・保存する intent には印が無い。
 //   - MUST-2: 印は writeContract に渡す 1 つの object の中 (登録簿と unmount の後の保存は object の同一性で見る)・送信待ちも対。
 //   - MUST-1: 印つきの送信は、その画面で 1 回まで。印つきで送る直前に同期で予約し、その後の送信は印なし (印つき A の応答待ちの
-//     間の B も)。予約を解くのはウォレットの拒否のときだけ。receipt・revert・置換は追わない。
+//     間の B も)。予約を解くのは、ウォレットが投げた元の error (cause のいちばん奥) の code が EIP-1193 の 4001 で、その 4001 が
+//     ウォレット自身の答えである接続 (injected・WalletConnect) のときだけ (文言だけの「拒否」では解かない)。receipt・revert・
+//     置換は追わない。
 // 兄弟の useStandardPayment.unmount.test.tsx と同じ形の harness (この file の分だけを写した)。
 type ReceiptState = {
   data:
@@ -130,6 +133,8 @@ type WalletSend = {
   approve: (hash: Hex) => void;
   reject: () => void;
   fail: () => void;
+  // ウォレット (provider) が投げる error をそのまま決める。
+  rejectWith: (error: unknown) => void;
   settled: boolean;
 };
 let walletSends: WalletSend[] = [];
@@ -153,6 +158,10 @@ function walletRequest({ method, params }: { method: string; params?: unknown })
         fail: () => {
           send.settled = true;
           reject(Object.assign(new Error('Internal JSON-RPC error.'), { code: -32603 }));
+        },
+        rejectWith: (error) => {
+          send.settled = true;
+          reject(error);
         },
         settled: false,
       };
@@ -244,6 +253,14 @@ const byteLength = (data: Hex | undefined) => size(data ?? '0x');
 
 // 決済のログ (lib/standardPaymentLog → logPaymentEvent) に送った中身の全部 (印が入っていないかを見る)。
 const loggedText = () => jsonWithBigint(vi.mocked(logPaymentEvent).mock.calls);
+// error と cause の連なりの、名前と code (viem・wagmi が包んだ形を、本物の node_modules で固定する)。
+function errorChain(error: unknown): { name: unknown; code: unknown }[] {
+  const out: { name: unknown; code: unknown }[] = [];
+  for (let e = error; typeof e === 'object' && e !== null && out.length < 10; e = (e as { cause?: unknown }).cause) {
+    out.push({ name: (e as { name?: unknown }).name, code: (e as { code?: unknown }).code });
+  }
+  return out;
+}
 // error の文と cause の連なりの文の全部 (ログ・画面に出る文に印が入っていないかを見る)。
 function errorTexts(error: unknown): string {
   const out: string[] = [];
@@ -256,7 +273,8 @@ beforeEach(() => {
   window.sessionStorage.clear();
   receiptByHash.clear();
   walletSends = [];
-  useAccountMock.mockReturnValue({ address: CUSTOMER });
+  // 接続の種類 (wagmi の connector の type) は、印の予約を解いてよいかの判定だけが読む。既定は injected (4001 がウォレット自身の答え)。
+  useAccountMock.mockReturnValue({ address: CUSTOMER, connector: { type: 'injected' } });
   publicClientMock.getTransactionReceipt = vi.fn().mockRejectedValue(new Error('rpc receipt fetch failed'));
 });
 
@@ -573,13 +591,20 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     await waitForWalletSends(1);
     await settle(view);
     await waitFor(() => expect(view.result.current.phase).toBe(waitPhase));
-    const settledError = errorTexts(view.result.current.error);
+    const error = view.result.current.error;
+    const settledError = errorTexts(error);
     act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
     await waitForWalletSends(2);
     const second = walletSends[1].tx.data;
     view.unmount();
-    return { first: walletSends[0].tx.data, second, settledError };
+    return { first: walletSends[0].tx.data, second, settledError, error };
   }
+  // 1 本目のウォレット (provider) が、決めた error を投げる。
+  const rejectFirstWith = (make: () => unknown) => async () => {
+    await act(async () => {
+      walletSends[0].rejectWith(make());
+    });
+  };
   // 1 本目のウォレットが hash を返し、mine を待つ所まで。
   async function approveFirst(view: Screen) {
     await act(async () => {
@@ -634,13 +659,117 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     expect(out.second).toBe(MERCHANT_CALLDATA);
   });
 
-  it('ウォレットでの拒否 (tx が出ない・お客様が自分で取り消した) は数えない → 次も印つき (100 byte)', async () => {
+  it('ウォレットでの拒否 (EIP-1193 の 4001・tx が出ない・お客様が自分で取り消した) は数えない → 次も印つき (100 byte)', async () => {
     const out = await settleThenResend(async () => {
       await act(async () => {
         walletSends[0].reject();
       });
     }, 'merchant-error');
+    // 4001 は、viem・wagmi が包んだ error の cause の奥に届く (画面に渡る error 自身に code は無い)。
+    expect(errorChain(out.error)).toEqual([
+      { name: 'ContractFunctionExecutionError', code: undefined },
+      { name: 'TransactionExecutionError', code: undefined },
+      { name: 'UserRejectedRequestError', code: 4001 },
+      { name: 'Error', code: 4001 },
+    ]);
     expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+    expect(byteLength(out.second)).toBe(100);
+  });
+
+  it.each<[string, () => unknown]>([
+    ['Error でない object の 4001', () => ({ code: 4001, message: 'User rejected the request.' })],
+    [
+      'ウォレットの側の SDK が code の無い error で包んだ、cause の奥の 4001',
+      () => new Error('Request failed', { cause: Object.assign(new Error('User rejected the request.'), { code: 4001 }) }),
+    ],
+  ])('cause の連なりのいちばん奥の error の code が 4001 (%s) → 予約を解き、次も印つき (100 byte)', async (_name, make) => {
+    const out = await settleThenResend(rejectFirstWith(make), 'merchant-error');
+    expect(errorChain(out.error).at(-1)).toMatchObject({ code: 4001 });
+    expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+  });
+
+  // Codex のレビュー (MUST 4 回目): 予約を解くのは、ウォレットが EIP-1193 の 4001 で答えたと、元の error の code で確かめられたときだけ。
+  // 文言だけの「拒否」(lib/walletErrors の isUserRejection = 計測・表示用の判定は真にする) は、ウォレットが tx を出した後に
+  // hash の応答だけが失われたのかもしれないので、予約のまま (印を渡して送り直しても 68 byte = 同じ画面から印つきが 2 本出ない)。
+  it.each<[string, () => unknown]>([
+    ['code の無い Connection request reset', () => new Error('Connection request reset. Please try again.')],
+    ['code の無い User rejected the request.', () => new Error('User rejected the request.')],
+    ['code の無い User denied transaction signature', () => new Error('MetaMask Tx Signature: User denied transaction signature.')],
+    ["code が文字列の '4001'", () => Object.assign(new Error('User rejected the request.'), { code: '4001' })],
+    [
+      '4001 のさらに奥に別の code の error がある',
+      () =>
+        Object.assign(new Error('User rejected the request.'), {
+          code: 4001,
+          cause: Object.assign(new Error('socket closed'), { code: -32000 }),
+        }),
+    ],
+    [
+      '4001 のさらに奥に code の無い error がある (包む側が文言から作った 4001 の形)',
+      () =>
+        Object.assign(new Error('User rejected the request.'), {
+          code: 4001,
+          cause: new Error('Connection request reset. Please try again.'),
+        }),
+    ],
+  ])('4001 と確かめられない「拒否」(%s) の後は、印を渡して送り直しても 68 byte', async (_name, make) => {
+    const out = await settleThenResend(rejectFirstWith(make), 'merchant-error');
+    expect(byteLength(out.first)).toBe(100);
+    // 文言での判定は拒否と見る (この判定で予約を解くと、次も 100 byte になる)。
+    expect(isUserRejection(out.error)).toBe(true);
+    expect(out.second).toBe(MERCHANT_CALLDATA);
+    expect(byteLength(out.second)).toBe(68);
+  });
+
+  it('WalletConnect の 5000 は、viem が UserRejectedRequestError (code 4001) に包むが、元の code は 4001 でない → 68 byte', async () => {
+    const out = await settleThenResend(
+      rejectFirstWith(() => Object.assign(new Error('User rejected.'), { code: 5000 })),
+      'merchant-error',
+    );
+    expect(errorChain(out.error)).toEqual([
+      { name: 'ContractFunctionExecutionError', code: undefined },
+      { name: 'TransactionExecutionError', code: undefined },
+      { name: 'UserRejectedRequestError', code: 4001 },
+      { name: 'Error', code: 5000 },
+    ]);
+    expect(isUserRejection(out.error)).toBe(true);
+    expect(out.second).toBe(MERCHANT_CALLDATA);
+  });
+
+  // 4001 がウォレット自身の答えである接続 (injected・WalletConnect) のときだけ、4001 で予約を解く。Coinbase Wallet SDK は、popup が
+  // 閉じただけで SDK が 4001 を作る (承認の後に閉じると、tx が出ていても 4001 が届きうる) ので解かない。知らない接続も解かない。
+  it.each<[string, { type: string } | undefined, number]>([
+    ['WalletConnect', { type: 'walletConnect' }, 100],
+    ['Coinbase Wallet SDK', { type: 'coinbaseWallet' }, 68],
+    ['知らない接続', { type: 'mock' }, 68],
+    ['接続を読めない', undefined, 68],
+  ])('接続が %s のときの 4001 の後に、印を渡して送り直すと %d byte', async (_name, connector, bytes) => {
+    useAccountMock.mockReturnValue({ address: CUSTOMER, connector });
+    const out = await settleThenResend(async () => {
+      await act(async () => {
+        walletSends[0].reject();
+      });
+    }, 'merchant-error');
+    expect(byteLength(out.first)).toBe(100);
+    expect(byteLength(out.second)).toBe(bytes);
+  });
+
+  it('予約を解いてよい接続かは、印つきで送ったときの接続で決まる (応答待ちの間に接続が変わっても)', async () => {
+    useAccountMock.mockReturnValue({ address: CUSTOMER, connector: { type: 'coinbaseWallet' } });
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(1);
+    useAccountMock.mockReturnValue({ address: CUSTOMER, connector: { type: 'injected' } });
+    view.rerender();
+    await act(async () => {
+      walletSends[0].reject();
+    });
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-error'));
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(2);
+    expect(walletSends[1].tx.data).toBe(MERCHANT_CALLDATA);
+    view.unmount();
   });
 
   const UNMARKED: [string, (view: Screen) => Promise<void>, string][] = [
