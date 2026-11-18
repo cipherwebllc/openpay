@@ -29,10 +29,12 @@ export const SPONSOR_PLANS: Readonly<Record<SponsorPlanId, SponsorPlan>> = {
  * 法人スポンサーの年間プラン (2026-11-18 user 裁定): 30 日の料金の 11 回分で 365 日 (12 回払いより 1 回分安い)。
  * バナー広告には無い。料金は 30 日の料金から作る (別の値を持たない)。
  */
+const SPONSOR_ANNUAL_TERMS_CHARGED = 11;
+
 export const SPONSOR_ANNUAL_PLAN = {
-  termsCharged: 11,
+  termsCharged: SPONSOR_ANNUAL_TERMS_CHARGED,
   termDays: 365,
-  priceYen: SPONSOR_PLANS.sponsor.priceYen * 11,
+  priceYen: SPONSOR_PLANS.sponsor.priceYen * SPONSOR_ANNUAL_TERMS_CHARGED,
 } as const;
 
 /**
