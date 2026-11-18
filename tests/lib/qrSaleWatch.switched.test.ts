@@ -1237,6 +1237,68 @@ describe('切り替えた入金が読むのは、その回の Settled が読ん�
     expect(settledRanges()).toEqual([[910n, 997n], [987n, 1_001n]]);
     expect(transferRanges()).toEqual([[910n, 997n], [987n, 1_001n]]);
   });
+
+  it('先のチェーンの RPC を待つ間に、後ろのチェーンに加わった会計は、その回 (tick) は候補にしない (会計は回の始まりの写し)。次の回から照合する', async () => {
+    showGasless(BK);
+    showGasless(BK2, { chain: 'kaia', receiptNo: 'K-1' });
+    // 後から加わる Kaia の会計 (BK3) の印の付いた入金が、もうチェーンにある。
+    pay(995n, 1, { billKey: BK3, token: KAIA.address });
+    // Polygon (先に読むチェーン) の先頭を待つ間に、Kaia に会計が加わる。Kaia の回は、加わった後に始まる。
+    rpc.head.mockImplementationOnce(async () => {
+      showGasless(BK3, { chain: 'kaia', receiptNo: 'G-3' }, NOW - 60_000);
+      return chain.head;
+    });
+    await tick();
+    // Kaia の Settled は、加わった会計の受取先 (同じ受取先) も読んでいる。それでも、この回は候補にしない。
+    expect(rpc.switched.mock.calls.map(([chainId]) => chainId)).toEqual([POLYGON.chainId, KAIA.chainId]);
+    expect(loadHistory()).toEqual([]);
+    await tick();
+    expect(rows()).toEqual([[stdId(tx(1)), 'G-3']]);
+    expect(loadHistory()[0].chainId).toBe(KAIA.chainId);
+  });
+
+  it('切り替えた入金の段が読んだ tx は、通常決済の会計の照合に使わせない: 通常決済の会計は、今までどおり 1 回に tx を 4 つ読んで照合する', async () => {
+    showGasless(BK);
+    showStd(BK2);
+    // 通常決済の会計 (BK2) への入金 5 つ (ガスレスの会計 BK と同じ受取先・同じ額)。
+    for (let i = 1; i <= 5; i += 1) pay(BigInt(989 + i), i, { billKey: BK2 });
+    // 1 回目は、通常決済の会計の getLogs だけ失敗する。切り替えた入金の段は、同じ Transfer の tx を 4 つ読む (どれも BK の印ではない)。
+    rpc.transfers.mockImplementationOnce(async () => {
+      throw down();
+    });
+    await tick();
+    expect(rpc.tx).toHaveBeenCalledTimes(4);
+    expect(loadHistory()).toEqual([]);
+    // 2 回目: 通常決済の会計は、今までどおり tx を 4 つ読んで 4 件を書く。5 件目は次の回 (切り替えた入金の段が読んだ tx を使って、
+    // 1 回の上限を越えて先へ進まない)。
+    await tick();
+    expect(rpc.tx).toHaveBeenCalledTimes(8);
+    expect(rows()).toEqual([
+      [stdId(tx(4)), null],
+      [stdId(tx(3)), null],
+      [stdId(tx(2)), null],
+      [stdId(tx(1)), 'S-1'],
+    ]);
+    await tick();
+    expect(loadHistory()).toHaveLength(5);
+  });
+
+  it('Settled の getLogs が範囲の外 (読めた所より後ろ) の log を返し、その log で照合を回した回: 切り替えた入金の範囲の終わりは、Settled が読めた所まで', async () => {
+    showGasless();
+    // Settled が読むのは 997 まで。RPC が、範囲の外の 1,000 の Settled も返す。その block の時刻は読めない。
+    settle(1_000n, 9);
+    rpc.logs.mockImplementation(async () => chain.settled);
+    rpc.time.mockImplementation(async (_chainId: number, block: bigint) => {
+      if (block === 1_000n) throw new Error('rpc down');
+      return blockTime(block);
+    });
+    // Settled が読んでいない 998 の、印の付いた入金。
+    pay(998n, 1);
+    await tick();
+    expect(settledRanges()).toEqual([[910n, 997n]]);
+    expect(switchedRanges()).toEqual([[910n, 997n]]);
+    expect(loadHistory()).toEqual([]);
+  });
 });
 
 describe('getLogs の範囲に制限のある RPC (10 block ずつ・Avalanche の RPC と同じ制限) のガスレスの会計', () => {

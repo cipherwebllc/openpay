@@ -295,7 +295,7 @@ type SwitchedCandidate = { w: WatchedSettled; std: QrStdBill };
  */
 type SwitchedJob = {
   chainId: number;
-  /** その回の始まりにあったガスレスの会計のうち、通常決済の期待値を持つもの (回の途中で加わった会計は入らない)。 */
+  /** その回 (tick) の始まりにあったガスレスの会計のうち、通常決済の期待値を持つもの (回の途中で加わった会計は入らない)。 */
   bills: readonly SwitchedCandidate[];
   /** その回の Settled が読んで照合し終えた block の範囲 (両端を含む)。 */
   fromBlock: bigint;
@@ -312,6 +312,11 @@ const seenLogs = new Set<string>();
 const blockTimes = new Map<string, bigint>();
 // 読めた tx (`チェーン:tx`)。同じ tx の 2 つ目の Transfer で読み直さない。
 const txs = new Map<string, StdTx>();
+// 切り替えた入金の段が読んだ block の時刻・tx (同じ key)。上の 2 つ (Settled と通常決済の会計の照合が使う) には書かない:
+// 切り替えた入金が先に読んだ tx を、通常決済の会計の照合が「もう読んだ tx」として使うと、1 回に読む tx の上限 (4 つ) を
+// 越えて照合が進み、今までと違う回に行を書く (頭の注記の約束 (1))。切り替えた入金の側は、上の 2 つを読むだけ。
+const switchedBlockTimeCache = new Map<string, bigint>();
+const switchedTxCache = new Map<string, StdTx>();
 // 会計ごとに、1 つの tx の印を何回数えたか (`チェーン:tx:bill key`)。印 1 つ (transfer + 印 の並び 1 つ) を数えるのは
 // Transfer 1 つまで (同じ tx に、同じ額の別の会計への Transfer がもう 1 つあっても、同じ印で 2 回数えない)。
 const txMarkUses = new Map<string, number>();
@@ -347,6 +352,8 @@ function clearState(): void {
   seenLogs.clear();
   blockTimes.clear();
   txs.clear();
+  switchedBlockTimeCache.clear();
+  switchedTxCache.clear();
   txMarkUses.clear();
 }
 
@@ -386,22 +393,24 @@ function withDeadline<T>(promise: Promise<T>): Promise<T> {
   });
 }
 
-async function blockTimeOf(chainId: number, blockNumber: bigint): Promise<bigint> {
+// store = 読めた値の置き場 (既定 = Settled と通常決済の会計の照合の置き場。切り替えた入金の段は、自分の置き場を渡す)。
+async function blockTimeOf(chainId: number, blockNumber: bigint, store = blockTimes): Promise<bigint> {
   const key = `${chainId}:${blockNumber}`;
-  const known = blockTimes.get(key);
+  const known = store.get(key);
   if (known !== undefined) return known;
   const time = await withDeadline(readBlockTime(chainId, blockNumber));
   if (typeof time !== 'bigint' || time <= 0n) throw new Error('qr_sale_block_time_unreadable');
-  blockTimes.set(key, time);
+  store.set(key, time);
   return time;
 }
 
 // 通常決済の会計の照合に使う tx (送り手・宛先・input)。読めない (RPC の失敗・時間切れ・tx が無い) ときは throw する
 // (呼ぶ側は、その Transfer を「読んだ」ことにせず、次の回に読み直す)。形の違う応答も読めないものとして扱う: 壊れた応答を
 // 「印の無い tx」として読んだことにすると、その入金を二度と照合しない (落とす) ため。
-async function txOf(chainId: number, hash: string): Promise<StdTx> {
+// store = 読めた tx の置き場 (blockTimeOf と同じ)。
+async function txOf(chainId: number, hash: string, store = txs): Promise<StdTx> {
   const key = `${chainId}:${hash.toLowerCase()}`;
-  const known = txs.get(key);
+  const known = store.get(key);
   if (known) return known;
   const tx = await withDeadline(readTransaction(chainId, hash as Hash));
   const readable =
@@ -415,7 +424,7 @@ async function txOf(chainId: number, hash: string): Promise<StdTx> {
     tx.input.length % 2 === 0;
   if (!readable) throw new Error('qr_sale_tx_unreadable');
   const read: StdTx = { from: tx.from, to: tx.to, input: tx.input };
-  txs.set(key, read);
+  store.set(key, read);
   return read;
 }
 
@@ -712,7 +721,9 @@ async function checkSwitched(
   if (fitting.length === 0) return 'done';
   let blockTime: bigint;
   try {
-    blockTime = await blockTimeOf(chainId, blockNumber);
+    // 今までの照合が読んだ時刻があれば使う (読むだけ)。この段が読んだ時刻は、この段の置き場に入れる。
+    blockTime =
+      blockTimes.get(`${chainId}:${blockNumber}`) ?? (await blockTimeOf(chainId, blockNumber, switchedBlockTimeCache));
   } catch {
     return 'stop';
   }
@@ -725,13 +736,14 @@ async function checkSwitched(
   );
   // 残る会計が無ければ、tx を読まない。
   if (open.length === 0) return 'done';
-  let tx = txs.get(`${chainId}:${txKey}`);
+  // 今までの照合が読んだ tx があれば使う (読むだけ)。この段が読んだ tx は、この段の置き場に入れる。
+  let tx = txs.get(`${chainId}:${txKey}`) ?? switchedTxCache.get(`${chainId}:${txKey}`);
   if (!tx) {
     // tx の数の上限 (通常決済の会計の照合と合わせて、1 回・チェーンごとに QR_SALE_MAX_TX_READS_PER_PASS)。
     if (job.txReads.count >= QR_SALE_MAX_TX_READS_PER_PASS) return 'stop';
     job.txReads.count += 1;
     try {
-      tx = await txOf(chainId, txHash);
+      tx = await txOf(chainId, txHash, switchedTxCache);
     } catch {
       return 'stop';
     }
@@ -964,11 +976,18 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<Sw
 
   // 切り替えた入金の段 (頭の注記) に渡すもの。ここまで (Settled と通常決済の会計の読み取り・照合・保存・位置) は、今までの回と
   // 同じ。段は、全チェーンのここまでが終わった後に走る (tick)。範囲 = この回の Settled が読んで照合し終えた範囲 (読めなかった
-  // 回・1 つも照合し終えていない回は、段を作らない)。会計 = この回の始まりにあったガスレスの会計。
+  // 回・1 つも照合し終えていない回は、段を作らない)。会計 = このチェーンの回の始まりにあったガスレスの会計 (tick が、回 (tick) の
+  // 始まりにあった会計だけに絞る)。
   const settledStream = streams.find((stream) => stream.source.kind === 'settled');
-  const settledTo = settledStream ? settledStream.cursor.lastTo : null;
+  if (!settledStream) return;
+  // 範囲の終わり = 読めた所 (readTo) と、照合し終えた所 (回した log の手前) の小さい方。RPC が範囲の外 (読めた所より後ろ) の
+  // log を返して、その log で照合を回した回は、照合し終えた所が読めた所を越える: 読んでいない block を範囲に入れない。
+  const settledTo =
+    settledStream.stoppedAt !== null && settledStream.stoppedAt - 1n < settledStream.readTo
+      ? settledStream.stoppedAt - 1n
+      : settledStream.readTo;
   const switchedBills = settledBills.flatMap((w) => (w.std ? [{ w, std: w.std }] : []));
-  if (!settledStream || settledTo === null || settledTo < settledStream.fromBlock || switchedBills.length === 0) return;
+  if (settledTo < settledStream.fromBlock || switchedBills.length === 0) return;
   return { chainId, bills: switchedBills, fromBlock: settledStream.fromBlock, toBlock: settledTo, budget, txReads };
 }
 
@@ -984,6 +1003,9 @@ async function tick(): Promise<void> {
     return;
   }
   const chainIds = [...new Set([...bills.values()].map((w) => w.bill.chainId))];
+  // この回 (tick) の始まりにあった会計。切り替えた入金の候補は、この中の会計だけ (頭の注記の約束 (2)): 先のチェーンの RPC を
+  // 待つ間に、後ろのチェーンに加わった会計は、次の回から。
+  const billsAtStart = new Set<WatchedBill>(bills.values());
   // タブが裏のあいだは読まない (戻ったら、前回の続き・先頭 − 90 のうち新しい方から読む)。
   if (document.visibilityState === 'hidden') return;
   running = true;
@@ -993,7 +1015,10 @@ async function tick(): Promise<void> {
     for (const chainId of chainIds) {
       try {
         const job = await pollChain(chainId, startedGeneration);
-        if (job) switchedJobs.push(job);
+        if (job) {
+          const atStart = job.bills.filter(({ w }) => billsAtStart.has(w));
+          if (atStart.length > 0) switchedJobs.push({ ...job, bills: atStart });
+        }
       } catch {
         // RPC の失敗・時間切れ・読めない応答は、その回を飛ばす (前回の位置を変えない = 次の回に同じ範囲から読み直す)。
       }
