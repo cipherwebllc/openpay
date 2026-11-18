@@ -343,7 +343,10 @@ const BLOCKED_FINISH_REASONS: ReadonlySet<string> = new Set([
 // 埋め字 U+3164・異体字セレクタなど) も除く。見えない文字で区切った URL を、除いた後に URL として残さないため。
 const INVISIBLE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Default_Ignorable_Code_Point}]/gu;
 // scheme (http / https) か www. で始まり、空白・引用符・括弧・日本語の句読点の手前まで (日本語のドメイン・パスも含む)。
-const URL_RE = /(?:https?:\/\/|www\.)[^\s"'<>()[\]{},、。「」『』【】〈〉《》]+/giu;
+// URL の続きに使わない文字 (空白・引用符・括弧・日本語の句読点)。
+const URL_TAIL = `[^\\s"'<>()[\\]{},、。「」『』【】〈〉《》]`;
+// scheme の直後の IPv6 のホスト ([2001:db8::1]) は括弧を含むので、別の枝で丸ごと落とす (Codex のレビュー)。
+const URL_RE = new RegExp(`(?:https?:\\/\\/(?:\\[[^\\]\\s]*\\]${URL_TAIL}*|${URL_TAIL}+)|www\\.${URL_TAIL}+)`, 'giu');
 
 /**
  * 出力の 1 つの文字列を整える (6 欄すべて同じ): 改行を空白に → NFKC (全角の ｈｔｔｐｓ：／／ などを ASCII に) → 制御文字と
