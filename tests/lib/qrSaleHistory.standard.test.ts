@@ -158,6 +158,24 @@ describe('1 つの入金で複数の会計を確かめたことにしない (std
     expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}0${plain}0` }, bill, 1)).toBe(false);
   });
 
+  it('同じ「transfer + 印」の並びが 2 回 (ウォレットの中継: 署名した中身と実行する中身) → 1 つと数える・違う並びは今までどおり断る', () => {
+    const bill = stdBill()!;
+    const seq = stdTransferCalldata(bill).slice(2);
+    const plain = seq.slice(0, -64);
+    const markB = billKeyStdMark('AAAAAAAAAAA')!.slice(2);
+    const len = (100).toString(16).padStart(64, '0');
+    // MetaMask の 7702 の中継 (2026-11-18 の実機の形): 長さ 100 の bytes として、同じ並びが 2 か所に入る。Transfer は 1 つ。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0xdeadbeef${len}${seq}${'00'.repeat(28)}${len}${seq}${'00'.repeat(28)}` }, bill, 1)).toBe(false);
+    // 同じ並びが 2 回 + 別の会計の印の並び → 違う並びは 2 つ → 超える。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}00${seq}${plain}${markB}` }, bill, 1)).toBe(true);
+    // 同じ並びが 2 回 + 印なしの transfer → 超える。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}00${seq}${plain}` }, bill, 1)).toBe(true);
+    // Transfer が 2 つの tx は重複をまとめない: 印 A・A・B と Transfer 2 つ → 超える (A に 2 つ数えて B が 0 になるのを断つ)。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}00${seq}${plain}${markB}` }, bill, 2)).toBe(true);
+    // Transfer 2 つ + 同じ並び 2 回 (同じ会計への 2 件の入金) → 超えない (今までどおり)。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}00${seq}` }, bill, 2)).toBe(false);
+  });
+
   it('宛先が JPYC の直接の送金は数えない (stdMarkCount がちょうどの一致を見る)', () => {
     const bill = stdBill()!;
     const input = stdTransferCalldata(bill);
