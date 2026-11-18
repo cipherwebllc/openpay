@@ -705,7 +705,7 @@ eslint・eslint-plugin-*・@eslint/* → minimatch@3.1.5
 [GHSA-mrwp-f3q8-3g9p](https://github.com/advisories/GHSA-mrwp-f3q8-3g9p) (HIGH: 別 realm の sensitiveHeaders 配列が捨てられ、独自の認証ヘッダがリダイレクト先へ送られる)。
 経路は x402-next → @coinbase/cdp-sdk → axios → follow-redirects。lockfile の 1 件だけの更新。
 
-### 7.17 MODERATE: `basic-ftp` (GHSA-5pm8-86m8-9m6r)・Lighthouse CI の道具の lockfile だけ (2026-11-13)
+### 7.17 Lighthouse CI の道具の lockfile (`tools/lighthouse`) の advisory: `basic-ftp` ほか (2026-11-13・全体を 2026-11-18 に受け入れ)
 
 **Root advisory**:
 - [GHSA-5pm8-86m8-9m6r](https://github.com/advisories/GHSA-5pm8-86m8-9m6r): FTP サーバーが返す一覧 (MLSD) の 1 行に `__proto__` という名前を入れると、basic-ftp の client が捕まえられない TypeError で落ちる (basic-ftp <=6.2.3・修正は 6.2.4)
@@ -727,6 +727,22 @@ eslint・eslint-plugin-*・@eslint/* → minimatch@3.1.5
 **Reassess triggers**:
 - @lhci/cli か get-uri が basic-ftp>=6.2.4 を取れる版を出す → `tools/lighthouse` の lockfile を更新する
 - Lighthouse の workflow に proxy の設定を足す変更 (**その PR で即再評価**)
+
+**2026-11-18 追記: `tools/lighthouse` の lockfile 全体の受け入れ** (外部レビューの指摘で、上の basic-ftp 1 件しか記録が無かった)。`npm audit --package-lock-only` (tools/lighthouse) = **20 件 (high 13・moderate 2・low 5・critical 0)**:
+- high: `@lhci/cli`・`@puppeteer/browsers`・`basic-ftp` (GHSA-c475-qrg2-pj4r・GHSA-5pm8-86m8-9m6r・GHSA-r4jh-29pc-gfqr)・`body-parser` (GHSA-27r3-jxmh-p828)・`chromium-bidi`・`extract-zip` (GHSA-jmr9-qjv8-65gv・GHSA-7pqw-9j4j-h8q3)・`get-uri`・`lighthouse`・`pac-proxy-agent`・`proxy-agent`・`puppeteer-core`・`tmp` (GHSA-52f5-9888-hmc6・GHSA-ph9p-34f9-6g65)・`zod` (GHSA-mrhx-c7xc-m3w5)
+- moderate: `ip-address` (GHSA-rxp7-6hxx-x8q5)・`uuid` (GHSA-w5hq-g745-h8pq)
+- low: `@lhci/utils`・`@sentry/node`・`cookie` (GHSA-pxg6-pf52-xh8x)・`external-editor`・`inquirer`
+
+**Reachability (全体)**: どれも CI の Lighthouse の job の中だけで、本番・npm の package・利用者の端末には入らない。
+- `.github/workflows/lighthouse.yml` は `npm --prefix tools/lighthouse ci --ignore-scripts` で入れ、`scripts/installed-scripts-gate.mjs` で install script を確かめる = 依存の install script は動かない
+- `lhci collect` が開くのは、同じ job で build して起動した OpenPay 自身 (`.lighthouserc.json` の localhost の URL) だけ。外のサイトの HTML・zip・FTP・proxy の設定を読まない (proxy の環境変数は設定していない)
+- `LHCI_GITHUB_APP_TOKEN` を持つのは upload の step だけ (collect には渡さない)
+- 起きても、落ちる・止まるのは CI の job 1 つ。秘密の値・成果物・本番には届かない
+→ **accepted risk (2026-11-18・user 承認)**。`scripts/audit-gate.mjs` の allowlist には足さない (本体の lockfile だけを見る gate のため・上の「Gate との関係」と同じ)。
+
+**Reassess triggers (追加)**:
+- npm は `@lhci/cli@0.16.1` (0.x の major) で大半が消えるとしている → Lighthouse の job が通ることを確かめる別の PR で `tools/lighthouse` を上げる (上げたら、この一覧を採り直す)
+- `.lighthouserc.json` に外のサイトの URL を足す・Lighthouse の job に秘密の値を足す変更 (**その PR で即再評価**)
 
 ### 7.18 HIGH: `picomatch` (GHSA-fc5q-39xc-vjpf)・修正版なし (2026-11-18)
 
@@ -1750,6 +1766,20 @@ on-chain 検証経路 (実 `getTransactionReceipt` → 実 JPYC `Transfer` log �
 - **H-R a1 利用料の hook (`hooks/useUsageFeePayment.ts`) は、復旧の枠を保存できたかを確かめずに POST する** (第 10 回レビュー・2026-11-11)。`persistUsageFeeIntent` は書き込みの失敗を握るので、枠を書けない端末 (アプリ内ブラウザ・サイトのデータの保存をブロックした設定) では、応答を失って開き直した画面が未解決の利用料を知らず、別の nonce で払い直せる (利用料の二重の送金)。a1 を点灯する前に、決済の hook (`hooks/useJpycEip3009Payment.ts` の `intent_storage_unavailable`・`lib/paymentIntentStorage.ts` の `canStoreRelayIntent` / `saveRelayIntentVerified`) と同じ「署名の前に書けるかを確かめる + 署名の後に枠を読み戻す」を入れるか、受容するかを決める。決済の側の今の扱い (2026-11-11 user 裁定 Q7): 止めたときは通常決済へ案内しない (/pay・/checkout も切り替えの banner を出さず、ブラウザの設定か別のブラウザだけを案内する)。束縛した注文の slot を保存できずに止めたとき (`order_binding_storage_unavailable`) も同じで、/checkout は切り替えの banner と汎用の文を出さず、専用の黄色の枠だけを出す (2026-11-11 user 裁定 Q8 = A・`isOrderBindingStorageUnavailableError`)。文脈が変わって止めた `order_binding_mismatch` は今までどおり切り替えを出す。通常決済の hook (`hooks/useStandardPayment.ts`) も復旧の印を同じ共有の `save()` で書くので同じ穴があるが、受容した。埋め込み (iframe) の中のチップは確かめをしない (`skipIntentStorageCheck`・今までどおり送る・受容)。束縛した注文 (/checkout) は、初回の POST の前に自分の slot を書いて読み戻す (`lib/orderDelivery.ts` の `saveOrderDeliveryVerified`・読めなければ `order_binding_storage_unavailable`)。IP 制限 (429) の後の再送は、保持した payload と一緒に持つ束縛 (その注文の記録と署名したときの checkout の文脈) で毎回確かめ、文脈が今と同じで、その記録を書いて読み戻せたときだけ送る (文脈が違えば `order_binding_mismatch`・どちらで止めても、送っていない payload の保持は外す)。hook が比べる文脈はお店・chain・token・webhook・注文番号・合計で、品目は見ない。別の注文へ移ったときに前の注文の支払いの状態 (保持した署名・署名の途中の試み・完了の画面) を持ち越さないのは /checkout の page の key で、URL から parse した注文の中身全体が変われば CheckoutForm を作り直す (`lib/checkoutFormKey.ts`)。この作り直しが断つのは memory の持ち越しだけで、作り直した画面は読み直しと同じく storage の復旧の記録を読む: タブに 1 つの記録 (束縛しない relay の枠・通常決済の印) や品目だけが違う注文の記録を復元して確定すると、前の支払いの完了が今の注文の完了の欄に出る (main にもある既存の挙動・第 10 回レビュー H-S・未修正)。確かめに落ちた回の記録は、書く前の枠・slot が空か同じ authorization だったときだけ片づける (別の記録があった・書く前に読めなかったときは残り、期限が証明されるまで塞ぐ)。利用料の relay は revert の後の固定読み取りをしない (第 8 回 #938 で対象外) ので、それも一緒に見直す。
 
 - **E-7 freee の認可開始 (`app/api/freee/authorize/route.ts`) の CSRF 検査が same-site を通す**。`Sec-Fetch-Site: cross-site` だけを拒否するので、サブドメイン (same-site) からの遷移では state の予約と freee への 302 が動く。freee を再開するときは、保護配布の発行 GET (§16.9) と同じ `isSameOriginGet` (`lib/net/crossOriginWrite.ts`・same-origin と none だけを通す) に揃える。`/api/freee/callback` は freee から戻ってくる cross-site の GET なので対象外 (state の照合で守る)。
+
+- **外部レビュー (2026-11-18・main 97b2a59b 対象) の freee の 4 件** — どれも経路は実在するが、本番は flag OFF (`/api/freee/status` が `freee_disabled`) で到達しない。freee を再開する PR で、4 件をまとめて直す:
+  - **P1-2 共有ブラウザで、店舗 A の売上・商品名・メモを店舗 B の freee 事業所に登録できる**。履歴 (localStorage `openpay:history:v1`) はウォレットで絞られず、`components/FreeeSyncPanel.tsx` は受取店舗で絞らずに送り、`lib/freeeSync.ts` の `runFreeeSync` は各明細の `merchant` をサインイン中のウォレットと照合しない。直し方: 画面とサーバーの両方で、明細の受取店舗 (`merchant`) が同期を許可したウォレットと同じ行だけを送る / 受け付ける (`merchant` が受取アドレスかを確かめてから)。
+  - **P2-1 再同期で同じ売上を二重に記帳する**。`lib/freee.ts` の取引の作成が freee 側で作成された後にタイムアウトすると、`lib/freeeSync.ts` の catch が重複防止の記録を解放し、再同期で作り直す。作成の後のローカルの保存だけが失敗した場合も、保留の記録 (`app/api/freee/_store.ts` の `CLAIM_TTL_SEC` = 5 分) が切れた後の再同期で作り直す。直し方: 通信の失敗・タイムアウトは「結果不明」として記録を解放せず、作り直す前に freee 側の取引と照合する。
+  - **P2-8 一時的なレート制限 (429) で連携の資格情報を消す**。`lib/freee.ts` のトークンの更新の失敗 (`freee_token_http_${status}`) を、`app/api/freee/_store.ts` の `/^freee_token_http_4\d\d$/` が 429・408 も含めて失効として扱い、トークンを消す。直し方: 消すのは OAuth が失効を明示した 400・401 だけにし、429・408 はトークンを残して 502 を返す。
+  - **P3-1 同期のバッチが一部だけ記帳された状態で 500 になる**。`app/api/freee/sync/route.ts` は `entries` が配列であることだけを見て、各要素の形を見ない。途中の `null` で、前の要素を freee に作った後に例外になる (再送は冪等で skip されるので、被害は表示の不整合)。直し方: freee へ書き込む前に全要素の形を確かめる。
+
+- **外部レビュー (2026-11-18) P2-6 後から確定した JPYC の決済が、a1 のメーター (`lib/billingMeter.ts`) に記録されない**。`recordRelayedVolume` は `app/api/relay/jpyc/route.ts` の同期の応答が `success` のときだけ呼ばれ、`pending` の後にオンチェーンで確定した決済を足す経路が無い (月次の請求の基礎額が少なくなる)。今の本番の利用料は recover の per-tx (決済のたびに差し引く) で、メーターは使わない (a1 は「当面やらない」) ので影響はほぼ 0。a1 を点灯する前に、status の解決で確定したときにも txHash で冪等に記録する。
+
+### §12.8 relay の provider を Gelato に切り替える前に直すこと (外部レビュー P1-1・2026-11-18)
+
+本番の relay は self-host (`RELAYER_PRIVATE_KEY`・`.env.local.example` の注記)。self-host は送信の前に tx に署名して hash を確定し、送信後の曖昧な失敗を pending に倒す (`lib/relay/selfHostRelayer.ts`) ので、次の穴は無い。**`RELAYER_PRIVATE_KEY` を外して Gelato (`GELATO_SPONSOR_API_KEY`・rollback 用) に切り替える前に直す**:
+
+- **Gelato が決済を受け付けた後に応答が失われると、利用者が二重に払える**。`lib/relay/relayProvider.ts` の `gelatoSubmit` は、fetch の throw・2xx でない応答・`taskId` の欠けをすべて throw にし、`lib/relay/relayBroadcast.ts` の catch は送信前の失敗と区別せずに重複防止の記録を解放して `relay_error` (502) を返す。画面 (`hooks/useJpycEip3009Payment.ts`) は元の支払いの追跡を消すので、利用者は新しい署名か通常決済で払い直せる。Gelato が応答の前に受け付けて実行していれば、最初の送金と払い直しの両方が成立しうる (同じ署名の再送は nonce の使用済みで止まる)。直し方: `gelatoSubmit` の失敗を「送信前に確実に失敗」と「結果不明」に分け、結果不明は記録を解放せず pending (txHash なし) にして、元の署名の nonce の使用済みを確かめられるまで新しい支払いを止める。money-path の変更なので、掟 12・15 (運営者の明示レビュー)。
 
 ## §13 モバイル注文 / レジ システム利用料 go-live SOP
 
