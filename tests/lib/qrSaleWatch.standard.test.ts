@@ -25,6 +25,9 @@ vi.mock('@/lib/qrSaleRpc', () => ({
   readSettledLogs: rpc.logs,
   readBlockTime: rpc.time,
   readTransferLogs: rpc.transfers,
+  // ガスレスの会計の「切り替えた入金」の読み取り (別の種類)。この file は通常決済の QR の会計だけを見るので、既定は
+  // 「読めて、1 つも無い」。切り替えた入金は tests/lib/qrSaleWatch.switched.test.ts が確かめる。
+  readSwitchedTransferLogs: async () => [],
   readTransaction: rpc.tx,
 }));
 const hold = vi.hoisted(() => ({

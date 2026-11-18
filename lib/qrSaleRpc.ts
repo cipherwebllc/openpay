@@ -88,6 +88,21 @@ export async function readTransferLogs(
   });
 }
 
+/**
+ * ガスレスの会計の「切り替えた入金」(ガスレスの QR を、払う側で通常決済に切り替えて払った入金) を探す読み取り。読むものは
+ * readTransferLogs と同じ (token の、この受取先宛ての Transfer)。見張り (lib/qrSaleWatch.ts) の読む種類ごとに関数を分ける:
+ * 通常決済の QR の会計の読み取り (readTransferLogs) とは、位置・回数の枠・失敗の扱いが別 (テストも種類ごとに差し替える)。
+ */
+export function readSwitchedTransferLogs(
+  chainId: number,
+  token: Address,
+  merchants: readonly Address[],
+  fromBlock: bigint,
+  toBlock: bigint,
+): Promise<QrSaleLog[]> {
+  return readTransferLogs(chainId, token, merchants, fromBlock, toBlock);
+}
+
 /** 読んだ tx のうち、見張りが使う部分 (どの欄も RPC の応答のまま・確かめるのは見張りの側)。 */
 export type QrSaleTx = {
   from: string;

@@ -7,12 +7,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { getAddress, HttpRequestError, type Address, type Hex } from 'viem';
 
-const rpc = vi.hoisted(() => ({ head: vi.fn(), logs: vi.fn(), time: vi.fn() }));
+const rpc = vi.hoisted(() => ({ head: vi.fn(), logs: vi.fn(), time: vi.fn(), transfers: vi.fn() }));
 vi.mock('@/lib/qrSaleRpc', () => ({
   QR_SALE_RPC_TIMEOUT_MS: 6_000,
   readChainHead: rpc.head,
   readSettledLogs: rpc.logs,
   readBlockTime: rpc.time,
+  // ガスレスの会計は JPYC の Transfer も読む (払う側で通常決済に切り替えた入金 = readSwitchedTransferLogs)。この file の既定は
+  // 「読めて、1 つも無い」(正常な保存の経路)。切り替えた入金・失敗・遅れは tests/lib/qrSaleWatch.switched.test.ts が個別に入れる。
+  readTransferLogs: rpc.transfers,
+  readSwitchedTransferLogs: rpc.transfers,
 }));
 const hold = vi.hoisted(() => ({
   forwarders: {} as Record<number, string>,
@@ -201,6 +205,7 @@ beforeEach(() => {
       logsIn(merchants, from, to),
     );
   rpc.time.mockReset().mockImplementation(async (_chainId: number, block: bigint) => blockTime(block));
+  rpc.transfers.mockReset().mockImplementation(async () => []);
   warn.mockReset();
 });
 afterEach(() => {
