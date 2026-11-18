@@ -574,12 +574,19 @@ describe('1 tx 1 行・払った側の行', () => {
   });
 });
 
+// 正しい input (印つきの transfer) から末尾の 1 桁を落としたもの (byte にならない応答)。
+const ODD_INPUT = markedTransfer(BK, SHOP, 1_000n * ONE).slice(0, -1) as Hex;
+
 describe('読み取りの失敗・上限・順', () => {
   it.each([
     ['getTransaction の失敗', () => Promise.reject(new Error('rpc down'))],
     ['tx が無い (null)', () => Promise.resolve(null)],
     ['形の違う応答 (input が hex でない)', () => Promise.resolve({ from: CUSTOMER, to: JPYC, input: 'not hex' })],
     ['形の違う応答 (from が address でない)', () => Promise.resolve({ from: '0x12', to: JPYC, input: '0x' })],
+    [
+      '形の違う応答 (input が奇数桁 = 末尾の 1 桁が欠けた正しい input)',
+      () => Promise.resolve({ from: CUSTOMER, to: JPYC, input: ODD_INPUT }),
+    ],
   ])('%s → 読んだことにせず、次の回にその log から読み直す', async (_name, broken) => {
     show();
     pay(994n, 1);

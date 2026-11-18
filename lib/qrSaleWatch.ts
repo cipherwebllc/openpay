@@ -317,7 +317,10 @@ async function txOf(chainId: number, hash: string): Promise<StdTx> {
     isAddress(tx.from, { strict: false }) &&
     (tx.to === null || (typeof tx.to === 'string' && isAddress(tx.to, { strict: false }))) &&
     typeof tx.input === 'string' &&
-    isHex(tx.input);
+    isHex(tx.input) &&
+    // isHex は奇数桁も通す。末尾の 1 桁が欠けた応答を「印の無い tx」として読んだことにすると、その入金を落とすので、
+    // byte にならない input も読めないものとして扱う。
+    tx.input.length % 2 === 0;
   if (!readable) throw new Error('qr_sale_tx_unreadable');
   const read: StdTx = { from: tx.from, to: tx.to, input: tx.input };
   txs.set(key, read);
