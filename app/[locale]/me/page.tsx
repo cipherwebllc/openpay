@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
 import { TipInboxCard } from '@/components/TipInboxCard';
+import { StdBillMarkTrialSwitch } from '@/components/StdBillMarkTrialSwitch';
 import { env } from '@/lib/env';
 
 export async function generateMetadata({
@@ -118,6 +119,9 @@ export default async function MePage({
         <p className="mt-6 text-xs leading-relaxed text-slate-400">
           {t('note')}
         </p>
+
+        {/* その端末だけの試しのスイッチ (通常決済の会計の印・K4b)。?stdmark=on / off で切り替え、ON の間だけ 1 行を出す。 */}
+        <StdBillMarkTrialSwitch label={t('stdMarkTrial')} />
       </div>
     </AppShell>
   );

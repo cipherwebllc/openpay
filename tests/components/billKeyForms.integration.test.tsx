@@ -468,8 +468,10 @@ describe.skipIf(capturePath)('約束 3 の柵: bk つきの URL でも、bill ke
 });
 
 // お店は JPYC の通常決済の QR (mode=standard) にも bk を載せる (hooks/useQrBillKey.ts)。払う側が通常決済の transfer に印を
-// 付けるのは別の変更から: それまでは、bk のある URL でも、今の支払いは 1 byte も変わらない。
-describe.skipIf(capturePath)('通常決済 (mode=standard・JPYC) の URL の bk: 今の支払いは 1 byte も変わらない', () => {
+// 付けるのは、その端末だけの試しのスイッチ (lib/stdBillMarkTrial.ts・K4b) が ON の端末だけ (tests/components/
+// stdBillMarkForms.integration.test.tsx)。既定の OFF (この file の beforeEach は localStorage を空にする) では、bk のある URL でも、
+// 今の支払いは 1 byte も変わらない (mutate の引数の数も同じ = 第 2 引数の印が無い)。
+describe.skipIf(capturePath)('通常決済 (mode=standard・JPYC) の URL の bk: 試しのスイッチ OFF (既定) では、今の支払いは 1 byte も変わらない', () => {
   // 押した時の通常決済の mutate の引数 (送る相手・額・保存の key) と、押した後の storage の中身。
   async function payStandard(form: FormName, query: string) {
     standardMutate.mockClear();

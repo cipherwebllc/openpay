@@ -22,6 +22,7 @@ import {
   useWriteContract,
 } from 'wagmi';
 import { classifyTransferReceipt } from '@/lib/replacedTransferReceipt';
+import { isUserRejection } from '@/lib/walletErrors';
 import {
   addStandardWalletRequest,
   removeStandardWalletRequest,
@@ -173,7 +174,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // restoredFromStorageRef は retryFee が false に戻すので、復元した別の支払いの利用料を再送した後は「復元でない」になる。
   // こちらは新しい mutate でだけ false に戻し、retryFee では戻さない (画面が完了の帰属を決めるのに使う)。
   const restoredAttemptRef = useRef(false);
-  const queuedParamsRef = useRef<StandardPaymentParams | null>(null);
+  // 送信待ち (storage の読込の前に押された送信)。送金に足す印 (dataSuffix・K4b) も押した時点の値を対で持つ。
+  const queuedParamsRef = useRef<{ params: StandardPaymentParams; dataSuffix: Hex | undefined } | null>(null);
   const [storageReady, setStorageReady] = useState(false);
   const [hasStoredIntent, setHasStoredIntent] = useState(false);
   const restoredMerchantTxHashRef = useRef<Hex | undefined>(undefined);
@@ -216,6 +218,13 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     merchantHash: Hex;
     merchantBlockNumber: bigint;
   } | null>(null);
+  // K4b (通常決済の会計の印・その端末だけの試しのスイッチ・hooks/useStdBillMark.ts): 印 (dataSuffix) を付けて送った merchant の
+  // 試みの vars (付けなかった試みでは null)。印は vars の 1 つの object の中にだけ置く (Fable の MUST-2: 登録簿と unmount の後の
+  // 保存は object の同一性で見るので、後から spread した別の object を渡さない)。
+  const markedVarsRef = useRef<object | null>(null);
+  // K4b (Fable の MUST-1): 印つきの送信が確定して失敗した (ウォレットの拒否を除く) 後は、この画面の以後の送信に印を付けない。
+  // 断つ波及: 余った calldata を拒むウォレット・口座で、この画面から払えなくなること (次は今までどおりの transfer を送る)。
+  const markFailedRef = useRef(false);
   // H-D (Codex の MUST): 同じタブの中で、結果の出ていないウォレットへの要求を同時に 1 つだけにする登録簿
   // (lib/standardPaymentOutstanding) での、この hook (1 つの画面) の持ち主の印。
   // 登録は hook の options の onMutate (Mutation が mutationFn = ウォレットへの要求を呼ぶ前に、writeContract の中で同期に呼ぶ)。
@@ -609,10 +618,13 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     if (intent) restoreStoredIntent(storage, intent);
   }, [requestElsewhere, restoreStoredIntent]);
 
-  function mutate(params: StandardPaymentParams): void {
+  // dataSuffix (K4b): 受取先への transfer の calldata の後ろに足す会計の印 (試しのスイッチが ON の端末の /pay・/checkout だけが
+  // 渡す・hooks/useStdBillMark.ts)。渡さない呼び出し (ほかの全員・チップ等) の送金は今までと 1 byte も変わらない。
+  // 利用料の transfer (submitFee・retryFee) には付けない。保存する intent・ログ (params) にも入れない。
+  function mutate(params: StandardPaymentParams, dataSuffix?: Hex): void {
     if (!enabled) return;
     if (!storageReady) {
-      queuedParamsRef.current = params;
+      queuedParamsRef.current = { params, dataSuffix };
       return;
     }
     // R: hash ありの receipt 不明中は、同じ送金が成功済みの可能性がある。
@@ -653,15 +665,20 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     feeWrite.reset();
     // H-D: reset で捨てた fee の試みは、後から承認されても保存しない (呼び出しごとの onSuccess が呼ばれなくなるのと同じ意味)。
     feeAttemptRef.current = null;
+    // K4b: 印は、この画面で印つきの送信が確定して失敗していないときだけ付ける (MUST-1)。
+    const suffix = dataSuffix !== undefined && !markFailedRef.current ? dataSuffix : undefined;
     const vars = {
       chainId: params.chainId,
       address: params.tokenAddress,
       abi: erc20Abi,
       functionName: 'transfer',
       args: [params.merchant, params.merchantAmount],
+      // 印の無い送信は key ごと無い (今までと同じ object の形)。
+      ...(suffix ? { dataSuffix: suffix } : {}),
     } as const;
     // H-D: unmount の後に承認された merchant の hash を、hook の options の onSuccess が保存できるように置く。
     merchantAttemptRef.current = { vars, params };
+    markedVarsRef.current = suffix ? vars : null;
     merchantWrite.writeContract(
       vars,
       {
@@ -680,7 +697,7 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     const queued = queuedParamsRef.current;
     if (!queued) return;
     queuedParamsRef.current = null;
-    mutate(queued);
+    mutate(queued.params, queued.dataSuffix);
     // mutate は render ごとに変わるが、storage 読込完了時に queue を 1 度だけ排出する effect。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, hasStoredIntent, storageReady]);
@@ -847,6 +864,23 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     persistIntent,
     submitFee,
   ]);
+
+  // K4b (Fable の MUST-1): 印つきの merchant の試みが確定して失敗したら、この画面の以後の送信は印なしにする。確定した失敗 =
+  // hash の返らない送信の失敗 (ウォレットの拒否 isUserRejection を除く) と、revert の確定 (上の effect が merchant-error に
+  // する revert の 3 つの分岐と同じ条件)。取消・別内容の置換 (お客様がウォレットで取り消した) は数えない。
+  // 上の phase の遷移・後片付けには触れない (印の有無だけを決める ref)。
+  const merchantWriteError = merchantWrite.error;
+  const merchantRevertConfirmed =
+    !!merchantReplacedRevertedBy ||
+    (!!merchantTxHash && merchantRevertedHash === merchantTxHash) ||
+    (merchantReceipt.isSuccess && merchantReceipt.data?.status === 'reverted');
+  useEffect(() => {
+    const marked = markedVarsRef.current;
+    if (!marked || merchantAttemptRef.current?.vars !== marked) return;
+    if ((merchantWriteError && !isUserRejection(merchantWriteError)) || merchantRevertConfirmed) {
+      markFailedRef.current = true;
+    }
+  }, [merchantWriteError, merchantRevertConfirmed]);
 
   useEffect(() => {
     if (!enabled) return;

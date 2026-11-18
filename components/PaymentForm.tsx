@@ -48,6 +48,7 @@ const SignReassurance = dynamic(
 );
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
+import { useStdBillMark } from '@/hooks/useStdBillMark';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
@@ -351,6 +352,10 @@ function PaymentDetails({ params }: { params: PayParams }) {
   // sponsorship free) では gas コストが無いため、旧 gas=merchant QR でも負担者バナーを
   // 出さない。会計金額計算は effectiveGasAmount=0 で自然に「控除なし」になる。
   const merchantGasActive = isMerchantGas && !(isJpyc && !useRecover);
+  // 通常決済の会計の印 (K4b・その端末だけの試しのスイッチが ON のときだけ・hooks/useStdBillMark.ts)。対象は JPYC・金額のある
+  // QR・分配なし (お店の端末が照合する会計と同じ形: lib/qrSaleHistory.ts の readQrStdBill)。付けるのは onSubmit の通常決済の
+  // 分岐で、受取先へ送る transfer だけ (経路を通常決済へ切り替えた後も)。
+  const takeStdBillMark = useStdBillMark(isJpyc && isFixed && !hasSplit, params);
 
   // gas 見積 (gasless mode のみ):
   //   ERC20 Paymaster (USDC): paymaster が顧客 USDC から actualGas を別途徴収。
@@ -930,7 +935,7 @@ function PaymentDetails({ params }: { params: PayParams }) {
     if (isStandard) {
       // standard mode: EOA から merchant transfer + fee transfer の 2 件直列。
       // split つきの QR は standard で送信させない (splitBlock) ため breakdown を直接使う。
-      standard.mutate({
+      const standardParams = {
         tokenAddress: deployment.address,
         merchant: params.to,
         merchantAmount: breakdown.merchantReceives,
@@ -939,7 +944,11 @@ function PaymentDetails({ params }: { params: PayParams }) {
         chainId: deployment.chainId,
         // 店舗売上 gross は商品小計。顧客上乗せ手数料を merchantAmount に加算しない。
         saleAmount: amountWei,
-      });
+      };
+      // 会計の印 (K4b): 押した瞬間に同期で読む (await を挟まない)。無ければ今までどおり引数 1 つで呼ぶ (スイッチ OFF は main と同じ)。
+      const stdMark = takeStdBillMark();
+      if (stdMark) standard.mutate(standardParams, stdMark);
+      else standard.mutate(standardParams);
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → Gelato が gas 負担で submit。
       // fee=0・gas は OpenPay 肩代わりなので、全額 (amountWei) をそのまま merchant へ単発送金。

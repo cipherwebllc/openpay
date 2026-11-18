@@ -37,6 +37,7 @@ import {
 import type { SignReassuranceProps } from './SignReassurance';
 import { useBatchPayment } from '@/hooks/useBatchPayment';
 import { useStandardPayment } from '@/hooks/useStandardPayment';
+import { useStdBillMark } from '@/hooks/useStdBillMark';
 import { useSmartAccount } from '@/hooks/useSmartAccount';
 import { useGasQuote } from '@/hooks/useGasQuote';
 import { useGasQuoteCircle } from '@/hooks/useGasQuoteCircle';
@@ -144,6 +145,20 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // sessionStorage に broadcast 済み standard intent が残る場合、元 URL が gasless でも
   // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
   const standard = useStandardPayment();
+  // 通常決済の会計の印 (K4b・その端末だけの試しのスイッチが ON のときだけ・hooks/useStdBillMark.ts)。対象は JPYC のレジの会計
+  // (お店の端末が照合する会計と同じ形: lib/qrSaleHistory.ts の readQrStdBill)。注文に結び付く会計 (webhook・@handle・
+  // モバイル注文の利用料・受付番号・ship=ask の注文リンク・お店の端末で送る) には付けない。付けるのは onSubmit の通常決済の
+  // 分岐で、受取先へ送る transfer だけ (経路を通常決済へ切り替えた後も)。
+  const takeStdBillMark = useStdBillMark(
+    isJpyc &&
+      !params.webhook &&
+      !params.storeHandle &&
+      !params.feeKind &&
+      !params.orderId &&
+      params.ship !== 'ask' &&
+      !params.submit,
+    params,
+  );
 
   // F7: success_url / cancel_url のうち、現在の origin と host が異なる第三者ホスト。
   // これらは決済後 (または中止時) の遷移先になり得るため、支払い前に payer へ明示開示する
@@ -994,7 +1009,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
     // 完了画面のチャイムを iOS でも鳴らせるよう、この gesture 内で AudioContext を解錠。
     if (!orderAdmissionMode) primeChimeAudio();
     if (isStandard) {
-      standard.mutate({
+      const standardParams = {
         tokenAddress: deployment.address,
         merchant: params.to,
         merchantAmount: breakdown.merchantReceives,
@@ -1008,7 +1023,12 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         // 注文リンクの支払いの指紋を保存する intent にだけ残す (読み直した後の完了を同じ注文リンクに結び付ける・
         // 第 9 回レビュー G-1)。送金の中身には関わらない。
         ...(orderLinkKey ? { orderLinkKey } : {}),
-      });
+      };
+      // 会計の印 (K4b): 押した瞬間に同期で読む (印の対象の会計では、押してからここまでに await は無い)。無ければ今までどおり
+      // 引数 1 つで呼ぶ (スイッチ OFF は main と同じ)。印は contextKey・intent には入らない (送金の calldata だけ)。
+      const stdMark = takeStdBillMark();
+      if (stdMark) standard.mutate(standardParams, stdMark);
+      else standard.mutate(standardParams);
     } else if (useRelay) {
       // JPYC EIP-3009 relay: 顧客が transferWithAuthorization に署名 → 自前 relayer が gas 負担で
       // submit。fee=0・gas は OpenPay 肩代わり (free) or JPYC 回収 (recover・hook 内で分割)。
