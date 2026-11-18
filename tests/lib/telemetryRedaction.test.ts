@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   redactUrlForTelemetry,
@@ -151,6 +153,46 @@ describe('telemetry URL redaction', () => {
     });
     expect(event.spans?.[0].data).not.toHaveProperty('url.query');
     expect(JSON.stringify(event)).not.toContain(SECRET);
+  });
+
+  it('受けた request の本文 (request.data・span の http.request.body.*) を落とす (出品の有料の本文・納品 URL を Sentry へ送らない)', () => {
+    const body = JSON.stringify({ title: 'lamp', content: `paid-${SECRET}`, deliveryUrl: SECRET_URL });
+    const event = scrubSentryServerEvent({
+      request: { method: 'POST', url: 'https://open-pay.jp/api/store/products', data: body },
+      contexts: { trace: { trace_id: 't', span_id: 's', data: { 'http.request.body.data': body, 'http.method': 'POST' } } },
+      spans: [{ span_id: 'a', trace_id: 't', start_timestamp: 0, data: { 'HTTP.Request.Body.Size': 10, 'http.method': 'POST' } }],
+    } as Parameters<typeof scrubSentryServerEvent>[0]);
+    expect(event?.request).not.toHaveProperty('data');
+    expect(event?.request?.method).toBe('POST');
+    expect(event?.contexts?.trace?.data).toEqual({ 'http.method': 'POST' });
+    expect(event?.spans?.[0].data).toEqual({ 'http.method': 'POST' });
+    expect(JSON.stringify(event)).not.toContain(SECRET);
+  });
+
+  it('支払いの署名 (PAYMENT-SIGNATURE・X-PAYMENT)・authorization・cookie を request.headers と span の http.request.header.* から落とす', () => {
+    const event = scrubSentryServerEvent({
+      request: {
+        method: 'POST',
+        headers: { 'PAYMENT-SIGNATURE': SECRET, 'X-PAYMENT': SECRET, Authorization: SECRET, cookie: SECRET, 'content-type': 'application/json' },
+      },
+      contexts: {
+        trace: {
+          trace_id: 't',
+          span_id: 's',
+          data: { 'http.request.header.payment_signature': SECRET, 'http.request.header.x_payment': SECRET, 'http.request.header.content_type': 'application/json' },
+        },
+      },
+      spans: [{ span_id: 'a', trace_id: 't', start_timestamp: 0, data: { 'http.request.header.authorization': SECRET, 'http.method': 'POST' } }],
+    } as Parameters<typeof scrubSentryServerEvent>[0]);
+    expect(event?.request?.headers).toEqual({ 'content-type': 'application/json' });
+    expect(event?.contexts?.trace?.data).toEqual({ 'http.request.header.content_type': 'application/json' });
+    expect(event?.spans?.[0].data).toEqual({ 'http.method': 'POST' });
+    expect(JSON.stringify(event)).not.toContain(SECRET);
+  });
+
+  it('instrumentation.ts の node の Sentry は、受けた request の本文を採らない (httpIntegration の maxIncomingRequestBodySize: none)', () => {
+    const source = readFileSync(join(process.cwd(), 'instrumentation.ts'), 'utf8');
+    expect(source).toContain("Sentry.httpIntegration({ disableIncomingRequestSpans: true, maxIncomingRequestBodySize: 'none' })");
   });
 
   it('onRequestError event の nextjs.request_path と Referer から query を落とす', () => {

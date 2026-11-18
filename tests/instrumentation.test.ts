@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const sentry = vi.hoisted(() => ({
   init: vi.fn(),
   captureRequestError: vi.fn(),
+  httpIntegration: vi.fn((options: unknown) => ({ name: 'Http', options })),
 }));
 
 vi.mock('@sentry/nextjs', () => sentry);
@@ -43,6 +44,18 @@ describe('server instrumentation telemetry hooks', () => {
       expect(options.beforeSendTransaction).toBeTypeOf('function');
     },
   );
+
+  it('nodejs runtime は受けた request の本文を採らない (httpIntegration の maxIncomingRequestBodySize: none)', async () => {
+    vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://public@example.ingest.sentry.io/1');
+    vi.stubEnv('NEXT_RUNTIME', 'nodejs');
+    const { register } = await import('@/instrumentation');
+    await register();
+    const options = sentry.init.mock.calls[0][0] as { integrations: unknown[] };
+    // @sentry/nextjs の既定の Http の設定 (disableIncomingRequestSpans: true) を保ったまま、本文を採らない。
+    const expected = { disableIncomingRequestSpans: true, maxIncomingRequestBodySize: 'none' };
+    expect(sentry.httpIntegration).toHaveBeenCalledWith(expected);
+    expect(options.integrations).toEqual([{ name: 'Http', options: expected }]);
+  });
 
   // 手元の dev / next start (VERCEL なし) の event は local-<network> にして mainnet の通知に混ぜない。
   it.each([
