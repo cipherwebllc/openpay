@@ -10,10 +10,12 @@ import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { OPENPAY_DISCORD_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
 import {
+  SPONSOR_ANNUAL_PLAN,
   SPONSOR_BANNER_SPEC,
   SPONSOR_BLURB_MAX_CHARS,
   SPONSOR_LOGO_MIN_WIDTH,
   SPONSOR_PLANS,
+  SPONSOR_RENEWAL_INVOICE_DAYS_BEFORE,
   formatSponsorYen,
   sponsorBannerRatio,
 } from '@/lib/sponsorPlans';
@@ -34,6 +36,15 @@ describe('料金と入稿の決まり (lib/sponsorPlans.ts) の値', () => {
     expect(sponsorBannerRatio()).toEqual({ w: 4, h: 1 });
     expect(SPONSOR_LOGO_MIN_WIDTH).toBe(400);
     expect(SPONSOR_BLURB_MAX_CHARS).toEqual({ ja: 80, en: 160 });
+  });
+
+  it('年間プラン (法人スポンサーだけ) は 30 日の料金の 11 回分で 365 日 = 363,000 円・12 回払いより 1 回分安い', () => {
+    expect(SPONSOR_ANNUAL_PLAN).toEqual({ termsCharged: 11, termDays: 365, priceYen: 363_000 });
+    expect(SPONSOR_PLANS.sponsor.priceYen * 12 - SPONSOR_ANNUAL_PLAN.priceYen).toBe(SPONSOR_PLANS.sponsor.priceYen);
+  });
+
+  it('自動の更新の請求書は、30 日のプランは 7 日前・年間プランは 30 日前までに送る', () => {
+    expect(SPONSOR_RENEWAL_INVOICE_DAYS_BEFORE).toEqual({ term: 7, annual: 30 });
   });
 
   it('金額は 3 桁で区切る', () => {
@@ -69,7 +80,14 @@ const APPROVED_JA = {
     '表示の金額のほかに、消費税等をいただくことはありません。請求書を発行します（適格請求書ではありません）。お支払いは、日本円の銀行振込か JPYC で承ります。',
   specs:
     'バナー: 1200×300 px（横 4：縦 1）・PNG / JPG / WebP・300 KB 以内・代替テキスト（画像の説明の文）。ロゴ: SVG か PNG（背景が透明のもの）・横 400 px 以上。リンク先の URL（https）。紹介文: 日本語 80 字以内・英語 160 字以内',
-  flow: '① Discord か X でお問い合わせ → ② 掲載の可否・空き枠・開始日のご連絡 → ③ 素材のご入稿 → ④ 請求書の発行とお支払い → ⑤ 掲載開始（30 日）',
+  // 2026-11-18 user「おすすめどおり」: ⑤ に年間プランを足し、⑥ 自動の更新を足した。
+  flow: '① Discord か X でお問い合わせ → ② 掲載の可否・空き枠・開始日のご連絡 → ③ 素材のご入稿 → ④ 請求書の発行とお支払い → ⑤ 掲載開始（30 日・年間プランは 1 年） → ⑥ 期間ごとに自動で更新',
+  // 2026-11-18 user「おすすめどおり」(年間プランと自動の更新)。
+  annual:
+    '年間プラン（法人スポンサー）: 363,000 円／365 日。30 日の料金の 11 回分で、1 年間掲載します。お支払いは期間の初めに一括です。広告主様のご都合で途中で止める場合、返金はありません。',
+  renewal:
+    '掲載は期間ごとに自動で更新します。期間の終わる 7 日前までに、次の期間の請求書をお送りします。更新しない場合は、期間の終わる日までに Discord か X でお知らせください（お送りした請求書は取り消します）。次の期間の始まる日までにお支払いを確かめられない場合は、掲載を止めます。',
+  renewalAnnual: '年間プランも同じく自動で更新し、請求書は期間の終わる 30 日前までにお送りします。',
   terms:
     '掲載料金は、所定の掲載場所・期間に対する料金です。バナー・ロゴ等の素材は広告主様にご用意いただきます。定期レポートの提供は含まれません。表示回数・クリック数・お問い合わせ・購入等の成果は保証いたしません。',
   bannerTerms:
@@ -107,12 +125,21 @@ describe('ja の文は承認済みの文のまま (中身を足さない・変�
     expect(c.plans.map((p) => p.id)).toEqual(['sponsor', 'banner']);
   });
 
+  it('年間プランのカード: 名前・「: 」・大きい数字 + 期間・本文をつなぐと、承認の文に戻る', () => {
+    expect(`${c.annual.name}: ${c.annual.focal}${c.annual.focalSub}。${c.annual.body}`).toBe(APPROVED_JA.annual);
+  });
+
+  it('更新: 30 日のプランと年間プランの文は、承認の文のまま', () => {
+    expect(c.renewal).toBe(APPROVED_JA.renewal);
+    expect(c.renewalAnnual).toBe(APPROVED_JA.renewalAnnual);
+  });
+
   it('入稿仕様: 名前と決まりを「: 」でつなぎ、行を「。」でつなぐと、承認の文に戻る', () => {
     expect(c.specs.map((s) => (s.body ? `${s.label}: ${s.body}` : s.label)).join('。')).toBe(APPROVED_JA.specs);
   });
 
   it('流れ: 番号を付けて「 → 」でつなぐと、承認の文に戻る', () => {
-    const marks = ['①', '②', '③', '④', '⑤'];
+    const marks = ['①', '②', '③', '④', '⑤', '⑥'];
     expect(c.flow).toHaveLength(marks.length);
     expect(c.flow.map((step, i) => `${marks[i]} ${step}`).join(' → ')).toBe(APPROVED_JA.flow);
   });
@@ -154,6 +181,16 @@ describe('ja / en の形と数字', () => {
       expect(SPONSORS.en.plans.find((p) => p.id === id)?.focalSub).toContain(`/ ${SPONSOR_PLANS[id].termDays} days`);
       expect(SPONSORS.en.plans.find((p) => p.id === id)?.focalSub).toContain(`up to ${SPONSOR_PLANS[id].maxCompanies} companies`);
     }
+  });
+
+  it('年間プランの数字と更新の日数は定数から (en も同じ数)', () => {
+    const yen = formatSponsorYen(SPONSOR_ANNUAL_PLAN.priceYen);
+    expect(SPONSORS.ja.annual.focal).toBe(`${yen} 円`);
+    expect(SPONSORS.en.annual.focal).toBe(`¥${yen}`);
+    expect(SPONSORS.en.annual.focalSub).toBe(`/ ${SPONSOR_ANNUAL_PLAN.termDays} days`);
+    expect(SPONSORS.en.annual.body).toContain(`${SPONSOR_ANNUAL_PLAN.termsCharged} terms of ${SPONSOR_PLANS.sponsor.termDays} days`);
+    expect(SPONSORS.en.renewal).toContain(`at least ${SPONSOR_RENEWAL_INVOICE_DAYS_BEFORE.term} days before`);
+    expect(SPONSORS.en.renewalAnnual).toContain(`at least ${SPONSOR_RENEWAL_INVOICE_DAYS_BEFORE.annual} days before`);
   });
 
   it.each(['ja', 'en'] as const)('%s: メタの説明に 2 つの料金 (定数の値) が入る', (locale) => {

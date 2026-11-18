@@ -460,4 +460,33 @@ describe('QrPreviewModal 入金の確認 (billConfirmed・bill key の会計の�
     expect(screen.queryByText(ja.QrGenerator.paymentWatching)).toBeNull();
     expect(status.querySelector('.bg-slate-100')).toBeNull();
   });
+
+  it('履歴に書けなかったかもしれない (billNotSaved): 同じ読み上げの領域に amber の枠で出す (赤・aria-label を使わない)・残高のヒントを隠す・印刷には出さない', () => {
+    const notSaved = ja.QrGenerator.billPaymentNotSaved;
+    const { props, rerender } = renderModal({ paymentStatus: received });
+    const status = screen.getByRole('status');
+    rerender(<QrPreviewModal {...props} paymentStatus={received} billNotSaved={notSaved} />);
+    expect(screen.getByRole('status')).toBe(status);
+    expect(status.textContent).toBe(notSaved);
+    expect(status).not.toHaveAttribute('aria-label');
+    expect(status).toHaveClass('print:hidden');
+    const note = screen.getByText(notSaved);
+    expect(note.tagName).toBe('P');
+    expect(note).toHaveClass('border-amber-200', 'bg-amber-50', 'text-amber-900');
+    expect(note.className).not.toMatch(/\b(?:bg|text|border)-red-/);
+    expect(screen.queryByText(received.text)).toBeNull();
+    // 緑の確認の文は無い (1 件目が書けなかったかもしれないときは、呼ぶ側が渡さない)。
+    expect(status.querySelector('.bg-emerald-50')).toBeNull();
+  });
+
+  it('確認の文 (2 件目以降の「二重のお支払いかもしれません」) と、書けなかったかもしれない注意の両方があれば、緑と amber を並べて両方出す', () => {
+    const another = ja.QrGenerator.billPaymentAnother.replace('{amount}', '1000 JPYC');
+    const notSaved = ja.QrGenerator.billPaymentNotSaved;
+    renderModal({ billConfirmed: another, billNotSaved: notSaved });
+    const status = screen.getByRole('status');
+    expect(status.textContent).toBe(`${another}${notSaved}`);
+    expect(screen.getByText(another)).toHaveClass('bg-emerald-50', 'text-emerald-900', 'font-semibold');
+    expect(screen.getByText(notSaved)).toHaveClass('bg-amber-50', 'text-amber-900');
+    expect(status).not.toHaveAttribute('aria-label');
+  });
 });

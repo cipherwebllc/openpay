@@ -108,6 +108,7 @@ export function QrPreviewModal({
   eip681,
   paymentStatus,
   billConfirmed,
+  billNotSaved,
   deviceStatus,
   actionsNote,
   hideUrl = false,
@@ -143,6 +144,11 @@ export function QrPreviewModal({
    * 印刷には出さない)。出している間は、着金検知ヒント (paymentStatus) の代わりに出す。省略時は何も描画しない。
    */
   billConfirmed?: string;
+  /**
+   * 表示中の会計の入金を確かめたが、この端末の取引履歴に書けなかったかもしれないときの注意の文 (任意・印刷には出さない)。
+   * billConfirmed と同じく、出している間は着金検知ヒントの代わりに出す。両方あれば両方出す。
+   */
+  billNotSaved?: string;
   /** レジの「お店の端末で送る」の状態 (任意・印刷には出さない)。省略時は何も描画しない。 */
   deviceStatus?: ReactNode;
   /** 操作ボタンの下の注記 (例: 画面に表示している間だけ使える QR で、印刷・保存・コピーはできない)。 */
@@ -318,18 +324,33 @@ export function QrPreviewModal({
                 入金の確認 (billConfirmed) は、この会計の bill key と nonce が一致した入金を履歴に書いた結果なので緑で出し
                 (お店の端末で送るの StoreDeviceRegisterStatus の「入金を確認しました」と同じ意匠)、出している間は残高のヒントを
                 隠す。同じ role="status" の要素の中身を入れ替える (決済QR では待っている間から置いてある読み上げの領域で、確認を
-                読み上げる)。確認が無い間の DOM は今までと同じ。 */}
-            {(billConfirmed || paymentStatus) && (
+                読み上げる)。確認が無い間の DOM は今までと同じ。
+                履歴に書けなかったかもしれない注意 (billNotSaved) は、同じ領域に amber の枠で出す (赤はエラーと破壊的な操作だけ。
+                入金は確かめてあり、確かめ方を案内する注意)。確認の文もあれば、緑の枠と amber の枠を並べる。 */}
+            {(billConfirmed || billNotSaved || paymentStatus) && (
               <div
                 role="status"
                 aria-live="polite"
                 className={
-                  billConfirmed
-                    ? 'mt-4 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 print:hidden'
-                    : 'mt-4 flex flex-col items-center gap-1 print:hidden'
+                  billNotSaved
+                    ? 'mt-4 flex w-full flex-col gap-2 text-sm print:hidden'
+                    : billConfirmed
+                      ? 'mt-4 w-full rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900 print:hidden'
+                      : 'mt-4 flex flex-col items-center gap-1 print:hidden'
                 }
               >
-                {billConfirmed ? (
+                {billNotSaved ? (
+                  <>
+                    {billConfirmed && (
+                      <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 font-semibold text-emerald-900">
+                        {billConfirmed}
+                      </p>
+                    )}
+                    <p className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 font-medium text-amber-900">
+                      {billNotSaved}
+                    </p>
+                  </>
+                ) : billConfirmed ? (
                   <p className="font-semibold">{billConfirmed}</p>
                 ) : (
                   paymentStatus && (

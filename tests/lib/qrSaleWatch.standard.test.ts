@@ -58,7 +58,7 @@ vi.mock('@/lib/history', async (importOriginal) => {
 });
 
 import { env } from '@/lib/env';
-import { appendHistory, buildHistoryEntry, loadHistory } from '@/lib/history';
+import { appendHistory, buildHistoryEntry, HISTORY_STORAGE_KEY, loadHistory } from '@/lib/history';
 import type { QrSaleLog, QrSaleTx } from '@/lib/qrSaleRpc';
 import { billKeyStdMark } from '@/lib/relay/billKeySalt';
 import { QR_SALE_MARKS_KEY } from '@/lib/qrSaleMarks';
@@ -815,6 +815,26 @@ describe('画面への知らせ (通常決済の行も、ガスレスの行と�
       { billKey: BK, count: 2, amount: (1_000n * ONE).toString() },
     ]);
     expect(loadHistory().every((e) => e.saleAmount === events[0].amount)).toBe(true);
+  });
+
+  it('行を履歴に書けなかった (黙った失敗) → notSaved つきで知らせる (count・額は同じ数え方)。印は残り、書き直さない', async () => {
+    const events: QrBillRecorded[] = [];
+    show(BK, {}, NOW, (e) => events.push(e));
+    pay(995n, 1);
+    const real = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === HISTORY_STORAGE_KEY) throw new Error('QuotaExceededError');
+      real.call(this, key, value);
+    });
+    await tick();
+    setItem.mockRestore();
+    expect(rows()).toEqual([]);
+    expect(marks()).toEqual([tx(1)]);
+    expect(events).toEqual([{ billKey: BK, count: 1, amount: (1_000n * ONE).toString(), notSaved: true }]);
+    await tick(2);
+    expect(rows()).toEqual([]);
+    expect(hold.appends).toBe(1);
+    expect(events).toHaveLength(1);
   });
 
   it('受け手が throw しても、行は書かれ、記録を続ける (警告は 1 回)', async () => {
