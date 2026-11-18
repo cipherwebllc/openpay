@@ -44,8 +44,8 @@ import goldenFromMain from '../fixtures/stdBillMarkGoldenHook.json';
 //   - 渡した送金は transfer(受取先, 額) + 印 の 100 byte で、お店の端末の照合 (lib/qrSaleHistory.ts) の calldata と同じ。
 //   - 利用料の transfer・保存する intent には印が無い。
 //   - MUST-2: 印は writeContract に渡す 1 つの object の中 (登録簿と unmount の後の保存は object の同一性で見る)・送信待ちも対。
-//   - MUST-1: 印つきの送信が hash を返した (チェーンに出た) か、ウォレットの拒否以外で失敗したら、その画面の以後の送信は印なし
-//     (印つきがその画面で実際に出るのは 1 回まで)。receipt・revert・置換は追わない。
+//   - MUST-1: 印つきの送信は、その画面で 1 回まで。印つきで送る直前に同期で予約し、その後の送信は印なし (印つき A の応答待ちの
+//     間の B も)。予約を解くのはウォレットの拒否のときだけ。receipt・revert・置換は追わない。
 // 兄弟の useStandardPayment.unmount.test.tsx と同じ形の harness (この file の分だけを写した)。
 type ReceiptState = {
   data:
@@ -654,19 +654,22 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
   });
 
-  // Codex のレビュー (MUST 2 回): 同じ画面で印つき A の応答待ちの間に B を始めると、reset で wagmi の見ている先が A から外れ、
-  // A の結果 (失敗・hash) は画面の state にも receipt の見張りにも入らない。送信自身の variables で、hook の options の
-  // onSuccess / onError が数える。
+  // Codex のレビュー (MUST 3 回): 同じ画面で印つき A の応答待ちの間に B を始めると、reset で wagmi の見ている先が A から外れ、
+  // A の結果 (失敗・hash) は画面の state にも receipt の見張りにも入らない。また A の hash が返る前は、B に印を渡すと印つきが 2 本
+  // 出うる。印つきで送る直前に同期で予約するので、A の応答待ちの間の B は印を渡しても印なし。予約を解くのは、送信自身の variables
+  // を見る hook の options の onError が、A のウォレットの拒否を見たときだけ。
   it.each([
     ['A の失敗 (拒否でない)', () => walletSends[0].fail()],
     ['A の hash (チェーンに出た)', () => walletSends[0].approve(MERCHANT_TX)],
-  ])('印つき A の応答待ちの間に印なし B を始め、%s が B の開始の後に届き、B は拒否 → 次の C は 68 byte', async (_name, resolveA) => {
+  ])('印つき A の応答待ちの間に B を印つきで始めると B は印なし。%s が B の開始の後に届き、B は拒否 → 次の C も 68 byte', async (_name, resolveA) => {
     const tab = await makeTab();
     const view = await tab.mountScreen();
     act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
     await waitForWalletSends(1);
-    act(() => view.result.current.mutate(PARAMS_NO_FEE));
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
     await waitForWalletSends(2);
+    // A の応答の前に、B はもう印なし (同じ画面で印つきが 2 本出ない)。
+    expect(walletSends[1].tx.data).toBe(MERCHANT_CALLDATA);
     await act(async () => {
       resolveA();
     });
@@ -678,18 +681,18 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
     await waitForWalletSends(3);
     expect(walletSends[0].tx.data).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
-    expect(walletSends[1].tx.data).toBe(MERCHANT_CALLDATA);
     expect(walletSends[2].tx.data).toBe(MERCHANT_CALLDATA);
     view.unmount();
   });
 
-  it('印つき A の応答待ちの間に B を始め、A がウォレットの拒否で後から解決しても数えない (次の C は印つき)', async () => {
+  it('印つき A の応答待ちの間の B は印なし。A がウォレットの拒否で後から解決したら予約を解き、B の後の C は印つきに戻る', async () => {
     const tab = await makeTab();
     const view = await tab.mountScreen();
     act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
     await waitForWalletSends(1);
-    act(() => view.result.current.mutate(PARAMS_NO_FEE));
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
     await waitForWalletSends(2);
+    expect(walletSends[1].tx.data).toBe(MERCHANT_CALLDATA);
     await act(async () => {
       walletSends[0].reject();
     });
@@ -700,6 +703,29 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
     await waitForWalletSends(3);
     expect(walletSends[2].tx.data).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+    view.unmount();
+  });
+
+  it('印つき A の拒否の後の送信は、印なしの B がまだ応答待ちでも印つき (出ている印つきは無い)・その次は印なし', async () => {
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(1);
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(2);
+    await act(async () => {
+      walletSends[0].reject();
+    });
+    await waitFor(() => expect(tab.mutationStatuses()[0]).toBe('error'));
+    // B (印なし) はまだウォレットに出たまま。A の拒否で予約が解けたので、次の送信は印つき。
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(3);
+    expect(walletSends[1].tx.data).toBe(MERCHANT_CALLDATA);
+    expect(walletSends[2].tx.data).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
+    // その応答待ちの間の送信は、また印なし。
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(4);
+    expect(walletSends[3].tx.data).toBe(MERCHANT_CALLDATA);
     view.unmount();
   });
 

@@ -221,15 +221,16 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // K4b (通常決済の会計の印・その端末だけの試しのスイッチ・hooks/useStdBillMark.ts): 印 (dataSuffix) は writeContract に渡す vars の
   // 1 つの object の中にだけ置く (Fable の MUST-2: 登録簿と unmount の後の保存は object の同一性で見るので、後から spread した別の
   // object を渡さない)。
-  // K4b (Fable の MUST-1): 印つきの送信が、hash を返した (ウォレットがチェーンに出した) か、ウォレットの拒否以外で失敗したら、
-  // この画面の以後の送信に印を付けない = 印つきの送信がこの画面で実際に出るのは 1 回まで。ウォレットの拒否 (isUserRejection・tx が
-  // 出ない) だけは数えない (次も印つき)。数えるのは下の merchant の hook の options の onSuccess / onError で、送信自身の variables の
-  // 印の有無を見る (Mutation 自身が呼ぶので、同じ画面で次の送信を始めて wagmi の見ている先が外れた後・画面を離れた後に届いた結果も
-  // 数える)。
+  // K4b (Fable の MUST-1): 印つきの送信は、この画面で 1 回まで。印つきで merchant の writeContract を呼ぶ直前に、同期で印を予約する
+  // (mutate の中)。予約の後のこの画面の送信は印なし (印つき A の応答待ちの間に始めた B も印なし = 同じ画面で印つきが 2 本出ない)。
+  // 予約を解くのは、印つきの送信がウォレットの拒否 (isUserRejection・tx が出ない) で終わったときだけ (次はまた印つき)。hash が
+  // 返った (ウォレットがチェーンに出した)・拒否以外で失敗したときは予約のまま。解く判定は下の merchant の hook の options の onError
+  // で、送信自身の variables の印の有無を見る (Mutation 自身が呼ぶので、同じ画面で次の送信を始めて wagmi の見ている先が外れた後・
+  // 画面を離れた後に届いた結果も見る)。
   // 断つ波及: 余った calldata を拒むウォレット・口座で、この画面から払えなくなること (次は今までどおりの transfer を送る)。
   // receipt・revert・置換は追わない: 印つきの送信が出た後に同じ画面で送り直すのは、失敗の後か二重払いのときだけで、どちらも
   // 印なしで困らない。追う状態を持たないので、応答の順・置換の種類・後片付けの順に左右されない。
-  const markSpentRef = useRef(false);
+  const markReservedRef = useRef(false);
   // H-D (Codex の MUST): 同じタブの中で、結果の出ていないウォレットへの要求を同時に 1 つだけにする登録簿
   // (lib/standardPaymentOutstanding) での、この hook (1 つの画面) の持ち主の印。
   // 登録は hook の options の onMutate (Mutation が mutationFn = ウォレットへの要求を呼ぶ前に、writeContract の中で同期に呼ぶ)。
@@ -248,8 +249,6 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
         addStandardWalletRequest(variables, requestOwner, 'merchant');
       },
       onSuccess: (hash, variables) => {
-        // K4b (MUST-1): 印つきの送信がチェーンに出た。この画面の以後の送信は印なし。
-        if (variables.dataSuffix) markSpentRef.current = true;
         const attempt = merchantAttemptRef.current;
         if (!mountedRef.current && attempt && attempt.vars === variables) {
           persistIntent('merchant', attempt.params, hash);
@@ -263,8 +262,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
         removeStandardWalletRequest(variables);
       },
       onError: (error, variables) => {
-        // K4b (MUST-1): 印つきの送信が hash を返さずに失敗した (ウォレットの拒否を除く)。この画面の以後の送信は印なし。
-        if (variables.dataSuffix && !isUserRejection(error)) markSpentRef.current = true;
+        // K4b (MUST-1): 印つきの送信がウォレットの拒否で終わった (tx が出ない) ときだけ、印の予約を解く (次はまた印つき)。
+        if (variables.dataSuffix && isUserRejection(error)) markReservedRef.current = false;
         removeStandardWalletRequest(variables);
       },
     },
@@ -674,8 +673,9 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     feeWrite.reset();
     // H-D: reset で捨てた fee の試みは、後から承認されても保存しない (呼び出しごとの onSuccess が呼ばれなくなるのと同じ意味)。
     feeAttemptRef.current = null;
-    // K4b: 印は、この画面で印つきの送信がまだ出ていない (hash も拒否以外の失敗も返っていない) ときだけ付ける (MUST-1)。
-    const suffix = dataSuffix !== undefined && !markSpentRef.current ? dataSuffix : undefined;
+    // K4b: 印は、この画面で印つきの送信を予約していないときだけ付け、付けるときは writeContract の前に同期で予約する (MUST-1)。
+    const suffix = dataSuffix !== undefined && !markReservedRef.current ? dataSuffix : undefined;
+    if (suffix) markReservedRef.current = true;
     const vars = {
       chainId: params.chainId,
       address: params.tokenAddress,
