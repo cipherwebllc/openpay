@@ -38,6 +38,12 @@
 // mempool で先取りして自分の tx に包むと、その人の入金を自分の会計に見せられる (同じ受取先・同じ額・会計の窓の中・頻度は
 // 低いと見る・受け入れた限界)。1 回の入金で 2 つの会計を確かめたことにする順は stdCallsExceedTransfers で断つ。
 // 行の欄は、払った側が通常決済で書く行 (hooks/usePaymentHistory の standard の成功・flow standard-merchant) に合わせる。
+//
+// ガスレスの QR を、払う側で通常決済に切り替えて払った入金 (readQrSwitchedStdBill): ガスレスで払えないウォレット (ERC-4337 の
+// マイナウォレットなど) は、ガスレスの QR を読んだ後、払う側の画面で通常決済に切り替えて払う。払う側は、その送金にも同じ
+// bill key の印を付ける。そこでガスレスの会計 (readQrBill) には、同じ URL・同じ bill key から、通常決済で払われたときの
+// 期待値 (上の 2 の額・3 の印) も持たせる。Settled の期待値 (回収の後の着金額・利用料) とは別の値: 請求 1,000 JPYC・回収 2 JPYC
+// なら、Settled は着金 998 + 利用料 2、切り替えた後の Transfer は 1,000。確かめ方は通常決済の QR の会計と同じ (1〜3 の全部)。
 
 import {
   concatHex,
@@ -261,12 +267,26 @@ export type QrStdBill = {
  * ウォレットが送る)。
  */
 export function readQrStdBill(input: QrBillInput): QrStdBill | null {
+  return stdBillOf(input, true);
+}
+
+/**
+ * ガスレスの QR を、払う側で通常決済に切り替えて払ったときの期待値 (頭の注記)。readQrStdBill から URL の mode の条件だけを
+ * 外したもの: 同じ URL・同じ bill key から、通常決済の額 (calcBreakdown の standard の着金額) と印を作る。使うのは
+ * lib/qrSaleWatch.ts が、ガスレスの会計 (readQrBill が読めた QR) に持たせるときだけ。
+ */
+export function readQrSwitchedStdBill(input: QrBillInput): QrStdBill | null {
+  return stdBillOf(input, false);
+}
+
+// standardQrOnly = URL の mode=standard の QR だけを読む (通常決済の QR の会計)。false = mode を問わない。
+function stdBillOf(input: QrBillInput, standardQrOnly: boolean): QrStdBill | null {
   const mark = billKeyStdMark(input.billKey);
   if (!mark) return null;
   const sale = readSale(input);
   if (!sale) return null;
   const { to, token, chain, mode } = sale.params;
-  if (token !== 'jpyc' || mode !== 'standard') return null;
+  if (token !== 'jpyc' || (standardQrOnly && mode !== 'standard')) return null;
   const chainSlug = chain ?? DEFAULT_CHAIN_FOR_SYMBOL.jpyc;
   const chainId = chainForSlug(chainSlug).id;
   const deployment = deploymentForSlug('jpyc', chainSlug);

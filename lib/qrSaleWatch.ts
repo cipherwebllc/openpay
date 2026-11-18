@@ -3,8 +3,9 @@
 // お店の画面 (/create の決済QR・レジ) が QR を出している間と、閉じた後 60 秒、forwarder の `Settled` を RPC で読み、
 // 会計ごとの印 (bill key) から計算し直した nonce とちょうど一致した入金だけを、この端末の取引履歴 (localStorage) に
 // 1 行書く。通常決済の QR (mode=standard) の会計は、JPYC の `Transfer` とその tx の input の印で確かめる (下の
-// 「通常決済の会計」)。server へは何も送らない。hooks/useQrBillKey.ts が dynamic import して使う (/create の初期の chunk に
-// 入れない)。
+// 「通常決済の会計」)。ガスレスの QR を払う側で通常決済に切り替えて払った入金も、同じく `Transfer` と印で確かめる (下の
+// 「ガスレスの会計の、通常決済で払われた入金」)。server へは何も送らない。hooks/useQrBillKey.ts が dynamic import して使う
+// (/create の初期の chunk に入れない)。
 //
 // 見張りは、この module に 1 つ (画面の部品ではなく module が持つ): QR を閉じた後の 60 秒も、決済QR / レジのタブの
 // 切り替えで部品が外れても続き、StrictMode の二重の effect でも 2 つにならない。/create を離れたら止める
@@ -37,10 +38,12 @@
 //     残りの log は次の回に回す (読んだことにしない)。1 回に最低 1 つの log は照合する (進まなくならない)。
 //
 // 通常決済の会計 (QR の URL の mode=standard・JPYC・lib/qrSaleHistory.ts の readQrStdBill):
-//   - そのチェーンに通常決済の会計があれば、JPYC の deployment の `Transfer` (この受取先宛て = getLogs の topic の to で
-//     絞る) も読む。読む位置は、チェーンと種類 (Settled・Transfer) ごとに持つ (始まり・重ね・先頭 − 90・10 block ずつ・
-//     途中で失敗したら読めた所まで、は上と同じ)。片方の種類だけ読めた回は、読めた種類の位置だけを進める (読めなかった
-//     種類は、次の回に同じ所から読み直す = 範囲を飛ばさない)。新しい会計が加わったら、その会計の種類の位置を消す。
+//   - そのチェーンに通常決済の会計か、ガスレスの会計 (下の「ガスレスの会計の、通常決済で払われた入金」) があれば、JPYC の
+//     deployment の `Transfer` (この受取先宛て = getLogs の topic の to で絞る) も読む。読む位置は、チェーンと種類
+//     (Settled・Transfer) ごとに持つ (始まり・重ね・先頭 − 90・10 block ずつ・途中で失敗したら読めた所まで、は上と同じ)。
+//     片方の種類だけ読めた回は、読めた種類の位置だけを進める (読めなかった種類は、次の回に同じ所から読み直す = 範囲を
+//     飛ばさない)。新しい会計が加わったら、その会計が読む種類の位置を消す (通常決済の会計は Transfer・ガスレスの会計は
+//     Settled と Transfer の両方)。
 //   - getLogs の回数の上限 (1 回・チェーンごとに 10 回) は種類を合わせた数。Settled が先に読み、Transfer は残りの回数で
 //     読む (Transfer の側の読み取りは、ガスレスの会計の読む範囲を狭めない)。10 block ずつのチェーンで Settled が 10 回を
 //     使い切った回は、Transfer はその回は読まず、次の回に (先頭 − 90 から・続きから) 読む。
@@ -56,9 +59,32 @@
 //     nonce の計算の組の上限 (4 つ) は Settled だけに数える。
 //   - 印 1 つ (input の「transfer + 印」の並び 1 つ) を数えるのは Transfer 1 つまで。同じ tx に同じ額の Transfer が
 //     2 つあり、印が別の 2 つの会計のものなら、それぞれの会計に 1 つずつ数える (行は tx ごとに 1 つ)。
-//   - 受け入れている限界: 払う側が印を付けるまで (別の変更)、通常決済の入金は行にならない。ウォレットが calldata を
-//     書き換えて印を落とすと行にならない。ERC-4337 の bundle で、同じお店・同じ額の 2 件が 1 つの tx に入ると 1 行。
+//   - 受け入れている限界: 払う側が印を付けない支払い (今、印を付けるのは、試しのスイッチを入れた端末だけ・
+//     hooks/useStdBillMark.ts) は行にならない。ウォレットが calldata を書き換えて印を落とすと行にならない。ERC-4337 の bundle で、同じお店・同じ額の 2 件が 1 つの tx に入ると 1 行。
 //     中の呼び出しが失敗した UserOp の印は input に残るが、Transfer の log が無いので候補にならない。
+//
+// ガスレスの会計の、通常決済で払われた入金 (ガスレスの QR を、払う側の画面で通常決済に切り替えて払った):
+//   - ガスレスで払えないウォレット (ERC-4337 のマイナウォレットなど) は、ガスレスの QR を読んで、払う側で通常決済に切り替えて
+//     払う。払う側は、その送金にも同じ bill key の印を付ける (transfer(受取先, 額) + 印)。forwarder は通らないので Settled は
+//     出ない。そこでガスレスの会計には、Settled の期待値 (回収の後の着金額・利用料) とは別に、同じ URL・同じ bill key から
+//     作った通常決済の期待値 (額 = calcBreakdown の standard の着金額 = 今は請求額そのもの・印 = billKeyStdMark) も持たせる
+//     (lib/qrSaleHistory.ts の readQrSwitchedStdBill)。例: 請求 1,000 JPYC・回収 2 JPYC の会計は、Settled なら着金 998 +
+//     利用料 2、切り替えた後の Transfer なら 1,000 (回収の後の額 998 の Transfer・通常決済の額 1,000 の Settled は一致しない)。
+//   - 確かめ方は、上の「通常決済の会計」とまったく同じ (受取先・額・送り手が forwarder でない → block の時刻に会計が
+//     生きていた → tx の input の印・stdCallsExceedTransfers・印 1 つに Transfer 1 つ)。額だけの一致では書かない。行も通常決済の
+//     行 (buildQrStdSaleEntry: payMode standard・gasMode null・お客様は Transfer の from)。getLogs の回数 (種類を合わせて
+//     10 回・Settled が先)・tx の読み取りの上限 (4 つ)・片方の種類だけ読めた回の扱いも同じものを使う。
+//   - 会計の件数 (何件目か)・明細 (1 件目だけ)・知らせは、Settled の入金と Transfer の入金で共有する (1 つの会計に 1 つの数)。
+//     同じ会計に、ガスレスの入金と通常決済の入金が別の tx で届けば 2 行 (チェーンの順に 1 件目・2 件目)。
+//   - 1 つの tx を、同じ会計の Settled と Transfer の両方が拾っても、数えるのは先に照合できた方の 1 回だけ (行も知らせも
+//     1 つ)。forwarder の settle の tx は、Settled と「forwarder → 受取先」の Transfer の両方を出すが、送り手が forwarder の
+//     Transfer は候補にしないので、ガスレスの行 1 つだけになる (tx は読まない)。
+//   - 増える RPC: ガスレスの会計だけだったチェーンで、表示中 (と閉じた後 60 秒) は 6 秒ごとに Transfer の getLogs が 1 回
+//     (10 block ずつのチェーンは普段 2 回)。block の時刻・tx を読むのは、受取先・額の合う Transfer が届いたときだけ。
+//   - 受け入れている限界: Settled と Transfer は読む位置が別なので、片方の種類だけ読めなかった回 (失敗・10 block ずつの
+//     チェーンで Settled が 10 回を使い切った回) の後は、同じ会計への古い入金が新しい入金より後に見つかることがある
+//     (明細は先に見つかった方に付く = 下の「行にするもの」の限界と同じ)。ガスレスの会計にならない QR (forwarder の無い
+//     チェーン・回収の額を引くと着金額が残らない額) は、今までどおり見張らない (通常決済に切り替えた入金も行にならない)。
 //
 // 行にするもの (log を 1 つずつ、必ず古い順 = block → log の番号の順に):
 //   - その会計の 1 件目の一致 → 会計の写しの明細・管理番号つきの行。
@@ -107,6 +133,7 @@ import {
   matchSettledToBill,
   readQrBill,
   readQrStdBill,
+  readQrSwitchedStdBill,
   readSettledLog,
   readTransferLog,
   settledMatchesExpected,
@@ -228,13 +255,19 @@ type WatchedBase = {
   /** 行を書いたときに知らせる受け手 (この会計を出した画面・無ければ知らせない)。 */
   onRecorded: QrBillRecordedListener | null;
 };
-/** ガスレスの会計 (forwarder の Settled で確かめる)。 */
-type WatchedSettled = WatchedBase & { rail: 'settled'; bill: QrBill };
+/**
+ * ガスレスの会計 (forwarder の Settled で確かめる)。std = 同じ QR を、払う側で通常決済に切り替えて払われたときの期待値
+ * (JPYC の Transfer と tx の input の印で確かめる・頭の注記の「ガスレスの会計の、通常決済で払われた入金」)。null = 通常決済の
+ * 期待値を作れない会計 (Transfer では確かめない)。
+ */
+type WatchedSettled = WatchedBase & { rail: 'settled'; bill: QrBill; std: QrStdBill | null };
 /** 通常決済の会計 (JPYC の Transfer と tx の input の印で確かめる)。 */
 type WatchedTransfer = WatchedBase & { rail: 'transfer'; bill: QrStdBill };
 type WatchedBill = WatchedSettled | WatchedTransfer;
-/** 読む log の種類 (ガスレスの会計の Settled・通常決済の会計の Transfer)。会計の rail と同じ値。 */
+/** 読む log の種類 (Settled・Transfer)。会計の rail と同じ値 (ガスレスの会計は Transfer も読む)。 */
 type LogKind = WatchedBill['rail'];
+/** Transfer で確かめる会計と、その通常決済の期待値 (通常決済の会計は自分の会計・ガスレスの会計は std)。 */
+type StdCandidate = { w: WatchedBill; std: QrStdBill };
 type ChainCursor = {
   /** 前回、照合し終えた最後の block (null = 次の回は先頭 − 90 から読む: 初めての回・新しい会計が加わった後)。 */
   lastTo: bigint | null;
@@ -250,6 +283,9 @@ const txs = new Map<string, StdTx>();
 // 会計ごとに、1 つの tx の印を何回数えたか (`チェーン:tx:bill key`)。印 1 つ (transfer + 印 の並び 1 つ) を数えるのは
 // Transfer 1 つまで (同じ tx に、同じ額の別の会計への Transfer がもう 1 つあっても、同じ印で 2 回数えない)。
 const txMarkUses = new Map<string, number>();
+// ガスレスの会計の入金として数えた tx と、数えた種類 (`チェーン:tx:bill key`)。1 つの tx を、同じ会計の Settled と Transfer の
+// 両方が拾っても、数えるのは先に照合できた種類だけ (会計の件数を 2 つの経路で二重に進めない)。同じ種類の中の数え方は変えない。
+const billTxKinds = new Map<string, LogKind>();
 // getLogs の範囲に制限のある RPC と分かったチェーン (10 block ずつ読む)。/create を離れるまで持つ (会計が無くなって
 // 読むのをやめた間も、同じ画面の RPC は変わらない = もう一度 1 回で読もうとして失敗しない)。
 const smallRangeChains = new Set<number>();
@@ -283,9 +319,13 @@ function clearState(): void {
   blockTimes.clear();
   txs.clear();
   txMarkUses.clear();
+  billTxKinds.clear();
 }
 
 const cursorKey = (chainId: number, kind: LogKind) => `${chainId}:${kind}`;
+const billTxKey = (chainId: number, txHash: string, billKey: string) => `${chainId}:${txHash.toLowerCase()}:${billKey}`;
+// この会計を Transfer で確かめるときの期待値 (無ければ null)。
+const stdOf = (w: WatchedBill): QrStdBill | null => (w.rail === 'transfer' ? w.bill : w.std);
 
 /**
  * 保存の結果。recorded = この書き手が行を書き、読み直せた・notSaved = この書き手が印を書いた後に、行を読み直せなかった
@@ -373,12 +413,13 @@ function billsFitting(chainId: number, settled: SettledLog): WatchedSettled[] {
   );
 }
 
-// このチェーンの通常決済の会計で、受取先・額がこの Transfer とちょうど同じで、送り手が forwarder でないもの (tx を読む前のふるい)。
-function stdBillsFitting(chainId: number, transfer: TransferLog): WatchedTransfer[] {
-  return [...bills.values()].filter(
-    (w): w is WatchedTransfer =>
-      w.rail === 'transfer' && w.bill.chainId === chainId && transferMatchesExpected(transfer, w.bill),
-  );
+// このチェーンの会計 (通常決済の会計と、ガスレスの会計の通常決済の期待値) で、受取先・額がこの Transfer とちょうど同じで、
+// 送り手が forwarder でないもの (tx を読む前のふるい)。
+function stdBillsFitting(chainId: number, transfer: TransferLog): StdCandidate[] {
+  return [...bills.values()].flatMap((w) => {
+    const std = stdOf(w);
+    return std && std.chainId === chainId && transferMatchesExpected(transfer, std) ? [{ w, std }] : [];
+  });
 }
 
 // 保存の直前の確認 → 印 → 行 (頭の注記の「保存の決まり」)。
@@ -534,8 +575,14 @@ async function checkTransfer(
     return 'defer';
   }
   if (startedGeneration !== generation) return 'stale';
-  // その block の時刻に生きていた会計が無ければ、tx を読まない。
-  if (!stdBillsFitting(chainId, transfer).some((w) => aliveAt(w, blockTime))) {
+  // その block の時刻に生きていた会計。この tx を Settled の入金としてもう数えた会計 (同じ tx を、同じ会計の Settled と
+  // Transfer の両方が拾った) は外す (頭の注記の「ガスレスの会計の、通常決済で払われた入金」)。
+  const openBills = () =>
+    stdBillsFitting(chainId, transfer).filter(
+      ({ w }) => aliveAt(w, blockTime) && billTxKinds.get(billTxKey(chainId, txHash, w.bill.billKey)) !== 'settled',
+    );
+  // 残る会計が無ければ、tx を読まない。
+  if (openBills().length === 0) {
     seenLogs.add(id);
     return 'done';
   }
@@ -554,31 +601,33 @@ async function checkTransfer(
     if (startedGeneration !== generation) return 'stale';
   }
   // 待つ間に増えた・表示をやめた会計も入れて選び直す。その block の時刻に生きていた会計だけ。
-  const candidates = stdBillsFitting(chainId, transfer).filter((w) => aliveAt(w, blockTime));
+  const candidates = openBills();
   seenLogs.add(id);
-  for (const w of candidates) {
+  for (const { w, std } of candidates) {
     // この会計の印の付いた transfer が、この tx の input にいくつあるか。そのうち、まだ別の Transfer に数えていない分だけ使う。
-    const key = `${chainId}:${txHash.toLowerCase()}:${w.bill.billKey}`;
+    const key = billTxKey(chainId, txHash, w.bill.billKey);
     const used = txMarkUses.get(key) ?? 0;
     // 1 つの入金で複数の会計を確かめたことにしない: input の transfer の数が、同じ tx のこの会計に合う Transfer の数を
     // 超える tx は、どの会計の入金ともしない (lib/qrSaleHistory.ts の stdCallsExceedTransfers)。
-    const fitting = sameTxTransfers(txHash).filter((t) => transferMatchesExpected(t, w.bill)).length;
-    if (stdCallsExceedTransfers(tx, w.bill, fitting)) continue;
-    if (stdMarkCount(tx, transfer, w.bill) <= used) continue;
+    const fitting = sameTxTransfers(txHash).filter((t) => transferMatchesExpected(t, std)).length;
+    if (stdCallsExceedTransfers(tx, std, fitting)) continue;
+    if (stdMarkCount(tx, transfer, std) <= used) continue;
     txMarkUses.set(key, used + 1);
-    // 明細を付けるのは、その会計の 1 件目の一致だけ (ガスレスと同じ)。
+    // ガスレスの会計: この tx は Transfer の入金として数えた (後から同じ tx の Settled が当たっても、もう数えない)。
+    if (w.rail === 'settled') billTxKinds.set(key, 'transfer');
+    // 明細を付けるのは、その会計の 1 件目の一致だけ (ガスレスと同じ・ガスレスの会計は Settled の入金と合わせて数える)。
     const withDetail = w.matched === 0;
     w.matched += 1;
     let outcome: SaveOutcome = 'skipped';
     try {
-      outcome = saveRow(txHash, () => buildQrStdSaleEntry(w.bill, transfer, txHash, blockNumber, blockTime, withDetail));
+      outcome = saveRow(txHash, () => buildQrStdSaleEntry(std, transfer, txHash, blockNumber, blockTime, withDetail));
     } catch (error) {
       // 1 件の保存の失敗を、残りの入金の記録へ波及させない (ガスレスと同じ)。行の組み立て・保存・読み直しの throw は
       // saveRow の中で受け止めるので、ここに届くのは印を書く前の確認 (履歴・印の読み取り) の throw。
       warnOnce('qrSale.save_failed', error);
     }
     // 額は書いた行の saleAmount (lib/qrSaleHistory.ts の buildQrStdSaleEntry: 請求額)。
-    notifyRecorded(w, w.bill.expected.saleAmount, outcome);
+    notifyRecorded(w, std.expected.saleAmount, outcome);
     // 1 つの Transfer に一致する会計は 1 つまで。
     break;
   }
@@ -588,7 +637,11 @@ async function checkTransfer(
 async function pollChain(chainId: number, startedGeneration: number): Promise<void> {
   const watched = [...bills.values()].filter((w) => w.bill.chainId === chainId);
   const settledBills = watched.filter((w): w is WatchedSettled => w.rail === 'settled');
-  const transferBills = watched.filter((w): w is WatchedTransfer => w.rail === 'transfer');
+  // Transfer で確かめる期待値: 通常決済の会計と、ガスレスの会計の通常決済の期待値 (払う側で通常決済に切り替えた入金)。
+  const stdBills = watched.flatMap((w) => {
+    const std = stdOf(w);
+    return std ? [std] : [];
+  });
   // 読む log の種類 (このチェーンにある会計の分だけ)。ガスレスの会計の Settled を先に読む (下の getLogs の回数)。
   const sources: LogSource[] = [];
   if (settledBills.length > 0) {
@@ -601,10 +654,10 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
       read: (from, to) => readSettledLogs(chainId, forwarder, merchants, from, to),
     });
   }
-  if (transferBills.length > 0) {
-    // 同じチェーンの通常決済の会計は、同じ JPYC の deployment。
-    const token = transferBills[0].bill.deployment.address;
-    const merchants = [...new Set(transferBills.map((w) => w.bill.merchant))];
+  if (stdBills.length > 0) {
+    // 同じチェーンの会計は、同じ JPYC の deployment。受取先は 2 種類の会計を合わせて、getLogs 1 回で読む。
+    const token = stdBills[0].deployment.address;
+    const merchants = [...new Set(stdBills.map((std) => std.merchant))];
     sources.push({ kind: 'transfer', token, read: (from, to) => readTransferLogs(chainId, token, merchants, from, to) });
   }
   // 位置は先頭を読む前に持つ (読んでいる間に新しい会計が加わって位置が消されたら、この回はその前の位置に書く = 次の回は
@@ -711,7 +764,12 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
     pairs += candidates.length;
     seenLogs.add(id);
     for (const w of candidates) {
+      // この tx を、この会計の通常決済の入金 (Transfer) としてもう数えた: Settled では数えない (同じ tx を 2 つの経路で
+      // 二重に数えない・頭の注記の「ガスレスの会計の、通常決済で払われた入金」)。
+      const txKey = billTxKey(chainId, txHash, w.bill.billKey);
+      if (billTxKinds.get(txKey) === 'transfer') continue;
       if (matchSettledToBill(settled, blockTime, w.bill) === null) continue;
+      billTxKinds.set(txKey, 'settled');
       // 明細を付けるのは、その会計の 1 件目の一致だけ (2 件目以降 = 同じ会計への 2 回目の入金)。
       const withDetail = w.matched === 0;
       w.matched += 1;
@@ -778,11 +836,12 @@ export function showQrBill(input: QrBillInput, shownAt: number, onRecorded?: QrB
       known.onRecorded = onRecorded ?? null;
     } else {
       // ガスレスの会計 (readQrBill) か、通常決済の会計 (readQrStdBill・URL の mode=standard)。2 つは mode で分かれる。
+      // ガスレスの会計には、払う側で通常決済に切り替えて払われたときの期待値 (readQrSwitchedStdBill) も持たせる。
       const settledBill = readQrBill(input);
       const stdBill = settledBill ? null : readQrStdBill(input);
       const base = { shownAt, hiddenAt: null, matched: 0, onRecorded: onRecorded ?? null };
       const watched: WatchedBill | null = settledBill
-        ? { ...base, rail: 'settled', bill: settledBill }
+        ? { ...base, rail: 'settled', bill: settledBill, std: readQrSwitchedStdBill(input) }
         : stdBill
           ? { ...base, rail: 'transfer', bill: stdBill }
           : null;
@@ -792,6 +851,8 @@ export function showQrBill(input: QrBillInput, shownAt: number, onRecorded?: QrB
       // 新しい会計が加わった: そのチェーンの次の回は先頭 − 90 から読み直す (表示を始めた後の入金を覆う・読んだ log は落とす)。
       // 位置を消す (null にしない): 読んでいる途中の回が、終わった後に古い位置を書き戻さないように、別の物にする。
       cursors.delete(cursorKey(watched.bill.chainId, watched.rail));
+      // ガスレスの会計は Transfer も読む: Transfer の位置も消す (両方の種類を先頭 − 90 から読み直す)。
+      if (watched.rail === 'settled' && watched.std) cursors.delete(cursorKey(watched.bill.chainId, 'transfer'));
     }
     if (timer === null) {
       timer = setInterval(() => {
