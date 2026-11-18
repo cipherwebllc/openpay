@@ -47,6 +47,7 @@ describe('tests/setup.ts の既定のスタブ', () => {
     await expect(stub.readSettledLogs(JPYC.chainId, FORWARDER, [SHOP], 1n, 2n)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
     await expect(stub.readBlockTime(JPYC.chainId, 1n)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
     await expect(stub.readTransferLogs(JPYC.chainId, JPYC.address, [SHOP], 1n, 2n)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
+    await expect(stub.readSwitchedTransferLogs(JPYC.chainId, JPYC.address, [SHOP], 1n, 2n)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
     await expect(stub.readTransaction(JPYC.chainId, TX as `0x${string}`)).rejects.toThrow('qr_sale_rpc_stubbed_in_tests');
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(stub.QR_SALE_RPC_TIMEOUT_MS).toBe((await loadActual()).QR_SALE_RPC_TIMEOUT_MS);
@@ -220,6 +221,20 @@ describe('readTransferLogs (通常決済の会計)', () => {
     ]);
     expect(logs).toHaveLength(1);
     expect(logs[0]).toMatchObject({ address: log.address, topics: log.topics, data: log.data, transactionHash: TX, logIndex: 2, blockNumber: 995n });
+  });
+
+  it('readSwitchedTransferLogs (ガスレスの会計の切り替えた入金) は、同じ eth_getLogs を 1 回 (JPYC の Transfer・受取先の topic・範囲)', async () => {
+    stubRpc(ok([]));
+    const { readSwitchedTransferLogs } = await loadActual();
+    expect(await readSwitchedTransferLogs(JPYC.chainId, JPYC.address, [SHOP], 987n, 997n)).toEqual([]);
+    expect(calls).toEqual([
+      {
+        method: 'eth_getLogs',
+        params: [
+          { address: JPYC.address, topics: [TRANSFER_TOPIC, null, [pad(SHOP).toLowerCase()]], fromBlock: '0x3db', toBlock: '0x3e5' },
+        ],
+      },
+    ]);
   });
 
   it('RPC が失敗したら throw する。範囲の制限の判定は Settled と同じ error で働く。送り直しはしない', async () => {

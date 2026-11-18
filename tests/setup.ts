@@ -118,6 +118,7 @@ vi.mock('@/lib/qrSaleRpc', () => {
     readSettledLogs: unreadable,
     readBlockTime: unreadable,
     readTransferLogs: unreadable,
+    readSwitchedTransferLogs: unreadable,
     readTransaction: unreadable,
   };
 });

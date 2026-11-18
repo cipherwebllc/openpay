@@ -25,6 +25,9 @@ vi.mock('@/lib/qrSaleRpc', () => ({
   readSettledLogs: rpc.logs,
   readBlockTime: rpc.time,
   readTransferLogs: rpc.transfers,
+  // ガスレスの会計の「切り替えた入金」の読み取り (別の種類)。この file は通常決済の QR の会計だけを見るので、既定は
+  // 「読めて、1 つも無い」。切り替えた入金は tests/lib/qrSaleWatch.switched.test.ts が確かめる。
+  readSwitchedTransferLogs: async () => [],
   readTransaction: rpc.tx,
 }));
 const hold = vi.hoisted(() => ({
@@ -515,13 +518,11 @@ describe('1 tx 1 行・払った側の行', () => {
     expect(rpc.tx).not.toHaveBeenCalled();
   });
 
-  // Settled の照合・保存は Transfer の読み取りを待たずに先に終える (lib/qrSaleWatch.ts の頭の注記)。log の番号が Transfer の方が
-  // 小さくても、行は Settled の会計の行 (前は、log の番号の小さい方の会計の行だった)。
   it.each([
-    ['log の番号は Settled が先', 0, 1, [`batch-${tx(1)}`, 'G-1']],
-    ['log の番号は Transfer が先', 1, 0, [`batch-${tx(1)}`, 'G-1']],
+    ['Settled が先', 0, 1, [`batch-${tx(1)}`, 'G-1']],
+    ['Transfer が先', 1, 0, [stdId(tx(1)), 'S-1']],
   ] as const)(
-    '1 つの tx に、ガスレスの会計の Settled と、通常決済の会計の印の付いた Transfer の両方 (%s) → 1 行 (Settled の会計の行)',
+    '1 つの tx に、ガスレスの会計の Settled と、通常決済の会計の印の付いた Transfer の両方 (%s) → 1 行 (先に見た log の会計)',
     async (_name, settledIndex, transferIndex, row) => {
       showQrBill(
         { billKey: BK, kind: 'pay', url: payUrl({ mode: 'gasless', gas: 'merchant', receiptNo: 'G-1' }), itemName: '' },
