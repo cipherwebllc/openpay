@@ -598,6 +598,32 @@ describe('1 tx 1 行・払った側の行', () => {
     expect(b).toEqual([{ billKey: BK2, count: 2, amount: (1_000n * ONE).toString() }]);
   });
 
+  it('印が A・A・B で Transfer が 2 つの tx (2 つの会計を同時に見張る): どの会計の入金ともしない (A に 2 つ数えて B を 0 にしない)', async () => {
+    const a: QrBillRecorded[] = [];
+    const b: QrBillRecorded[] = [];
+    show(BK, { receiptNo: 'R-1' }, NOW, (e) => a.push(e));
+    show(BK2, { receiptNo: 'R-2' }, NOW, (e) => b.push(e));
+    const input = handleOps(
+      executeBatch([
+        markedTransfer(BK, SHOP, 1_000n * ONE),
+        markedTransfer(BK, SHOP, 1_000n * ONE),
+        markedTransfer(BK2, SHOP, 1_000n * ONE),
+      ]),
+    );
+    pay(995n, 1, { logIndex: 0, input, txFrom: BUNDLER, txTo: ENTRY_POINT });
+    pay(995n, 1, { logIndex: 1, input, txFrom: BUNDLER, txTo: ENTRY_POINT, from: OTHER_CUSTOMER });
+    await tick();
+    expect(loadHistory()).toEqual([]);
+    expect(a).toEqual([]);
+    expect(b).toEqual([]);
+    // 次の別の tx の入金は、それぞれの会計の 1 件目 (前の tx を数えていない)。
+    chain.head = 1_004n;
+    pay(1_000n, 2, { billKey: BK2 });
+    await tick();
+    expect(b).toEqual([{ billKey: BK2, count: 1, amount: (1_000n * ONE).toString() }]);
+    expect(a).toEqual([]);
+  });
+
   it('同じ額の 2 つの会計への 1 つの Transfer: input にある印の会計の行 (先に出した会計ではない)', async () => {
     show(BK, { receiptNo: 'R-1' });
     show(BK2, { receiptNo: 'R-2' });

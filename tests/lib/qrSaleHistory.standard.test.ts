@@ -170,6 +170,10 @@ describe('1 つの入金で複数の会計を確かめたことにしない (std
     expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}00${seq}${plain}${markB}` }, bill, 1)).toBe(true);
     // 同じ並びが 2 回 + 印なしの transfer → 超える。
     expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}00${seq}${plain}` }, bill, 1)).toBe(true);
+    // Transfer が 2 つの tx は重複をまとめない: 印 A・A・B と Transfer 2 つ → 超える (A に 2 つ数えて B が 0 になるのを断つ)。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}00${seq}${plain}${markB}` }, bill, 2)).toBe(true);
+    // Transfer 2 つ + 同じ並び 2 回 (同じ会計への 2 件の入金) → 超えない (今までどおり)。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}00${seq}` }, bill, 2)).toBe(false);
   });
 
   it('宛先が JPYC の直接の送金は数えない (stdMarkCount がちょうどの一致を見る)', () => {
