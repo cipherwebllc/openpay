@@ -713,6 +713,31 @@ describe('会計の件数・明細・1 tx 1 行・知らせは、Settled の入�
     expect(seen).toEqual([{ billKey: BK, count: 2, amount: BILL.toString() }]);
   });
 
+  it('両方が一致する tx で、Settled の行を履歴に書けなかった (notSaved): 印は残り、同じ tx の Transfer で書き直さない (通常決済の行にもしない)', async () => {
+    const seen: QrBillRecorded[] = [];
+    showGasless(BK, {}, NOW, (e) => seen.push(e));
+    settle(995n, 1, { logIndex: 0 });
+    pay(995n, 1, {
+      logIndex: 1, input: handleOps(execute(markedTransfer(BK, SHOP, BILL))), txFrom: BUNDLER, txTo: ENTRY_POINT,
+    });
+    const real = Storage.prototype.setItem;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === HISTORY_STORAGE_KEY) throw new Error('QuotaExceededError');
+      real.call(this, key, value);
+    });
+    await tick();
+    setItem.mockRestore();
+    expect(rows()).toEqual([]);
+    expect(marks()).toEqual([tx(1)]);
+    expect(seen).toEqual([{ billKey: BK, count: 1, amount: BILL.toString(), notSaved: true }]);
+    // storage が戻った後に重ねて読んでも、Settled でも Transfer でも書き直さない。
+    await tick(2);
+    expect(rows()).toEqual([]);
+    expect(hold.appends).toBe(1);
+    expect(seen).toHaveLength(1);
+    expect(rpc.tx).not.toHaveBeenCalled();
+  });
+
   it('通常決済の QR とガスレスの QR が、同じ受取先・同じ額で同時にある: 入金は input にある印の会計の行になり、件数は会計ごと', async () => {
     const gasless: QrBillRecorded[] = [];
     const std: QrBillRecorded[] = [];
