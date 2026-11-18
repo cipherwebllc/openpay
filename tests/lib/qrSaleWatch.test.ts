@@ -1351,6 +1351,17 @@ describe('画面への知らせ (印を書いた後だけ・書けなかった�
     expect(warn.mock.calls.filter(([name]) => name.startsWith('qrSale.'))).toEqual([['qrSale.row_not_confirmed', {}]]);
   });
 
+  it('「行を読み直せなかった」の警告は、ほかの警告 (例外つき) と別に 1 回: この警告の後の notify_failed も出る (main より原因を追えなくしない)', async () => {
+    showWith(() => {
+      throw new Error('listener down');
+    });
+    settle(995n, 1);
+    hold.failAppend = true;
+    await tick();
+    const names = warn.mock.calls.map(([name]) => name).filter((name) => String(name).startsWith('qrSale.'));
+    expect(names).toEqual(['qrSale.row_not_confirmed', 'qrSale.notify_failed']);
+  });
+
   it('印を確かめた後・印を書く前に、別のタブが同じ tx の印を書いた: 保存の流れは今までどおり (行を書きにいく) で、読み直せなくても notSaved を知らせない', async () => {
     const listener = vi.fn();
     showWith(listener);

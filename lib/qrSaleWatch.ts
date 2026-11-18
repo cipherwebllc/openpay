@@ -258,11 +258,20 @@ let running = false;
 // stopQrSaleWatch のたびに進める。RPC を待っている間に止められた回は、戻った後に何も書かない。
 let generation = 0;
 let warned = false;
+// 「行を読み直せなかった」の警告は、ほかの警告 (watch_failed・save_failed = 例外つき) と別に 1 回。共通の 1 回を使うと、
+// この警告が先に出た /create の間は、見張りの失敗の例外が Sentry に届かなくなる (main より原因を追えなくなるのを断つ)。
+let warnedRowNotConfirmed = false;
 
 function warnOnce(event: string, error?: unknown): void {
   if (warned) return;
   warned = true;
   logger.warn(event, error === undefined ? {} : { error });
+}
+
+function warnRowNotConfirmedOnce(): void {
+  if (warnedRowNotConfirmed) return;
+  warnedRowNotConfirmed = true;
+  logger.warn('qrSale.row_not_confirmed', {});
 }
 
 function clearState(): void {
@@ -402,10 +411,11 @@ function saveRow(txHash: string, build: () => HistoryEntry): SaveOutcome {
     if (historyHasTx(hash)) return 'recorded';
   } catch {
     // 1 件の行の組み立て・保存・読み直しの throw を、残りの入金の記録へ波及させない (掟 13)。黙った失敗と同じに扱う (下)。
-    // 例外の本文は logger に渡さない (本文に tx が入りうる・共通の logger の伏せ字の対象外)。
+    // 例外の本文は logger に渡さない (本文に tx が入りうる・共通の logger の伏せ字の対象外)。そのため行の組み立ての不具合は、
+    // main (save_failed + 例外) と違い Sentry から原因を追えない (受け入れた限界・画面の注意で店主には見える)。
   }
   // 行を読み直せなかった。警告は固定のイベント名だけ (例外の本文・名前・tx・bill key を出さない)。
-  warnOnce('qrSale.row_not_confirmed');
+  warnRowNotConfirmedOnce();
   // 画面に「書けなかったかもしれない」を出すのは、このタブが印を書いたときだけ ('present' = 確かめた後に別のタブがこの tx の
   // 印を書いていた: その tx の行の行方は、そのタブの保存しだいで、このタブからは分からない)。
   return mark === 'added' ? 'notSaved' : 'skipped';
@@ -563,7 +573,8 @@ async function checkTransfer(
     try {
       outcome = saveRow(txHash, () => buildQrStdSaleEntry(w.bill, transfer, txHash, blockNumber, blockTime, withDetail));
     } catch (error) {
-      // 1 件の保存の失敗 (履歴の読み書き・行の組み立て) を、残りの入金の記録へ波及させない (ガスレスと同じ)。
+      // 1 件の保存の失敗を、残りの入金の記録へ波及させない (ガスレスと同じ)。行の組み立て・保存・読み直しの throw は
+      // saveRow の中で受け止めるので、ここに届くのは印を書く前の確認 (履歴・印の読み取り) の throw。
       warnOnce('qrSale.save_failed', error);
     }
     // 額は書いた行の saleAmount (lib/qrSaleHistory.ts の buildQrStdSaleEntry: 請求額)。
@@ -708,7 +719,8 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
       try {
         outcome = save(w.bill, settled, txHash, blockTime, withDetail);
       } catch (error) {
-        // 1 件の保存の失敗 (履歴の読み書き・行の組み立て) を、残りの入金の記録へ波及させない。
+        // 1 件の保存の失敗を、残りの入金の記録へ波及させない。行の組み立て・保存・読み直しの throw は saveRow の中で
+        // 受け止めるので、ここに届くのは印を書く前の確認 (履歴・印の読み取り) の throw。
         warnOnce('qrSale.save_failed', error);
       }
       // 額は書いた行の saleAmount と同じ式 (lib/qrSaleHistory.ts の buildQrSaleEntry: 着金額 + 利用料)。
@@ -812,4 +824,5 @@ export function stopQrSaleWatch(): void {
   smallRangeChains.clear();
   // 警告は /create を開いている間に 1 回 (開き直したら、また 1 回は残す)。
   warned = false;
+  warnedRowNotConfirmed = false;
 }
