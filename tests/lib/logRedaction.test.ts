@@ -13,6 +13,7 @@ const sentry = vi.hoisted(() => ({
   captureException: vi.fn(),
   captureRequestError: vi.fn(),
   captureRouterTransitionStart: vi.fn(),
+  httpIntegration: vi.fn((options: unknown) => ({ name: 'Http', options })),
 }));
 vi.mock('@sentry/nextjs', () => sentry);
 vi.mock('@/lib/sentryReplayLazy', () => ({ installSentryReplay: vi.fn() }));
