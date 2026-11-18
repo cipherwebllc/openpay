@@ -360,6 +360,11 @@ export function stdMarkCount(tx: StdTx, transfer: TransferLog, bill: QrStdBill):
  * 超えるなら、その tx は 1 つの入金に対して複数の会計の印を並べている (例: 自作の contract が Transfer 1 つの tx の input に、
  * 別の端末の会計 A と B の「transfer + 印」を両方入れる) ので、どの会計の入金ともしない (確かめた数 ≤ 入金の数にする)。
  * 宛先が JPYC の直接の送金は stdMarkCount が input のちょうどの一致を見るので、ここでは数えない (false)。
+ *
+ * 数えるのは「transfer の calldata + 直後の 32 byte」の**違う並び**の数 (同じ並びが何度あっても 1 つ)。ウォレットの中継の tx
+ * (MetaMask がガス代を USDC で払う 7702 の中継: 署名した中身と実行する中身に、同じ「transfer + 印」が 2 回入る) は、
+ * Transfer 1 つで同じ並びが 2 回現れる (2026-11-18 の実機・Polygon)。同じ並び = 同じ会計の同じ呼び出しなので 1 つと数える。
+ * 別の会計の印 (直後の 32 byte が違う)・印つきと印なしの並びは、今までどおり別に数えて超えたら断る。
  */
 export function stdCallsExceedTransfers(tx: StdTx, bill: QrStdBill, sameTxTransfers: number): boolean {
   if (tx.to !== null && tx.to.toLowerCase() === bill.deployment.address.toLowerCase()) return false;
@@ -371,12 +376,13 @@ export function stdCallsExceedTransfers(tx: StdTx, bill: QrStdBill, sameTxTransf
     .slice(2)
     .toLowerCase();
   const hay = tx.input.slice(2).toLowerCase();
-  let calls = 0;
+  // 「transfer の calldata + 直後の 32 byte (64 字・input の終わりなら残り全部)」の違う並び。
+  const calls = new Set<string>();
   // hex の 2 字が 1 byte。奇数の位置 (半 byte ずれ) から始まる一致は数えない (stdMarkCount と同じ)。
   for (let at = hay.indexOf(call); at >= 0; at = hay.indexOf(call, at + 1)) {
-    if (at % 2 === 0) calls += 1;
+    if (at % 2 === 0) calls.add(hay.slice(at, at + call.length + 64));
   }
-  return calls > sameTxTransfers;
+  return calls.size > sameTxTransfers;
 }
 
 // 会計の写しから作る欄 (払った側の historyCtx と同じ組み方)。
