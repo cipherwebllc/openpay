@@ -9,6 +9,7 @@ import en from '@/messages/en.json';
 import type { ProductForm } from '@/lib/store/productForm';
 import { listingAssistantFactsOf, type ListingAssistantDraft } from '@/lib/store/listingAssistant';
 import { MAX_HOSTED_DESC_LEN, MAX_HOSTED_TITLE_LEN } from '@/lib/x402/hostedStore';
+import { parseDraft } from '@/lib/store/listingAssistantServer';
 import { COO_WORLD_DRAFT, MARKERS, emptyProductForm, existingProductForm, jsonResponse } from '../_helpers/listingAssistantFixtures';
 
 const image = vi.hoisted(() => ({ prepare: vi.fn() }));
@@ -291,38 +292,86 @@ describe('ListingAssistant: 案の反映', () => {
     expect(updates).toEqual([{ desc: '一行目 二行目' }, { tags: '照明, 3D素材' }]);
   });
 
-  it('fits:false の欄は入れられない (理由を出し、ボタンを止める)・欄で直すと入れられる', async () => {
-    const longTitle = 'あ'.repeat(61);
+  it('fits:false の欄は上限の中に切った見本として見せ、入れるボタンを止める・欄で直すと入れられる (PR 1 の 0688fcdc の形)', async () => {
+    // server は長すぎた案を上限の中に切って返す (lib/store/listingAssistantServer の lineField・tagsField・checksField)。
+    const sample = `${'あ'.repeat(59)}い`;
+    const tagSample = ['a', 'b', 'c', 'd', 'e'];
     vi.stubGlobal('fetch', vi.fn(async () => okResponse(draftOf({
-      title: { value: longTitle, fits: false },
-      tags: { value: ['a', 'b', 'c', 'd', 'e', 'f'], fits: false },
+      title: { value: sample, fits: false },
+      tags: { value: tagSample, fits: false },
       desc: { value: '', fits: false },
+      x: { value: 'う'.repeat(120), fits: false },
+      checks: { value: ['確認 1', '確認 2', '確認 3', '確認 4', '確認 5'], fits: false },
     }))));
     renderAssistant();
     await generateWithMemo();
+    const titleBox = screen.getByRole('textbox', { name: A.fieldTitle });
     const applyTitle = screen.getByRole('button', { name: A.applyTitle });
+    expect(titleBox).toHaveValue(sample);
     expect(applyTitle).toBeDisabled();
-    expect(screen.getByText('長すぎるため入れられません (60 字まで・いま 61 字)。欄で短くすると入れられます。')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: A.fieldTitle })).toHaveAccessibleDescription(/長すぎるため/);
+    const clipped = '長すぎたため、60 字で切った見本です。このままでは入れられません。欄で直すと入れられます。';
+    expect(screen.getByText(clipped)).toBeInTheDocument();
+    expect(titleBox).toHaveAccessibleDescription(clipped);
+    expect(screen.getByRole('textbox', { name: A.fieldTags })).toHaveValue('a, b, c, d, e');
     expect(screen.getByRole('button', { name: A.applyTags })).toBeDisabled();
-    expect(screen.getByText('タグは 5 個まで・1 つ 24 字までです。欄で直すと入れられます。')).toBeInTheDocument();
+    expect(screen.getByText('案のタグが上限 (5 個・1 つ 24 字) を超えたため、切った見本です。このままでは入れられません。欄で直すと入れられます。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: A.applyDesc })).toBeDisabled();
     expect(screen.getByText(A.empty)).toBeInTheDocument();
+    // X の投稿文の見本はコピーできるが、X では開かない。
+    expect(screen.getByText('長すぎたため、120 字で切った見本です。欄で直してから使ってください。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: A.copyX })).toBeEnabled();
+    expect(screen.queryByRole('link', { name: A.openX })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: A.openX })).toBeDisabled();
+    const checks = screen.getByRole('region', { name: A.checksHeading });
+    expect(within(checks).getByText('確認候補が上限 (5 個・1 つ 100 字) を超えたため、切って見せています。')).toBeInTheDocument();
     fireEvent.click(applyTitle);
     expect(updates).toEqual([]);
 
-    fireEvent.change(screen.getByRole('textbox', { name: A.fieldTitle }), { target: { value: 'あ'.repeat(60) } });
+    // 直して見本と同じ文に戻すと、また止まる (見本のまま入れない)。
+    fireEvent.change(titleBox, { target: { value: `${sample}x` } });
+    expect(screen.getByText('長すぎるため入れられません (60 字まで・いま 61 字)。欄で短くすると入れられます。')).toBeInTheDocument();
+    expect(applyTitle).toBeDisabled();
+    fireEvent.change(titleBox, { target: { value: sample } });
+    expect(applyTitle).toBeDisabled();
+    fireEvent.change(titleBox, { target: { value: 'あ'.repeat(60) } });
     expect(applyTitle).toBeEnabled();
     fireEvent.click(applyTitle);
     expect(updates).toEqual([{ title: 'あ'.repeat(60) }]);
+
+    fireEvent.change(screen.getByRole('textbox', { name: A.fieldTags }), { target: { value: 'a, b, c, d, e, f' } });
+    expect(screen.getByText('タグは 5 個まで・1 つ 24 字までです。欄で直すと入れられます。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: A.applyTags })).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: A.fieldTags }), { target: { value: 'a, b' } });
+    fireEvent.click(screen.getByRole('button', { name: A.applyTags }));
+    expect(updates.at(-1)).toEqual({ tags: 'a, b' });
   });
 
-  it('server が fits:false と言う欄は、画面の数え方で収まっても入れない (保存の判定が権威)', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => okResponse(draftOf({ title: { value: '短い', fits: false } }))));
+  it('server の parseDraft が長すぎた案から作る形を受けると、見本を見せて 3 つとも入れない (PR 1 との境目)', async () => {
+    const draft = parseDraft({
+      title: 'あ'.repeat(80),
+      desc: 'い'.repeat(250),
+      tags: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+      en: 'e'.repeat(500),
+      x: 'x'.repeat(200),
+      checks: Array.from({ length: 8 }, (_, index) => `確認 ${index}`),
+    });
+    expect(draft).toBeDefined();
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse(draft)));
+    renderAssistant();
+    await generateWithMemo();
+    expect(screen.getByRole('textbox', { name: A.fieldTitle })).toHaveValue('あ'.repeat(60));
+    for (const name of [A.applyTitle, A.applyDesc, A.applyTags, A.openX]) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    }
+    expect(within(screen.getByRole('region', { name: A.checksHeading })).getAllByRole('listitem')).toHaveLength(5);
+  });
+
+  it('上限を超えた値のまま fits:false が来ても入れない (長さの理由を出す)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse(draftOf({ title: { value: 'あ'.repeat(61), fits: false } }))));
     renderAssistant();
     await generateWithMemo();
     expect(screen.getByRole('button', { name: A.applyTitle })).toBeDisabled();
-    expect(screen.getByText(A.cannotApply)).toBeInTheDocument();
+    expect(screen.getByText('長すぎるため入れられません (60 字まで・いま 61 字)。欄で短くすると入れられます。')).toBeInTheDocument();
   });
 
   it('画面の上限は保存の上限と同じ (商品名 60・説明 200)', () => {

@@ -12,6 +12,8 @@ import { useTranslations } from 'next-intl';
 import { Check, Copy, Undo2 } from 'lucide-react';
 import { MAX_HOSTED_TAGS, MAX_HOSTED_TAG_LEN, parseHostedTags } from '@/lib/x402/storeMeta';
 import {
+  LISTING_ASSISTANT_CHECKS_MAX,
+  LISTING_ASSISTANT_CHECK_MAX,
   LISTING_ASSISTANT_EN_MAX,
   LISTING_ASSISTANT_FACT_KEYS,
   LISTING_ASSISTANT_IMAGE_MIME_TYPE,
@@ -170,11 +172,14 @@ function errorMessage(t: Translate, error: AssistantError): string {
   return t(ERROR_MESSAGE_KEYS[error.code]);
 }
 
+// clipped = server が fits:false とした欄 (長すぎた案を上限の中に切った見本・lib/store/listingAssistantServer の lineField・
+// tagsField)。見本はそのままでは入れない — 欄で直した文 (見本と違う文) だけを画面の数え方で判定する。
 type FitIssue =
   | { kind: 'empty' }
   | { kind: 'tooLong'; max: number; count: number }
   | { kind: 'tags' }
-  | { kind: 'invalid' };
+  | { kind: 'clipped'; max: number }
+  | { kind: 'tagsClipped' };
 
 /** 1 行の欄: 保存の sanitizeLine と同じく改行を空白にして前後を除き、UTF-16 の長さで数える。 */
 const lineOf = (value: string) => value.replace(/[\r\n]+/g, ' ').trim();
@@ -301,16 +306,19 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
     }
   };
 
-  const valueOf = (current: ListingAssistantDraft, field: TextField): string =>
-    edited[field] ?? (field === 'tags' ? current.tags.value.join(', ') : current[field].value);
+  const draftValueOf = (current: ListingAssistantDraft, field: TextField): string =>
+    field === 'tags' ? current.tags.value.join(', ') : current[field].value;
+  const valueOf = (current: ListingAssistantDraft, field: TextField): string => edited[field] ?? draftValueOf(current, field);
 
   const issueOf = (current: ListingAssistantDraft, field: TextField): FitIssue | null => {
     const value = valueOf(current, field);
     const issue = field === 'tags' ? tagsIssue(value) : lineIssue(value, FIELD_MAX[field]);
-    if (edited[field] !== undefined) return issue;
-    // 案のままの欄は server の判定 (保存と同じ sanitizeLine・parseHostedTags) に従う。理由の文だけ画面で数える。
+    // 欄で直した文 (案と違う文) は画面で数える。
+    if (value !== draftValueOf(current, field)) return issue;
+    // 案のままの欄 (直して元に戻した欄も) は server の判定 (保存と同じ sanitizeLine・parseHostedTags) に従う。
     if (current[field].fits) return null;
-    return issue ?? { kind: 'invalid' };
+    if (issue) return issue;
+    return field === 'tags' ? { kind: 'tagsClipped' } : { kind: 'clipped', max: FIELD_MAX[field] };
   };
 
   const issueText = (issue: FitIssue, copyOnly: boolean): string => {
@@ -321,8 +329,10 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
         return t(copyOnly ? 'tooLongCopy' : 'tooLong', { max: issue.max, count: issue.count });
       case 'tags':
         return t('tagsInvalid', { max: MAX_HOSTED_TAGS, len: MAX_HOSTED_TAG_LEN });
-      case 'invalid':
-        return t('cannotApply');
+      case 'clipped':
+        return t(copyOnly ? 'clippedCopy' : 'clipped', { max: issue.max });
+      case 'tagsClipped':
+        return t('tagsClipped', { max: MAX_HOSTED_TAGS, len: MAX_HOSTED_TAG_LEN });
     }
   };
 
@@ -371,7 +381,7 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
         {multiline ? (
           <textarea
             id={id}
-            rows={field === 'en' ? 4 : 3}
+            rows={field === 'x' ? 3 : 4}
             value={value}
             onChange={(event) => onChange(event.target.value)}
             aria-describedby={issue ? `${id}-issue` : undefined}
@@ -581,6 +591,11 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
                 {t('checksHeading')}
               </h5>
               <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('checksHint')}</p>
+              {draft.checks.fits ? null : (
+                <p className="mt-1 text-xs leading-relaxed text-amber-800">
+                  {t('checksClipped', { max: LISTING_ASSISTANT_CHECKS_MAX, len: LISTING_ASSISTANT_CHECK_MAX })}
+                </p>
+              )}
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
                 {draft.checks.value.map((item, index) => (
                   <li key={`${index}-${item}`}>{item}</li>
