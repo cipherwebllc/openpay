@@ -29,6 +29,7 @@ vi.mock('@/lib/qrSaleRpc', () => ({
 }));
 const hold = vi.hoisted(() => ({
   forwarders: {} as Record<number, string>,
+  failAppend: false,
   appends: 0,
   visibility: 'visible' as 'visible' | 'hidden',
 }));
@@ -45,20 +46,21 @@ vi.mock('@/lib/relay/forwarderConfig', async (importOriginal) => ({
 }));
 const warn = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/logger', () => ({ logger: { debug: vi.fn(), info: vi.fn(), warn, error: vi.fn() } }));
-// 履歴は実物。書いた回数だけ数える。
+// 履歴は実物。書いた回数を数え、保存の失敗 (throw) を差し込めるようにだけする。
 vi.mock('@/lib/history', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/history')>();
   return {
     ...actual,
     appendHistory: (entry: Parameters<typeof actual.appendHistory>[0]) => {
       hold.appends += 1;
+      if (hold.failAppend) throw new Error('QuotaExceededError');
       actual.appendHistory(entry);
     },
   };
 });
 
 import { env } from '@/lib/env';
-import { appendHistory, buildHistoryEntry, loadHistory } from '@/lib/history';
+import { appendHistory, buildHistoryEntry, loadHistory, removeHistoryEntry } from '@/lib/history';
 import type { QrSaleLog, QrSaleTx } from '@/lib/qrSaleRpc';
 import { billKeyStdMark } from '@/lib/relay/billKeySalt';
 import { QR_SALE_MARKS_KEY } from '@/lib/qrSaleMarks';
@@ -66,6 +68,7 @@ import {
   QR_SALE_MAX_GETLOGS_PER_PASS,
   QR_SALE_MAX_TX_READS_PER_PASS,
   QR_SALE_POLL_MS,
+  QR_SALE_SAVE_RETRY_MAX,
   QR_SALE_SMALL_RANGE_BLOCKS,
   hideQrBill,
   showQrBill,
@@ -225,6 +228,7 @@ beforeEach(() => {
   chain.settled = [];
   chain.txs = new Map();
   hold.forwarders = { [POLYGON.chainId]: FORWARDER };
+  hold.failAppend = false;
   hold.appends = 0;
   hold.visibility = 'visible';
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => hold.visibility });
@@ -829,6 +833,51 @@ describe('画面への知らせ (通常決済の行も、ガスレスの行と�
     expect(listener).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toBe('qrSale.notify_failed');
+  });
+});
+
+describe('保存のやり直し (通常決済の行も、ガスレスの行と同じ)', () => {
+  it('履歴の保存が throw → 行なし・印は外れる → 次の回に書けたら、tx を読み直さずに明細つきの行を書き、知らせる。その後に店主が消しても書き戻さない', async () => {
+    const events: QrBillRecorded[] = [];
+    show(BK, {}, NOW, (e) => events.push(e));
+    pay(995n, 1);
+    hold.failAppend = true;
+    await tick();
+    expect(rows()).toEqual([]);
+    expect(marks()).toEqual([]);
+    expect(events).toEqual([]);
+    hold.failAppend = false;
+    await tick();
+    expect(rows()).toEqual([[stdId(tx(1)), 'R-1']]);
+    expect(loadHistory()[0].lineItems).toHaveLength(1);
+    expect(marks()).toEqual([tx(1)]);
+    expect(events).toEqual([{ billKey: BK, count: 1, amount: (1_000n * ONE).toString() }]);
+    // やり直しは保存だけ (tx も block の時刻も読み直さない)。
+    expect(rpc.tx).toHaveBeenCalledTimes(1);
+    expect(rpc.time).toHaveBeenCalledTimes(1);
+    // 行が書けた tx の印は外さない = 店主が消した行を書き戻さない。
+    removeHistoryEntry(stdId(tx(1)));
+    await tick(2);
+    expect(rows()).toEqual([]);
+    expect(marks()).toEqual([tx(1)]);
+    expect(hold.appends).toBe(2);
+  });
+
+  it('失敗が続くと、やり直しは 3 回で止める (印を残し、行は書かない・上限の警告は 1 回)', async () => {
+    const listener = vi.fn();
+    show(BK, {}, NOW, listener);
+    pay(995n, 1);
+    hold.failAppend = true;
+    await tick(QR_SALE_SAVE_RETRY_MAX + 2);
+    expect(hold.appends).toBe(1 + QR_SALE_SAVE_RETRY_MAX);
+    expect(rows()).toEqual([]);
+    expect(marks()).toEqual([tx(1)]);
+    expect(warn.mock.calls.filter(([name]) => name === 'qrSale.save_retry_exhausted')).toHaveLength(1);
+    hold.failAppend = false;
+    await tick();
+    expect(rows()).toEqual([]);
+    expect(hold.appends).toBe(1 + QR_SALE_SAVE_RETRY_MAX);
+    expect(listener).not.toHaveBeenCalled();
   });
 });
 

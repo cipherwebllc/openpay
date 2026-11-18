@@ -88,6 +88,7 @@ import {
   QR_SALE_SMALL_RANGE_BLOCKS,
   QR_SALE_OVERLAP_BLOCKS,
   QR_SALE_POLL_MS,
+  QR_SALE_SAVE_RETRY_MAX,
   hideQrBill,
   isBlockRangeLimitError,
   showQrBill,
@@ -602,7 +603,7 @@ describe('一致した入金だけを行にする', () => {
   });
 });
 
-describe('保存の決まり (同じ tx は 1 行・印が先・印は外さない)', () => {
+describe('保存の決まり (同じ tx は 1 行・印が先・行が書けた tx の印は外さない)', () => {
   const payerRow = (hash: string) =>
     buildHistoryEntry({
       flow: 'batch', status: 'success', chainId: POLYGON.chainId, chainSlug: 'polygon', asset: 'jpyc',
@@ -724,21 +725,22 @@ describe('保存の決まり (同じ tx は 1 行・印が先・印は外さな�
     expect(order.indexOf(HISTORY_STORAGE_KEY)).toBeGreaterThan(0);
   });
 
-  it('履歴の保存が throw しても、印は残し (外さない)、後ろの入金の記録を続ける。警告は 1 回', async () => {
+  it('履歴の保存が throw したら、その tx の印を外し (次の回にやり直す)、後ろの入金の記録を続ける。警告は 1 回', async () => {
     show();
     settle(994n, 1);
     hold.failAppend = true;
     await tick();
-    expect(marks()).toEqual([tx(1)]);
+    // 行の無い印を残さない (残すと、次の回も印を見て書かず、その入金は永久に履歴から欠ける)。
+    expect(marks()).toEqual([]);
     expect(loadHistory()).toEqual([]);
     hold.failAppend = false;
     chain.head = 1_002n;
     settle(999n, 2);
     await tick();
-    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(2)}`]);
-    // 印の付いた 1 件目は、二度と書かない。
+    // 次の回は、前の回の入金を先に書き直してから、新しい入金を書く (古い入金が下に並ぶ)。
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(2)}`, `batch-${tx(1)}`]);
     expect(marks().sort()).toEqual([tx(1), tx(2)]);
-    expect(hold.appends).toBe(2);
+    expect(hold.appends).toBe(3);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toBe('qrSale.save_failed');
   });
@@ -772,6 +774,210 @@ describe('保存の決まり (同じ tx は 1 行・印が先・印は外さな�
     expect(dump(window.localStorage)).not.toContain(BK);
     expect(dump(window.localStorage)).not.toContain('bk=');
     expect(window.sessionStorage.length).toBe(0);
+  });
+});
+
+describe('保存のやり直し (印を書いた後に、行を履歴に読み直せなかった入金)', () => {
+  const showWith = (listener: (event: QrBillRecorded) => void, billKey = BK) =>
+    showQrBill(
+      { billKey, kind: 'pay', url: payUrl({ productName: 'ランチ', receiptNo: 'R-1' }), itemName: 'お支払い' },
+      Date.now(),
+      listener,
+    );
+  // 履歴の key への書き込みだけを失敗させる (appendHistory は握りつぶして返る = 容量の上限・private mode の拒否)。
+  const failHistoryWrites = () => {
+    const real = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      if (key === HISTORY_STORAGE_KEY) throw new Error('QuotaExceededError');
+      real.call(this, key, value);
+    });
+    return () => spy.mockRestore();
+  };
+  const warned = (event: string) => warn.mock.calls.filter(([name]) => name === event).length;
+
+  it('書き込みが黙って失敗 → 行なし・印は外れる・知らせない → 次の回に書けたら、照合し直さずに明細つきの行を書き、知らせる', async () => {
+    const events: QrBillRecorded[] = [];
+    showWith((e) => events.push(e));
+    settle(995n, 1);
+    const restore = failHistoryWrites();
+    await tick();
+    restore();
+    expect(loadHistory()).toEqual([]);
+    expect(marks()).toEqual([]);
+    expect(events).toEqual([]);
+    const matched = hold.matches;
+    await tick();
+    const rows = loadHistory();
+    expect(rows.map((e) => e.id)).toEqual([`batch-${tx(1)}`]);
+    expect(rows[0]).toMatchObject({ receiptNo: 'R-1', productName: 'ランチ', saleAmount: (1_000n * ONE).toString() });
+    expect(rows[0].lineItems).toHaveLength(1);
+    expect(marks()).toEqual([tx(1)]);
+    // 知らせは行を読み直せた回に 1 回。何件目かは照合したときの数 (1 = 明細つきの行)。
+    expect(events).toEqual([{ billKey: BK, count: 1, amount: (1_000n * ONE).toString() }]);
+    // やり直しは保存だけ (照合し直さない)。
+    expect(hold.matches).toBe(matched);
+    expect(hold.appends).toBe(2);
+    expect(warned('qrSale.save_retry_exhausted')).toBe(0);
+  });
+
+  it('失敗が続くと、やり直しは同じ tx に 3 回で止める (印を残し、行は書かない・警告は 1 回)。書けるようになっても書かない', async () => {
+    expect(QR_SALE_SAVE_RETRY_MAX).toBe(3);
+    const listener = vi.fn();
+    showWith(listener);
+    settle(994n, 1);
+    settle(995n, 2);
+    hold.failAppend = true;
+    await tick(QR_SALE_SAVE_RETRY_MAX + 2);
+    // tx ごとに、1 回目 + やり直し 3 回。
+    expect(hold.appends).toBe(2 * (1 + QR_SALE_SAVE_RETRY_MAX));
+    expect(loadHistory()).toEqual([]);
+    expect(marks().sort()).toEqual([tx(1), tx(2)]);
+    // 上限の警告は、2 つの tx が上限に届いても 1 回。保存の throw の警告 (qrSale.save_failed) も 1 回。
+    expect(warned('qrSale.save_retry_exhausted')).toBe(1);
+    expect(warned('qrSale.save_failed')).toBe(1);
+    hold.failAppend = false;
+    await tick(2);
+    expect(hold.appends).toBe(2 * (1 + QR_SALE_SAVE_RETRY_MAX));
+    expect(loadHistory()).toEqual([]);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('行が書けた tx の印は外さない: 後の入金の保存が失敗しても、外すのはその入金の tx の印だけ', async () => {
+    show();
+    settle(994n, 1);
+    await tick();
+    expect(marks()).toEqual([tx(1)]);
+    chain.head = 1_002n;
+    settle(999n, 2);
+    const restore = failHistoryWrites();
+    await tick();
+    restore();
+    expect(marks()).toEqual([tx(1)]);
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(1)}`]);
+  });
+
+  it('やり直しで書けた行を店主が消したら、同じ tx を読み直しても書き戻さない', async () => {
+    show();
+    settle(995n, 1);
+    hold.failAppend = true;
+    await tick();
+    hold.failAppend = false;
+    await tick();
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(1)}`]);
+    removeHistoryEntry(`batch-${tx(1)}`);
+    // 組み直し (reorg) で同じ tx が別の log の番号で届いた = 「読んだ log」には無い。印で止まる。
+    chain.logs[0] = { ...chain.logs[0], logIndex: 5 };
+    await tick(2);
+    expect(loadHistory()).toEqual([]);
+    expect(marks()).toEqual([tx(1)]);
+    expect(hold.appends).toBe(2);
+  });
+
+  it('確かめた後・印を書く前に、別のタブが同じ tx の印を書いた: 行を読み直せなくても、その印は外さない', async () => {
+    show();
+    settle(995n, 1);
+    hold.failAppend = true;
+    const real = Storage.prototype.getItem;
+    let reads = 0;
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      // 保存の直前の確認 (1 回目の読み取り) の後、印を書く所 (2 回目) の前に、別のタブの印が届く。
+      if (key === QR_SALE_MARKS_KEY && ++reads === 2) {
+        window.localStorage.setItem(QR_SALE_MARKS_KEY, JSON.stringify([[tx(1), 1]]));
+      }
+      return real.call(this, key);
+    });
+    await tick();
+    getItem.mockRestore();
+    expect(reads).toBe(2);
+    expect(hold.appends).toBe(1);
+    expect(window.localStorage.getItem(QR_SALE_MARKS_KEY)).toBe(JSON.stringify([[tx(1), 1]]));
+    hold.failAppend = false;
+    await tick();
+    // 別の書き手の印がある tx は書かない (今までどおり)。
+    expect(loadHistory()).toEqual([]);
+    expect(hold.appends).toBe(1);
+  });
+
+  it('やり直しの前に、受注の書き手が同じ tx に印を書いた → やり直しで書かない・その印に触れない・知らせない', async () => {
+    const listener = vi.fn();
+    showWith(listener);
+    settle(995n, 1);
+    hold.failAppend = true;
+    await tick();
+    hold.failAppend = false;
+    window.localStorage.setItem(ORDER_SALE_MARKS_KEY, JSON.stringify([[tx(1), 1]]));
+    await tick();
+    expect(hold.appends).toBe(1);
+    expect(loadHistory()).toEqual([]);
+    expect(window.localStorage.getItem(ORDER_SALE_MARKS_KEY)).toBe(JSON.stringify([[tx(1), 1]]));
+    expect(marks()).toEqual([]);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('やり直しの前に、ほかのタブが同じ tx の行を書いた → やり直しで書かない (その行に印だけ付ける)・知らせない', async () => {
+    const listener = vi.fn();
+    showWith(listener);
+    settle(995n, 1);
+    hold.failAppend = true;
+    await tick();
+    hold.failAppend = false;
+    appendHistory(
+      buildHistoryEntry({
+        flow: 'batch', status: 'success', chainId: POLYGON.chainId, chainSlug: 'polygon', asset: 'jpyc',
+        tokenAddress: POLYGON.address, payMode: 'gasless', gasMode: 'merchant', merchant: SHOP,
+        merchantAmount: 998n * ONE, customer: CUSTOMER, feeReceiver: env.feeReceiver, feeAmount: 0n,
+        txHash: tx(1), userOpHash: null, blockNumber: null, errorMessage: null, storeName: 'payer wrote this',
+      }),
+    );
+    hold.appends = 0;
+    await tick();
+    expect(hold.appends).toBe(0);
+    expect(loadHistory().map((e) => e.storeName)).toEqual(['payer wrote this']);
+    expect(marks()).toEqual([tx(1)]);
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('印を外せない (localStorage の障害) → 印は残り、やり直さない。見張りの次の回と、ほかの入金の記録は続く', async () => {
+    show();
+    settle(994n, 1);
+    hold.failAppend = true;
+    const real = Storage.prototype.setItem;
+    let writes = 0;
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key: string, value: string) {
+      // 1 回目 = 印を書く・2 回目 = 印を外す (ここだけ失敗させる)。
+      if (key === QR_SALE_MARKS_KEY && ++writes === 2) throw new Error('QuotaExceededError');
+      real.call(this, key, value);
+    });
+    await tick();
+    setItem.mockRestore();
+    expect(writes).toBe(2);
+    expect(marks()).toEqual([tx(1)]);
+    hold.failAppend = false;
+    chain.head = 1_002n;
+    settle(999n, 2);
+    await tick();
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(2)}`]);
+    expect(marks().sort()).toEqual([tx(1), tx(2)]);
+    expect(hold.appends).toBe(2);
+  });
+
+  it('やり直すのは、その会計を見張っている間だけ: 表示をやめて 60 秒を過ぎた会計の行は、やり直さずに捨てる', async () => {
+    show();
+    show(BK2, { amount: '700' });
+    settle(995n, 1);
+    hold.failAppend = true;
+    await tick();
+    expect(marks()).toEqual([]);
+    // タブが裏のあいだは、読みも、やり直しもしない。その間に、表示をやめて 60 秒を過ぎた。
+    hold.visibility = 'hidden';
+    hide(BK);
+    await vi.advanceTimersByTimeAsync(QR_SALE_KEEP_AFTER_HIDE_MS + QR_SALE_POLL_MS);
+    hold.failAppend = false;
+    hold.visibility = 'visible';
+    await tick();
+    expect(hold.appends).toBe(1);
+    expect(loadHistory()).toEqual([]);
+    expect(marks()).toEqual([]);
   });
 });
 
@@ -1313,7 +1519,8 @@ describe('画面への知らせ (行を書いた後だけ・受け手の失敗�
     });
     await tick();
     setItem.mockRestore();
-    expect(hold.appends).toBe(2);
+    // 前の回の入金のやり直し (1) + 新しい入金 (1)。どちらも書けず、知らせない。
+    expect(hold.appends).toBe(3);
     expect(loadHistory()).toEqual([]);
     expect(listener).not.toHaveBeenCalled();
   });
