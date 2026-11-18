@@ -22,9 +22,9 @@ import { SPONSORS, sponsorsContentFor, sponsorsMetadata, type SponsorsContent } 
 const ROOT = resolve(__dirname, '../..');
 
 describe('料金と入稿の決まり (lib/sponsorPlans.ts) の値', () => {
-  it('法人スポンサー 33,000 円／30 日・最大 3 社・バナー広告 11,000 円／30 日・最大 3 社で共有', () => {
+  it('法人スポンサー 33,000 円／30 日・最大 6 社・バナー広告 11,000 円／30 日・最大 3 社で共有', () => {
     expect(SPONSOR_PLANS).toEqual({
-      sponsor: { priceYen: 33_000, termDays: 30, maxCompanies: 3 },
+      sponsor: { priceYen: 33_000, termDays: 30, maxCompanies: 6 },
       banner: { priceYen: 11_000, termDays: 30, maxCompanies: 3 },
     });
   });
@@ -62,7 +62,7 @@ const APPROVED_JA = {
   purpose:
     'いただいた協賛・掲載料は、OpenPay の開発と運営にあてます。協賛は、OpenPay の開発・運営の支援と、協賛企業としての掲載を内容とします。',
   sponsor:
-    '33,000 円／30 日・最大 3 社。トップページ上部の「協賛企業」欄・OpenPay の案内ページ（ガイド等）の下部・このページに、ロゴ・企業名・リンク（このページでは短い紹介文も）を掲載します。掲載中の全社のロゴを、同じ大きさで並べます。',
+    '33,000 円／30 日・最大 6 社。トップページ上部の「協賛企業」欄・OpenPay の案内ページ（ガイド等）の下部・このページに、ロゴ・企業名・リンク（このページでは短い紹介文も）を掲載します。掲載中の全社のロゴを、同じ大きさで並べます。',
   banner:
     '11,000 円／30 日・最大 3 社で共有する枠。トップページ（主な機能の紹介の後）・Store（商品一覧の手前）・AI ストア（カタログの手前）に掲載します。',
   priceNote:

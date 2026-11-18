@@ -19,7 +19,8 @@ export type SponsorPlan = {
 
 export const SPONSOR_PLANS: Readonly<Record<SponsorPlanId, SponsorPlan>> = {
   // 法人スポンサー: 協賛企業の欄・案内ページの下部・募集ページに、ロゴ・企業名・リンクを同じ大きさで並べる。
-  sponsor: { priceYen: 33_000, termDays: 30, maxCompanies: 3 },
+  // 上限 6 社 (2026-11-18 user 裁定: 表示を分け合わないので 3 から増やす・限られた枠として上限は書く)。
+  sponsor: { priceYen: 33_000, termDays: 30, maxCompanies: 6 },
   // バナー広告: 最大 3 社で共有する枠 (ページ表示のたびに 1 件をランダムに出す・第 2 段)。
   banner: { priceYen: 11_000, termDays: 30, maxCompanies: 3 },
 };
