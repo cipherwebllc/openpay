@@ -119,17 +119,26 @@ function multilineValue(raw: string, maxCodePoints: number): string | undefined 
   return codePoints(cleaned) <= maxCodePoints ? cleaned : undefined;
 }
 
-/** 仕様表: 空でない行は保存の上限 (8 行) まで、1 行はフォームが読み込む形 `${label}: ${value}` の最大の長さまで。 */
-const SPEC_LINE_MAX = MAX_HOSTED_SPEC_LABEL_LEN + 2 + MAX_HOSTED_SPEC_VALUE_LEN;
+// 出品フォームの保存 (CreatorStoreSellerPanel) と同じ区切り: 直後が / でない最初のコロン (半角・全角)。
+const SPEC_SEPARATOR_RE = /^([^:：]*)[:：](?!\/)(.*)$/;
+
+/**
+ * 仕様表: 保存と同じ形で各行を「ラベル: 値」に分け、保存の上限 (8 行・ラベル 24 字・値 80 字・code point) を各行に当てる。
+ * 区切りの無い行はラベルだけとみなす (入力の途中でも案を作れる・保存では従来どおり 400 になる)。
+ */
 function specsValue(raw: string): string | undefined {
   if (raw.length > MAX_HOSTED_TEXT_CODE_POINTS) return undefined;
-  const lines = raw
-    .split(/\r\n?|\n/)
-    .map((line) => sanitizeLine(line, Number.MAX_SAFE_INTEGER) ?? '')
-    .filter(Boolean);
-  if (lines.length > MAX_HOSTED_SPECS) return undefined;
-  if (lines.some((line) => codePoints(line) > SPEC_LINE_MAX)) return undefined;
-  return lines.join('\n');
+  const rows: string[] = [];
+  for (const line of raw.split(/\r\n?|\n/)) {
+    const cleaned = sanitizeLine(line, Number.MAX_SAFE_INTEGER) ?? '';
+    if (!cleaned) continue;
+    const match = SPEC_SEPARATOR_RE.exec(cleaned);
+    const label = (match ? match[1] : cleaned).trim();
+    const value = match ? match[2].trim() : '';
+    if (codePoints(label) > MAX_HOSTED_SPEC_LABEL_LEN || codePoints(value) > MAX_HOSTED_SPEC_VALUE_LEN) return undefined;
+    rows.push(value ? `${label}: ${value}` : label);
+  }
+  return rows.length <= MAX_HOSTED_SPECS ? rows.join('\n') : undefined;
 }
 
 /** タグ: 保存と同じ分け方 (、か , で区切る) で parseHostedTags (5 個・各 24 字) を通す。 */
@@ -330,33 +339,71 @@ const BLOCKED_FINISH_REASONS: ReadonlySet<string> = new Set([
   'IMAGE_RECITATION',
 ]);
 
-const URL_RE = /(?:https?:\/\/|www\.)[\x21-\x7e]+/gi;
-// 出力の URL は落とす (指示でも禁じるが、守られなかったときの網)。落とした跡の空白は 1 つに寄せる。
-const withoutUrls = (text: string) => text.replace(URL_RE, ' ').replace(/ {2,}/g, ' ');
+// 制御・書式・サロゲート (保存の UNSAFE_UNICODE_RE と同じ) に加え、見えない文字 (Default_Ignorable: ゼロ幅・ハングルの
+// 埋め字 U+3164・異体字セレクタなど) も除く。見えない文字で区切った URL を、除いた後に URL として残さないため。
+const INVISIBLE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Default_Ignorable_Code_Point}]/gu;
+// scheme (http / https) か www. で始まり、空白・引用符・括弧・日本語の句読点の手前まで (日本語のドメイン・パスも含む)。
+const URL_RE = /(?:https?:\/\/|www\.)[^\s"'<>()[\]{},、。「」『』【】〈〉《》]+/giu;
 
-function lineField(raw: string, max: number): ListingAssistantDraftField<string> {
-  const value = sanitizeLine(withoutUrls(raw), Number.MAX_SAFE_INTEGER) ?? '';
-  return { value, fits: sanitizeLine(value, max) !== undefined };
+/**
+ * 出力の 1 つの文字列を整える (6 欄すべて同じ): 改行を空白に → NFKC (全角の ｈｔｔｐｓ：／／ などを ASCII に) → 制御文字と
+ * 見えない文字を除く → URL を除く (指示でも禁じるが、守られなかったときの網・除いた跡は空白なので新しい URL は組み上がらない)
+ * → 保存と同じ sanitizeLine。文字の正規化を URL の判定より先にする (後にすると判定をすり抜ける)。
+ */
+function normalizeOutputText(raw: string): string {
+  const text = raw
+    .replace(/[\r\n]+/g, ' ')
+    .normalize('NFKC')
+    .replace(INVISIBLE_RE, '')
+    .replace(URL_RE, ' ')
+    .replace(/ {2,}/g, ' ');
+  return sanitizeLine(text, Number.MAX_SAFE_INTEGER) ?? '';
 }
 
-function cleanItems(raw: readonly string[]): string[] {
-  return raw.map((item) => sanitizeLine(withoutUrls(item), Number.MAX_SAFE_INTEGER) ?? '').filter(Boolean);
+/** 上限の中に切った見本 (UTF-16 の長さ = sanitizeLine と同じ数え方・サロゲートの組は割らない)。 */
+function clipUnits(text: string, max: number): string {
+  if (text.length <= max) return text;
+  let out = '';
+  for (const ch of text) {
+    if (out.length + ch.length > max) break;
+    out += ch;
+  }
+  return out.trimEnd();
+}
+
+/** 上限の中に切った見本 (code point = parseHostedTags と同じ数え方)。 */
+const clipCodePoints = (text: string, max: number) => [...text].slice(0, max).join('').trimEnd();
+
+// fits=false の欄も value は上限の中に切った見本にする (画面へ長すぎる値・多すぎる件数を返さない)。
+function lineField(raw: string, max: number): ListingAssistantDraftField<string> {
+  const value = normalizeOutputText(raw);
+  const fits = sanitizeLine(value, max) !== undefined;
+  return { value: fits ? value : clipUnits(value, max), fits };
 }
 
 function tagsField(raw: readonly string[]): ListingAssistantDraftField<string[]> {
   // フォームのタグ欄は 、と , で区切るので、区切り文字を含むタグは分けてから保存と同じ parseHostedTags を通す。
-  const items = cleanItems(raw.flatMap((tag) => tag.split(/[,、]/)));
+  const items = raw
+    .flatMap((tag) => normalizeOutputText(tag).split(/[,、]/))
+    .map((tag) => tag.trim())
+    .filter(Boolean);
   const parsed = parseHostedTags(items);
-  if (!parsed.ok) return { value: [...new Set(items)], fits: false };
+  if (!parsed.ok) {
+    const preview = [...new Set(items.map((tag) => clipCodePoints(tag, MAX_HOSTED_TAG_LEN)))].slice(0, MAX_HOSTED_TAGS);
+    return { value: preview, fits: false };
+  }
   const tags = [...(parsed.tags ?? [])];
   return { value: tags, fits: tags.length > 0 };
 }
 
 function checksField(raw: readonly string[]): ListingAssistantDraftField<string[]> {
-  const items = cleanItems(raw);
+  const items = raw.map(normalizeOutputText).filter(Boolean);
+  const fits = items.length <= LISTING_ASSISTANT_CHECKS_MAX && items.every((item) => item.length <= LISTING_ASSISTANT_CHECK_MAX);
   return {
-    value: items,
-    fits: items.length <= LISTING_ASSISTANT_CHECKS_MAX && items.every((item) => item.length <= LISTING_ASSISTANT_CHECK_MAX),
+    value: fits
+      ? items
+      : items.slice(0, LISTING_ASSISTANT_CHECKS_MAX).map((item) => clipUnits(item, LISTING_ASSISTANT_CHECK_MAX)),
+    fits,
   };
 }
 
@@ -465,9 +512,12 @@ export async function generateListingDraft(input: ListingAssistantInput): Promis
         body: JSON.stringify(geminiRequestBody(input)),
         signal: controller.signal,
         cache: 'no-store',
+        // 3xx を追わない: 追うと key (x-goog-api-key) と画像・メモ・公開用の欄が転送先 (別 origin) にも届く。
+        // 3xx は fetch が投げる → 下の catch で 503 unavailable。
+        redirect: 'error',
       });
     } catch {
-      // 接続・DNS の失敗と中断を固定の code にする (例外の文・URL を応答とログに出さない)。
+      // 接続・DNS の失敗・転送 (3xx)・中断を固定の code にする (例外の文・URL を応答とログに出さない)。
       return controller.signal.aborted ? failure(504, 'timeout') : failure(503, 'unavailable');
     }
     // 本文の読み取りも同じ 20 秒の中断の内側 (読み取りの失敗は invalid_json になる)。
