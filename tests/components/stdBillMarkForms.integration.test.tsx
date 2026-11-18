@@ -1,15 +1,18 @@
-// K4b: /pay (PaymentForm) と /checkout (CheckoutForm) の通常決済の会計の印 (その端末だけの試しのスイッチ)。本物のフォームと
-// 本物の hooks/useStdBillMark.ts・useJpycEip3009Payment を動かし、通常決済の hook (useStandardPayment) の mutate の引数を受ける。
+// K4b: /pay (PaymentForm) と /checkout (CheckoutForm) の通常決済の会計の印 (対象の会計なら、どの端末でも付ける。その端末だけの
+// 試しのスイッチは 2026-11-19 に外した)。本物のフォームと本物の hooks/useStdBillMark.ts・useJpycEip3009Payment を動かし、通常決済の
+// hook (useStandardPayment) の mutate の引数を受ける。
 // 境界の mock は wagmi・ほかの決済 hook・見積り・fetch だけ (tests/components/billKeyForms.integration.test.tsx と同じ形)。
-//   - スイッチ OFF (既定): mutate の呼び出し (引数の全体) が、main 956eb4ff のフォームで採った GOLDEN
+//   - bk の無い URL (= 対象の外): mutate の呼び出し (引数の全体) が、main 956eb4ff (印を足す前) のフォームで採った GOLDEN
 //     (tests/fixtures/stdBillMarkGoldenForms.json) と 1 byte も同じ (引数 1 つ・第 2 引数の印が無い)・印の計算もしない。
 //     GOLDEN の採り方: components/PaymentForm.tsx・CheckoutForm.tsx を main 956eb4ff のものにして
 //     STD_BILL_MARK_GOLDEN_CAPTURE=<書き出す dir> npx vitest run tests/components/stdBillMarkForms.integration.test.tsx -t 'GOLDEN を採る'
 //     → 書き出された forms.json を tests/fixtures/stdBillMarkGoldenForms.json に置く (新しい code から写さない)。
-//   - スイッチ ON: JPYC の通常決済で、URL の bk の印 (billKeyStdMark の golden) を第 2 引数に渡す。第 1 引数 (保存の intent・
-//     contextKey の元) は OFF と 1 byte も同じ。
+//     main のフォームは通常決済で bk を読まないので、GOLDEN は bk つきの URL で採ってある (bk の無い URL でも同じ値)。
+//   - 対象の会計 (JPYC の通常決済・bk のある URL): URL の bk の印 (billKeyStdMark の golden) を第 2 引数に渡す。第 1 引数 (保存の
+//     intent・contextKey の元) は GOLDEN と 1 byte も同じ。
 //   - 押した時の URL の bk が準備した bk と違う・無い・形が違うときと、対象でない会計 (金額なし・USDC・注文に結び付く会計) は
-//     印なし。ガスレスの支払いは変わらない。ガスレスの画面から通常決済へ切り替えた支払いには付ける。
+//     印なし。ガスレスの支払いは変わらない (relay への POST の body が main の GOLDEN と同じ)。ガスレスの画面から通常決済へ
+//     切り替えた支払いには付ける。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -97,7 +100,6 @@ import { useGasQuoteJpyc } from '@/hooks/useGasQuoteJpyc';
 import { PaymentForm } from '@/components/PaymentForm';
 import { CheckoutForm } from '@/components/CheckoutForm';
 import { buildCheckoutUrl, parseCheckoutParams, type CheckoutParams } from '@/lib/url';
-import { STD_BILL_MARK_TRIAL_KEY } from '@/lib/stdBillMarkTrial';
 import { mockHook } from '../_helpers/wagmiMock';
 import { FIXED_NOW_MS, jsonWithBigint, stubRandom, stubRelayFetch } from '../_helpers/relayAttemptCapture';
 import goldenFromMain from '../fixtures/stdBillMarkGoldenForms.json';
@@ -155,6 +157,8 @@ const FORMS = { '/pay': renderPay, '/checkout': renderCheckout } as const;
 type FormName = keyof typeof FORMS;
 const FORM_NAMES = Object.keys(FORMS) as FormName[];
 const STD_QUERY: Record<FormName, string> = { '/pay': PAY_STD, '/checkout': CHECKOUT_STD };
+// GOLDEN の中の、ガスレス (relay) の /pay の body の名前。
+const RELAY_GOLDEN = '/pay relay';
 
 // effect の中の dynamic import と then を流す。
 async function flush() {
@@ -171,10 +175,18 @@ async function clickPay(name: RegExp = /JPYC を支払う/) {
   await user.click(button);
 }
 
-// 押した時の通常決済の mutate の呼び出し (引数の配列) を 1 つ返す。
-async function payStandard(form: FormName, query: string) {
+// 印の hook が印を計算し終える (本物の billKeyStdMark が呼ばれる = hook は呼んだ直後に同期で ref に置く) まで待つ。
+// 着くまでの tick の数は決まっていない (dynamic import) ので、決まった回数の tick でなく、計算した状態そのものを待つ。
+async function markComputed(after: number) {
+  await vi.waitFor(() => expect(stdMark.calls.length).toBeGreaterThan(after), { timeout: 2000, interval: 5 });
+}
+
+// 押した時の通常決済の mutate の呼び出し (引数の配列) を 1 つ返す。marked = 印の計算を待ってから押す (印の付く会計)。
+async function payStandard(form: FormName, query: string, marked = false) {
   standardMutate.mockClear();
+  const computedBefore = stdMark.calls.length;
   const view = FORMS[form](query);
+  if (marked) await markComputed(computedBefore);
   await clickPay();
   expect(standardMutate).toHaveBeenCalledOnce();
   const call = standardMutate.mock.calls[0] as unknown[];
@@ -182,7 +194,16 @@ async function payStandard(form: FormName, query: string) {
   return call;
 }
 
-const switchOn = () => window.localStorage.setItem(STD_BILL_MARK_TRIAL_KEY, '1');
+// ガスレス (relay) の /pay の支払いの、relay への POST の body (時刻と乱数は固定)。
+const PAY_RELAY = `to=${MERCHANT}&token=jpyc&amount=1000&bk=${BK}`;
+async function payRelay() {
+  const view = renderPay(PAY_RELAY);
+  await clickPay(/1000 JPYC を支払う/);
+  await waitFor(() => expect(relay.posts).toHaveLength(1));
+  const body = relay.posts[0].body;
+  view.unmount();
+  return body;
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: FIXED_NOW_MS });
@@ -227,59 +248,67 @@ if (capturePath) {
       for (const form of FORM_NAMES) {
         golden[form] = jsonWithBigint(await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`));
       }
+      golden[RELAY_GOLDEN] = await payRelay();
       writeFileSync(join(capturePath, 'forms.json'), `${JSON.stringify(golden, null, 2)}\n`);
     });
   });
 }
-// main のフォームが、同じ会計 (bk つきの URL) で通常決済の mutate に渡した引数の全体 (呼び出し 1 つ分の配列)。
-const GOLDEN = goldenFromMain as Record<FormName, string>;
+// main のフォームが、同じ会計 (bk つきの URL) で通常決済の mutate に渡した引数の全体 (呼び出し 1 つ分の配列) と、
+// ガスレス (relay) の /pay が同じ bk つきの URL で relay へ POST した body。
+const GOLDEN = goldenFromMain as Record<FormName | typeof RELAY_GOLDEN, string>;
 
-describe('試しのスイッチ OFF (既定・ほかの全員): 通常決済の mutate は main と同じ', () => {
-  it.each(FORM_NAMES)('%s: bk のある URL でも、mutate の引数の全体が main の GOLDEN と同じ (引数 1 つ)・印を計算しない', async (form) => {
-    const withKey = await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`);
+describe('bk の無い URL (= 対象の外): 通常決済の mutate は main と 1 byte も同じ', () => {
+  it.each(FORM_NAMES)('%s: mutate の引数の全体が main の GOLDEN と同じ (引数 1 つ)・印を計算しない', async (form) => {
+    const plain = await payStandard(form, STD_QUERY[form]);
     expect(GOLDEN[form]).toContain(MERCHANT);
-    expect(jsonWithBigint(withKey)).toBe(GOLDEN[form]);
-    expect(withKey).toHaveLength(1);
-    // bk の無い URL も同じ。
-    expect(jsonWithBigint(await payStandard(form, STD_QUERY[form]))).toBe(GOLDEN[form]);
+    expect(jsonWithBigint(plain)).toBe(GOLDEN[form]);
+    expect(plain).toHaveLength(1);
     expect(stdMark.calls).toEqual([]);
+  });
+
+  it.each(FORM_NAMES)('%s: 形の違う bk (前の 22 字) の URL も、mutate の引数の全体が main の GOLDEN と同じ (引数 1 つ)', async (form) => {
+    // 形の違う bk は、印の計算が「印なし」を返す (計算を終えたのを待ってから押す)。
+    const bad = await payStandard(form, `${STD_QUERY[form]}&bk=${OLD_22_BK}`, true);
+    expect(stdMark.calls).toEqual([OLD_22_BK]);
+    expect(jsonWithBigint(bad)).toBe(GOLDEN[form]);
+    expect(bad).toHaveLength(1);
   });
 });
 
-describe('試しのスイッチの読み込みが throw するブラウザ (保存の使えないブラウザ)', () => {
-  it.each(FORM_NAMES)('%s: 支払いは止まらず、印なしで今までどおり送る', async (form) => {
-    switchOn();
-    const getItem = Storage.prototype.getItem;
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
-      if (key === STD_BILL_MARK_TRIAL_KEY) throw new Error('SecurityError: storage is disabled');
-      return getItem.call(this, key);
-    });
-    const call = await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`);
-    expect(call).toHaveLength(1);
-    expect(stdMark.calls).toEqual([]);
-  });
-});
-
-describe('試しのスイッチ ON の端末: JPYC の通常決済の受取先への transfer に印を付ける', () => {
-  beforeEach(() => switchOn());
-
+describe('対象の会計 (bk のある URL・どの端末でも): JPYC の通常決済の受取先への transfer に印を付ける', () => {
   it.each(FORM_NAMES)('%s: 第 2 引数が URL の bk の印 (golden)・第 1 引数は main の GOLDEN と 1 byte も同じ (intent・contextKey に印が入らない)', async (form) => {
-    const on = await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`);
-    expect(on).toHaveLength(2);
-    expect(on[1]).toBe(MARK);
-    expect(jsonWithBigint([on[0]])).toBe(GOLDEN[form]);
-    expect(jsonWithBigint(on[0])).toContain(MERCHANT);
-    expect(jsonWithBigint(on[0])).not.toContain(MARK.slice(2));
+    const marked = await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`, true);
+    expect(marked).toHaveLength(2);
+    expect(marked[1]).toBe(MARK);
+    expect(jsonWithBigint([marked[0]])).toBe(GOLDEN[form]);
+    expect(jsonWithBigint(marked[0])).toContain(MERCHANT);
+    expect(jsonWithBigint(marked[0])).not.toContain(MARK.slice(2));
     expect(stdMark.calls).toEqual([BK]);
+  });
+
+  // 外した試しのスイッチの名残 (2026-11-18 の試しの端末の localStorage) は読まない: 古い key の値によらず、同じに印を付ける。
+  it.each(FORM_NAMES)('%s: 外した試しのスイッチの古い key が localStorage に残っていても (off の値でも)、無くても、同じに印を付ける', async (form) => {
+    const calls: string[] = [];
+    for (const stored of [null, '1', 'off']) {
+      window.localStorage.clear();
+      if (stored !== null) window.localStorage.setItem('openpay:std-bill-mark-trial:v1', stored);
+      calls.push(jsonWithBigint(await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`, true)));
+    }
+    expect(JSON.parse(calls[0])).toHaveLength(2);
+    expect(JSON.parse(calls[0])[1]).toBe(MARK);
+    expect(calls[1]).toBe(calls[0]);
+    expect(calls[2]).toBe(calls[0]);
   });
 
   it.each(FORM_NAMES)('%s: 押した時の URL の bk が準備した bk と違う・無いと、印なし (引数 1 つ)', async (form) => {
     for (const changed of [OTHER_BK, null]) {
       standardMutate.mockClear();
+      const computedBefore = stdMark.calls.length;
       const view = FORMS[form](`${STD_QUERY[form]}&bk=${BK}`);
       const button = await screen.findByRole('button', { name: /JPYC を支払う/ });
       await waitFor(() => expect(button).toBeEnabled());
-      await flush();
+      // 印の準備を終えた (押せば印が付く) 状態にしてから、URL の bk だけを変える。
+      await markComputed(computedBefore);
       // 画面はそのまま、URL の bk だけが変わる (描き直しの前に押す)。
       const query = changed === null ? STD_QUERY[form] : `${STD_QUERY[form]}&bk=${changed}`;
       window.history.replaceState(null, '', `/ja/${form.slice(1)}?${query}`);
@@ -288,11 +317,6 @@ describe('試しのスイッチ ON の端末: JPYC の通常決済の受取先�
       expect(standardMutate.mock.calls[0]).toHaveLength(1);
       view.unmount();
     }
-  });
-
-  it.each(FORM_NAMES)('%s: bk が無い・形が違う (前の 22 字) URL は印なし', async (form) => {
-    expect(await payStandard(form, STD_QUERY[form])).toHaveLength(1);
-    expect(await payStandard(form, `${STD_QUERY[form]}&bk=${OLD_22_BK}`)).toHaveLength(1);
   });
 
   it('/pay・金額なしの QR (お店の端末が照合しない) は印なし・印を計算しない', async () => {
@@ -332,24 +356,18 @@ describe('試しのスイッチ ON の端末: JPYC の通常決済の受取先�
     expect(stdMark.calls).toEqual([]);
   });
 
-  it('/pay・ガスレス (relay) の支払いは変わらない: relay への POST の body が OFF と同じで、通常決済の mutate は呼ばない', async () => {
-    const payRelay = async () => {
-      window.sessionStorage.clear();
-      relay = stubRelayFetch();
-      stubRandom();
-      const view = renderPay(`to=${MERCHANT}&token=jpyc&amount=1000&bk=${BK}`);
-      await clickPay(/1000 JPYC を支払う/);
-      await waitFor(() => expect(relay.posts).toHaveLength(1));
-      const body = relay.posts[0].body;
-      view.unmount();
-      return body;
-    };
-    window.localStorage.removeItem(STD_BILL_MARK_TRIAL_KEY);
-    const off = await payRelay();
-    switchOn();
-    const on = await payRelay();
-    expect(on).toBe(off);
-    expect(on).not.toContain(MARK.slice(2));
+  it('/pay・ガスレス (relay) の支払いは変わらない: relay への POST の body が main の GOLDEN と同じで、通常決済の mutate は呼ばない', async () => {
+    // ガスレスの画面でも印は準備する (通常決済へ切り替えた後の送金のため)。準備を終えた後に押しても、relay の body は変わらない。
+    const computedBefore = stdMark.calls.length;
+    const view = renderPay(PAY_RELAY);
+    await markComputed(computedBefore);
+    await clickPay(/1000 JPYC を支払う/);
+    await waitFor(() => expect(relay.posts).toHaveLength(1));
+    const body = relay.posts[0].body;
+    view.unmount();
+    expect(GOLDEN[RELAY_GOLDEN]).toContain(MERCHANT);
+    expect(body).toBe(GOLDEN[RELAY_GOLDEN]);
+    expect(body).not.toContain(MARK.slice(2));
     expect(standardMutate).not.toHaveBeenCalled();
   });
 
@@ -358,7 +376,9 @@ describe('試しのスイッチ ON の端末: JPYC の通常決済の受取先�
     const query = form === '/pay'
       ? `to=${MERCHANT}&token=jpyc&amount=1000&bk=${BK}`
       : `${queryOf(buildCheckoutUrl('https://shop.test', { ...REGISTER, mode: undefined }))}&bk=${BK}`;
+    const computedBefore = stdMark.calls.length;
     FORMS[form](query);
+    await markComputed(computedBefore);
     await userEvent.setup().click(await screen.findByRole('button', { name: '通常支払い（自分でガスを払う）に切り替える' }));
     await clickPay();
     expect(standardMutate).toHaveBeenCalledOnce();

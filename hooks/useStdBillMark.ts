@@ -1,7 +1,8 @@
 'use client';
 
-// 払う側 (/pay・/checkout) の通常決済の送金に付ける会計の印 (K4b)。その端末だけの試しのスイッチ (lib/stdBillMarkTrial.ts) が
-// ON のときだけ動く。OFF (既定・ほかの全員) なら何もしない (URL の `bk` も読まず、印の chunk も読まない)。
+// 払う側 (/pay・/checkout) の通常決済の送金に付ける会計の印 (K4b)。対象の会計 (eligible) で、URL に会計の印 (`bk`) があれば、
+// どの端末でも付ける (2026-11-19 にその端末だけの試しのスイッチを外した)。対象でない会計は何もしない (URL の `bk` も読まず、
+// 印の chunk も読まない)。URL に `bk` の無い支払いも印の chunk を読まず、今までと 1 byte も変わらない送金を送る。
 //
 // 印 = lib/relay/billKeySalt.ts の billKeyStdMark(URL の `bk`) の 32 byte。お店の端末の照合 (lib/qrSaleHistory.ts の
 // stdTransferCalldata) と同じ関数。通常決済の hook (hooks/useStandardPayment.ts) が、受取先への ERC-20 の
@@ -9,7 +10,7 @@
 // 送金の宛先・額・本数は変わらない。
 //
 // 時機 (Fable の K-1): 印は mount の後 (と URL が変わった後) の effect で計算して ref に置く (state にしない = 描き直さない)。
-// 押した瞬間は、その ref を同期で読むだけ: スイッチが ON のままで、今の URL の `bk` が ref の `bk` と同じときだけ印を返す。
+// 押した瞬間は、その ref を同期で読むだけ: 対象の会計のままで、今の URL の `bk` が ref の `bk` と同じときだけ印を返す。
 // `bk` が無い・違う・形が違う・計算中・chunk を読めなかったときは undefined (印なし) を返し、呼ぶ側は今までどおりの送金を
 // その場で送る。押した後に await を挟まない (待つ間の二度押しで二重払いの窓を作らない)。
 //
@@ -22,7 +23,6 @@
 import { useEffect, useRef } from 'react';
 import type { Hex } from 'viem';
 import { readBillKeyParam } from '@/lib/url/billKey';
-import { isStdBillMarkTrialOn } from '@/lib/stdBillMarkTrial';
 
 /**
  * 通常決済の送金に付ける印を、押した瞬間に同期で返す関数を返す (印を付けないときは undefined)。
@@ -31,7 +31,7 @@ import { isStdBillMarkTrialOn } from '@/lib/stdBillMarkTrial';
 export function useStdBillMark(eligible: boolean, urlKey: unknown): () => Hex | undefined {
   const preparedRef = useRef<{ billKey: string; mark: Hex } | null>(null);
   useEffect(() => {
-    if (!eligible || !isStdBillMarkTrialOn()) return;
+    if (!eligible) return;
     const billKey = readBillKeyParam();
     if (!billKey) return;
     let active = true;
@@ -51,7 +51,7 @@ export function useStdBillMark(eligible: boolean, urlKey: unknown): () => Hex | 
 
   return () => {
     const prepared = preparedRef.current;
-    if (!eligible || !prepared || !isStdBillMarkTrialOn()) return undefined;
+    if (!eligible || !prepared) return undefined;
     return readBillKeyParam() === prepared.billKey ? prepared.mark : undefined;
   };
 }

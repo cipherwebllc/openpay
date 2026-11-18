@@ -36,7 +36,7 @@ import goldenFromMain from '../fixtures/stdBillMarkGoldenHook.json';
 // K4b: 通常決済の hook (useStandardPayment) の mutate の第 2 引数 dataSuffix (会計の印) が、ウォレットへ送る calldata に
 // どう載るか。wagmi の useWriteContract は本物のまま (本物の @wagmi/core の writeContract・viem・TanStack Query の Mutation)。
 // mock は境界だけ: ウォレット (EIP-1193 の request = 承認・拒否・失敗まで止めておける promise) と、receipt の照会。
-//   - dataSuffix を渡さない送金 (試しのスイッチ OFF・ほかの全員) は main と同じ: 外から見える全部 (ウォレットへの要求・
+//   - dataSuffix を渡さない送金 (bk の無い URL・対象でない会計・チップ等) は main と同じ: 外から見える全部 (ウォレットへの要求・
 //     writeContract の引数・保存の intent の各段・登録簿・決済のログ・結果) が、main 956eb4ff の hook で採った GOLDEN
 //     (tests/fixtures/stdBillMarkGoldenHook.json) と 1 byte も同じ。
 //     GOLDEN の採り方: hooks/useStandardPayment.ts を main 956eb4ff のものにして
@@ -48,7 +48,8 @@ import goldenFromMain from '../fixtures/stdBillMarkGoldenHook.json';
 //   - MUST-1: 印つきの送信は、その画面で 1 回まで。印つきで送る直前に同期で予約し、その後の送信は印なし (印つき A の応答待ちの
 //     間の B も)。予約を解くのは、ウォレットが投げた元の error (cause のいちばん奥) の code が EIP-1193 の 4001 で (途中に 4001 で
 //     ない code が無く)、その 4001 がウォレット自身の答えである接続 (injected・WalletConnect) のときだけ (文言だけの「拒否」では
-//     解かない)。receipt・revert・置換は追わない。
+//     解かない)。解くのは画面ごとに 1 回まで (全員に付けるときの Fable の MUST: 1 回目の 4001 の次は印つき・2 回目の 4001 では
+//     解かず、3 回目からは印なし)。receipt・revert・置換は追わない。
 // 兄弟の useStandardPayment.unmount.test.tsx と同じ形の harness (この file の分だけを写した)。
 type ReceiptState = {
   data:
@@ -659,7 +660,7 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     expect(out.second).toBe(MERCHANT_CALLDATA);
   });
 
-  it('ウォレットでの拒否 (EIP-1193 の 4001・tx が出ない・お客様が自分で取り消した) は数えない → 次も印つき (100 byte)', async () => {
+  it('ウォレットでの拒否 (EIP-1193 の 4001・tx が出ない・お客様が自分で取り消した) の 1 回目は数えない → 次も印つき (100 byte)', async () => {
     const out = await settleThenResend(async () => {
       await act(async () => {
         walletSends[0].reject();
@@ -674,6 +675,113 @@ describe('useStandardPayment の dataSuffix (K4b・MUST-1): 印つきの送信�
     ]);
     expect(out.second).toBe(concatHex([MERCHANT_CALLDATA, MARK]));
     expect(byteLength(out.second)).toBe(100);
+  });
+
+  // Fable の最終監査の MUST (全員に付けるときの条件): 4001 で予約を解くのは、画面ごとに 1 回まで。印つきの送金を、確認の画面を
+  // 出さずに 4001 で断るウォレットだと、毎回解けて印つきを送り続け、その画面から払えなくなる。
+  // 同じ画面から印を渡して送り、ウォレットが 4001 で断る、を count 回くり返し、ウォレットへ届いた calldata を順に返す。
+  async function rejectRepeatedly(view: Screen, tab: Awaited<ReturnType<typeof makeTab>>, count: number) {
+    const start = walletSends.length;
+    for (let index = start; index < start + count; index += 1) {
+      act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+      await waitForWalletSends(index + 1);
+      await act(async () => {
+        walletSends[index].reject();
+      });
+      await waitFor(() => expect(tab.mutationStatuses()[index]).toBe('error'));
+      await waitFor(() => expect(view.result.current.phase).toBe('merchant-error'));
+    }
+    return walletSends.slice(start).map((send) => send.tx.data);
+  }
+  const MARKED = concatHex([MERCHANT_CALLDATA, MARK]);
+
+  it('4001 で予約を解くのは画面ごとに 1 回まで: 1 回目の 4001 の次は印つき (100 byte)・2 回目の 4001 では解かず、3 回目からは印なし (68 byte)', async () => {
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    const sent = await rejectRepeatedly(view, tab, 5);
+    expect(sent).toEqual([MARKED, MARKED, MERCHANT_CALLDATA, MERCHANT_CALLDATA, MERCHANT_CALLDATA]);
+    expect(sent.map(byteLength)).toEqual([100, 100, 68, 68, 68]);
+    // 3 回目から (印なし) は今までどおりの transfer なので、ウォレットが承認すれば払える (この画面から払えなくならない)。
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(6);
+    expect(walletSends[5].tx.data).toBe(MERCHANT_CALLDATA);
+    await act(async () => {
+      walletSends[5].approve(MERCHANT_TX);
+    });
+    receiptByHash.set(MERCHANT_TX, receipt(MERCHANT_TX, 'success'));
+    view.rerender();
+    await waitFor(() => expect(view.result.current.phase).toBe('success'));
+    view.unmount();
+  });
+
+  it('1 回目の 4001 で解いた後の印つき (2 回目) が出たら (hash)、今までどおり次は印なし', async () => {
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    expect(await rejectRepeatedly(view, tab, 1)).toEqual([MARKED]);
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(2);
+    expect(walletSends[1].tx.data).toBe(MARKED);
+    await act(async () => {
+      walletSends[1].approve(MERCHANT_TX);
+    });
+    receiptByHash.set(MERCHANT_TX, receipt(MERCHANT_TX, 'reverted'));
+    view.rerender();
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-error'));
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(3);
+    expect(walletSends[2].tx.data).toBe(MERCHANT_CALLDATA);
+    view.unmount();
+  });
+
+  it('解く回数を数えるのは、その画面だけ (2 回の 4001 で印なしになった後に開き直した画面は、また印つきで送り、1 回だけ解く)', async () => {
+    const tab = await makeTab();
+    const first = await tab.mountScreen();
+    expect(await rejectRepeatedly(first, tab, 3)).toEqual([MARKED, MARKED, MERCHANT_CALLDATA]);
+    first.unmount();
+
+    const second = await tab.mountScreen();
+    expect(await rejectRepeatedly(second, tab, 3)).toEqual([MARKED, MARKED, MERCHANT_CALLDATA]);
+    second.unmount();
+  });
+
+  it('4001 と確かめられない拒否では解かない (回数にも数えない・予約のまま): その後の送信は印なしが続く', async () => {
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(1);
+    await act(async () => {
+      walletSends[0].rejectWith(new Error('User rejected the request.'));
+    });
+    await waitFor(() => expect(view.result.current.phase).toBe('merchant-error'));
+    expect(await rejectRepeatedly(view, tab, 2)).toEqual([MERCHANT_CALLDATA, MERCHANT_CALLDATA]);
+    expect(walletSends[0].tx.data).toBe(MARKED);
+    view.unmount();
+  });
+
+  it('応答待ちの印なしの B をまたいでも、解くのは 1 回まで: A (印つき) の 4001 → C (印つき) の 4001 → D は印なし', async () => {
+    const tab = await makeTab();
+    const view = await tab.mountScreen();
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(1);
+    // A の応答待ちの間の B は印なし。
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(2);
+    await act(async () => {
+      walletSends[0].reject();
+    });
+    await waitFor(() => expect(tab.mutationStatuses()[0]).toBe('error'));
+    // A の 4001 で 1 回目を解いた。C は印つき。
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(3);
+    await act(async () => {
+      walletSends[2].reject();
+    });
+    await waitFor(() => expect(tab.mutationStatuses()[2]).toBe('error'));
+    // C の 4001 では解かない。D は印なし。
+    act(() => view.result.current.mutate(PARAMS_NO_FEE, MARK));
+    await waitForWalletSends(4);
+    expect(walletSends.map((send) => send.tx.data)).toEqual([MARKED, MERCHANT_CALLDATA, MARKED, MERCHANT_CALLDATA]);
+    view.unmount();
   });
 
   it('ウォレットが Error でない object の 4001 を投げても (WalletConnect の応答の形) → 予約を解き、次も印つき (100 byte)', async () => {

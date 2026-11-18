@@ -1,10 +1,12 @@
 // /guide/history「取引履歴と会計 CSV」の content (lib/historyGuide.ts) の検査:
-// - 本文は運営者の承認済みの文 (2026-11-18・同日の直し「直す案で」を含む) のまま (ja)。ja / en の形がそろう
+// - 本文は運営者の承認済みの文 (2026-11-18・同日の直し「直す案で」を含む) に、2026-11-19 の通常決済の直し (① に通常決済を足す・
+//   「履歴に出ない入金」から通常決済を外す) を入れた文のまま (ja)。ja / en の形がそろう
 // - 文が言う事実をコードと照合する:
 //   - 上限の件数: 受取の履歴 = HISTORY_MAX_ENTRIES・支払いの控え = PAYER_RECEIPTS_MAX (ガイド・llms.txt とも)
 //   - 「QR を閉じてから 60 秒」= 見張りの QR_SALE_KEEP_AFTER_HIDE_MS
 //   - ① は金額を入れて画面に表示している QR だけ = 決済QR の useQrBillKey の url / shown の条件
-//   - 「通常決済 (モバイルオーダーを除く)」= 通常決済のモバイルオーダーの受注も履歴の行になる (lib/orderFeedHistory.ts)
+//   - ① の「通常決済も」= 払う側が対象の通常決済の送金に印を付け、お店の端末が同じ印で照合する (hooks/useStdBillMark.ts・lib/qrSaleWatch.ts)
+//   - ③ のモバイルオーダーは、通常決済の受注も履歴の行になる (lib/orderFeedHistory.ts)
 //   - ② の名前 = 画面の名前 (Create.storeDeviceStatusLabel)
 // - 会計 CSV の形式の名前は、履歴ページの選択肢 (History.accountingFormat*) にある名前
 // - 料率・利用料・CSV パス (CSV の有料化) に触れない
@@ -21,7 +23,6 @@ import { buildOrderSaleEntry, isRecordableOrder } from '@/lib/orderFeedHistory';
 import type { StoredOrder } from '@/lib/orderRelay';
 import { PAYER_RECEIPTS_MAX } from '@/lib/payerReceipt';
 import { QR_SALE_KEEP_AFTER_HIDE_MS } from '@/lib/qrSaleWatch';
-import { isStdBillMarkTrialOn } from '@/lib/stdBillMarkTrial';
 import { deploymentForSlug } from '@/lib/tokens';
 
 const MAX = HISTORY_MAX_ENTRIES.toLocaleString('en-US');
@@ -49,7 +50,7 @@ function allText(c: HistoryGuideContent): string[] {
 }
 
 describe('取引履歴のガイド (content)', () => {
-  it('ja の本文は承認済みの文のまま (2026-11-18)', () => {
+  it('ja の本文は承認済みの文 (2026-11-18) に、通常決済の直し (2026-11-19) を入れた文のまま', () => {
     const c = historyGuideContentFor('ja');
     expect(c.lead).toBe(
       '取引履歴は、このブラウザに保存される売上と支払いの控えです。OpenPay のサーバーには送りません。会計 CSV に書き出して、会計ソフトに取り込めます。',
@@ -58,7 +59,7 @@ describe('取引履歴のガイド (content)', () => {
     expect(c.inHistory).toEqual([
       {
         mark: '①',
-        text: 'お客様がお店の QR (決済QR・レジ) を JPYC のガス代不要の払い方で払ったとき (QR を出していた端末に・QR を閉じてから 60 秒まで)',
+        text: 'お客様がお店の QR (決済QR・レジ) を JPYC で払ったとき (ガス代不要の払い方も、ガス代を自分で払う通常決済も・QR を出していた端末に・QR を閉じてから 60 秒まで)',
       },
       { mark: '②', text: 'お店がガス代を肩代わりして送る支払い (その端末に)' },
       { mark: '③', text: 'モバイルオーダー (店主としてサインインし、受注の画面を開いた端末に)' },
@@ -69,7 +70,7 @@ describe('取引履歴のガイド (content)', () => {
     expect(c.notInHistoryTitle).toBe('履歴に出ない入金');
     // 承認の文は「・」で並べた 1 文。一覧にするために「・」で分けただけで、並びと語は変えない。
     expect(`${c.notInHistory.join('・')}。${c.notInHistoryCheck}`).toBe(
-      '通常決済 (ガス代を自分で払う払い方・モバイルオーダーを除く)・USDC・ウォレットのアプリで読む QR・印刷・保存・コピーした QR や、金額なしの QR での入金・注文リンク・QR を閉じて 60 秒より後や、受け取るページを離れた後に届いた入金・ほかの端末やブラウザで受けた入金。これらは受取のウォレットか、ブロックチェーンのエクスプローラーで確かめてください。',
+      'USDC・ウォレットのアプリで読む QR・印刷・保存・コピーした QR や、金額なしの QR での入金・注文リンク・QR を閉じて 60 秒より後や、受け取るページを離れた後に届いた入金・ほかの端末やブラウザで受けた入金。これらは受取のウォレットか、ブロックチェーンのエクスプローラーで確かめてください。',
     );
     expect(c.csvTitle).toBe('会計 CSV');
     expect(c.csvBody).toBe('成功した売上だけを書き出します (freee・弥生・マネーフォワードの形式)。勘定科目は履歴ページで変えられます。');
@@ -130,25 +131,43 @@ describe('取引履歴のガイド (content)', () => {
     expect(call).toMatch(/shown: qrModalOpen && /);
   });
 
-  // 「通常決済」が履歴に出ない入金のままである出どころ: 通常決済の QR にも印 (bk) は載るが、払う側の通常決済が transfer の
-  // calldata に印を足すのは、その端末だけの試しのスイッチ (lib/stdBillMarkTrial.ts・K4b) が ON の端末だけ。既定は OFF で、
-  // ほかの全員の通常決済は印を付けない。お店の端末は印の無い通常決済を行にしない (tests/components/qrSaleHistory.standardParity.test.tsx)。
-  // 実機で試して全員に印を付けるようになったら、このガイドの文も直す。
-  it('通常決済の払う側が印を付けるのは試しのスイッチが ON の端末だけ (既定 OFF = ガイドの「通常決済は履歴に出ない」はほかの全員に今も正しい)', () => {
-    window.localStorage.clear();
-    expect(isStdBillMarkTrialOn()).toBe(false);
-    // 印を作るのは印の hook だけで、hook はスイッチを読んでから準備し (OFF なら URL も chunk も読まない)、押した時にも読む
-    // (振る舞いは tests/hooks/useStdBillMark.test.tsx・フォームの OFF の呼び出しは tests/components/stdBillMarkForms.integration.test.tsx)。
+  // ① の「ガス代を自分で払う通常決済も」の出どころ (2026-11-19 に全員へ): 通常決済の QR にも印 (bk) が載り、払う側の通常決済は、
+  // 対象の会計 (/pay は JPYC・金額あり・分配なし / /checkout は JPYC のレジの会計) の transfer の calldata に、URL の bk から作った印を
+  // 足す (端末ごとのスイッチは無い)。お店の端末の見張り (lib/qrSaleWatch.ts) は、その印の付いた Transfer を照合して行にする。
+  // 振る舞いは tests/hooks/useStdBillMark.test.tsx・tests/components/stdBillMarkForms.integration.test.tsx・
+  // tests/components/qrSaleHistory.standardParity.test.tsx (払う側の calldata = お店の照合の calldata・印の無い入金は行にしない)。
+  it('通常決済の払う側は、対象の会計の送金に印を付け (端末ごとのスイッチは無い)、お店の端末は同じ印で照合する = ガイドの ① に通常決済が入る', () => {
+    const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
+    // 印を作るのは印の hook だけ (フォームと通常決済の hook は作り方を知らない)。hook が見るのは対象か (eligible) と URL の bk だけ。
     for (const file of ['hooks/useStandardPayment.ts', 'components/PaymentForm.tsx', 'components/CheckoutForm.tsx']) {
-      expect(readFileSync(join(process.cwd(), file), 'utf8')).not.toMatch(/billKeyStdMark/);
+      expect(read(file)).not.toMatch(/billKeyStdMark/);
     }
-    const hook = readFileSync(join(process.cwd(), 'hooks/useStdBillMark.ts'), 'utf8');
-    expect(hook).toContain('if (!eligible || !isStdBillMarkTrialOn()) return;');
-    expect(hook).toContain('if (!eligible || !prepared || !isStdBillMarkTrialOn()) return undefined;');
-    expect(historyGuideContentFor('ja').notInHistory[0]).toContain('通常決済');
+    const hook = read('hooks/useStdBillMark.ts');
+    expect(hook).toContain('if (!eligible) return;');
+    expect(hook).toContain('if (!eligible || !prepared) return undefined;');
+    expect(hook).toContain('const mark = billKeyStdMark(billKey);');
+    expect(hook).not.toMatch(/(local|session)Storage|Trial/);
+    // 2 つのフォームは、通常決済の分岐で印を取り、あれば mutate の第 2 引数に渡す。対象の条件はフォームが決める。
+    const pay = read('components/PaymentForm.tsx');
+    expect(pay).toContain('const takeStdBillMark = useStdBillMark(isJpyc && isFixed && !hasSplit, params);');
+    const checkout = read('components/CheckoutForm.tsx');
+    expect(checkout).toMatch(/useStdBillMark\(\s*isJpyc &&\s*!params\.webhook &&\s*!params\.storeHandle &&\s*!params\.feeKind &&\s*!params\.orderId &&\s*params\.ship !== 'ask' &&\s*!params\.submit,\s*params,\s*\)/);
+    for (const form of [pay, checkout]) expect(form).toContain('if (stdMark) standard.mutate(standardParams, stdMark);');
+    // お店の端末: 見張りが、通常決済の会計 (readQrStdBill・印 = 同じ billKeyStdMark) の印の付いた Transfer を数えて行にする。
+    const watch = read('lib/qrSaleWatch.ts');
+    expect(watch).toMatch(/\breadQrStdBill\(input\)/);
+    expect(watch).toMatch(/\bstdMarkCount\(tx, transfer, /);
+    expect(read('lib/qrSaleHistory.ts')).toContain('const mark = billKeyStdMark(input.billKey);');
+    // ガイド: ① に通常決済が入り、「履歴に出ない入金」に通常決済は無い (ja・en)。
+    const jaGuide = historyGuideContentFor('ja');
+    const enGuide = historyGuideContentFor('en');
+    expect(jaGuide.inHistory[0].text).toContain('ガス代を自分で払う通常決済も');
+    expect(enGuide.inHistory[0].text).toContain('a standard payment where they pay the gas fee themselves');
+    for (const item of jaGuide.notInHistory) expect(item).not.toContain('通常決済');
+    for (const item of enGuide.notInHistory) expect(item).not.toMatch(/standard payment/i);
   });
 
-  // 「通常決済 (モバイルオーダーを除く)」の出どころ: 通常決済で払われたモバイルオーダーの受注 (unboundPayment) も、
+  // ③ のモバイルオーダーは、払い方によらない: 通常決済で払われたモバイルオーダーの受注 (unboundPayment) も、
   // 受注の画面を開いた端末で履歴の行 (通常決済の行) になる。
   it('モバイルオーダーの通常決済の受注は、履歴の行になる (通常決済の行)', () => {
     const jpyc = deploymentForSlug('jpyc', 'polygon');
@@ -206,14 +225,17 @@ describe('取引履歴のガイド (content)', () => {
     }
   });
 
-  it('llms.txt にガイドの 1 行があり、上限の件数・60 秒・② の名前・通常決済の除外はガイドと同じ', () => {
+  it('llms.txt にガイドの 1 行があり、上限の件数・60 秒・② の名前・① の通常決済はガイドと同じ (出ない入金に通常決済は無い)', () => {
     const llms = readFileSync(join(process.cwd(), 'public', 'llms.txt'), 'utf8');
     const line = llms.split('\n').find((l) => l.includes('(https://open-pay.jp/ja/guide/history)'));
     expect(line).toBeDefined();
     expect(line).toContain(`受取の履歴はブラウザごとに最大 ${MAX} 件・支払いの控えは ${RECEIPTS} 件`);
     expect(line).toContain(`${QR_SALE_KEEP_AFTER_HIDE_MS / 1000} 秒`);
     expect(line).toContain(ja.Create.storeDeviceStatusLabel);
-    expect(line).toContain('通常決済 (モバイルオーダーを除く)');
+    expect(line).toContain('JPYC で払ったとき (ガス代不要の払い方も通常決済も・');
+    // 通常決済が出るのは ① の中の 1 回だけ (「出ない入金」の並びに無い)。
+    expect(line!.match(/通常決済/g)).toHaveLength(1);
+    expect(line!.slice(line!.indexOf('と出ない入金 ('))).not.toContain('通常決済');
     expect(line).toContain('金額を入れて画面に表示している QR だけ');
   });
 });

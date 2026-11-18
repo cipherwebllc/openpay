@@ -1,6 +1,8 @@
 // K4b: 払う側の通常決済の会計の印を準備する hook (hooks/useStdBillMark.ts)。
-//   - その端末だけの試しのスイッチが OFF (既定) なら何もしない: URL の bk を読まず、印の chunk も読まない。
-//   - ON なら mount の後の effect で印を計算して ref に置き、押した瞬間 (返した関数を呼んだ時) は同期で照合するだけ (K-1):
+//   - 対象でない会計 (eligible = false) は何もしない: URL の bk を読まず、印の chunk も読まない。URL に bk の無い支払いも chunk を
+//     読まない (今までどおりの送金)。
+//   - 対象の会計は、どの端末でも (その端末だけの試しのスイッチは 2026-11-19 に外した・localStorage は読まない)、mount の後の effect で
+//     印を計算して ref に置き、押した瞬間 (返した関数を呼んだ時) は同期で照合するだけ (K-1):
 //     今の URL の bk が ref の bk と同じときだけ印を返す。bk が無い・違う・形が違う・計算中・chunk の失敗は undefined (印なし)。
 // 印の chunk (lib/relay/billKeySalt) は、test ごとに読み込みの回数と印を計算した bk を記録し、読み込みを止めておく (計算中) こともできる。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -26,7 +28,8 @@ vi.mock('@/lib/url/billKey', async (importOriginal) => {
   };
 });
 
-import { STD_BILL_MARK_TRIAL_KEY } from '@/lib/stdBillMarkTrial';
+// 外した試しのスイッチの localStorage の key (2026-11-18 の試しの端末に残っているかもしれない)。hook はもう読まない。
+const OLD_TRIAL_KEY = 'openpay:std-bill-mark-trial:v1';
 
 // 印の chunk の mock は test ごとに作り直す (vi.mock の結果は module の登録簿を消しても残るので、読み込みを数えられない)。
 // hook も test ごとに読み直し、新しい登録簿から chunk を読ませる (react 等の node_modules は読み直さない = 同じ React)。
@@ -58,7 +61,6 @@ let otherMark: Hex;
 function setUrl(bk: string | null) {
   window.history.replaceState(null, '', bk === null ? '/ja/pay?to=x&amount=1' : `/ja/pay?to=x&amount=1&bk=${bk}`);
 }
-const switchOn = () => window.localStorage.setItem(STD_BILL_MARK_TRIAL_KEY, '1');
 
 // effect の中の dynamic import と then が、ある状態 (chunk を読み始めた・印を計算した) に着くまで待つ。
 // 着くまでの tick の数は決まっていない: dynamic import は worker から vitest の main process への問い合わせ (module の
@@ -100,48 +102,26 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-describe('useStdBillMark: 試しのスイッチが OFF (既定) なら何もしない', () => {
-  it('URL に形の正しい bk があっても、bk を読まず・印の chunk を読まず・印を返さない', async () => {
-    const view = render();
-    await importsSettled();
-    expect(view.result.current()).toBeUndefined();
-    expect(bkReads.count).toBe(0);
-    expect(chunk.loads).toBe(0);
-  });
-
-  it('スイッチが "1" 以外の値でも OFF', async () => {
-    window.localStorage.setItem(STD_BILL_MARK_TRIAL_KEY, 'on');
-    const view = render();
-    await importsSettled();
-    expect(view.result.current()).toBeUndefined();
-    expect(chunk.loads).toBe(0);
-  });
-
-  it('スイッチの読み込みが throw しても止まらない (OFF と読む・chunk を読まない)', async () => {
-    switchOn();
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('SecurityError: storage is disabled');
-    });
-    const view = render();
-    await importsSettled();
-    expect(() => view.result.current()).not.toThrow();
-    expect(view.result.current()).toBeUndefined();
-    expect(chunk.loads).toBe(0);
-  });
-
-  it('対象でない会計 (eligible = false) は、スイッチが ON でも何もしない', async () => {
-    switchOn();
+describe('useStdBillMark: 対象でない会計・bk の無い URL は何もしない (今までどおりの送金)', () => {
+  it('対象でない会計 (eligible = false) は、URL に形の正しい bk があっても、bk を読まず・印の chunk を読まず・印を返さない', async () => {
     const view = render(false);
     await importsSettled();
     expect(view.result.current()).toBeUndefined();
     expect(bkReads.count).toBe(0);
     expect(chunk.loads).toBe(0);
   });
+
+  it('URL に bk が無ければ、対象の会計でも印の chunk を読まず・印を返さない', async () => {
+    setUrl(null);
+    const view = render();
+    await importsSettled();
+    expect(view.result.current()).toBeUndefined();
+    expect(chunk.loads).toBe(0);
+    expect(chunk.markedKeys).toEqual([]);
+  });
 });
 
-describe('useStdBillMark: スイッチが ON の端末', () => {
-  beforeEach(() => switchOn());
-
+describe('useStdBillMark: 対象の会計 (どの端末でも・端末ごとのスイッチは無い)', () => {
   it('mount の後に印を計算して置き、押した時に同じ bk なら印 (billKeyStdMark の golden) を返す', async () => {
     const view = render();
     await untilComputed(BK);
@@ -177,14 +157,7 @@ describe('useStdBillMark: スイッチが ON の端末', () => {
     expect(chunk.markedKeys).toEqual([]);
   });
 
-  it('URL に bk が無ければ chunk を読まず印なし・形の違う bk (前の 22 字) は印なし', async () => {
-    setUrl(null);
-    const none = render();
-    await importsSettled();
-    expect(none.result.current()).toBeUndefined();
-    expect(chunk.loads).toBe(0);
-    none.unmount();
-
+  it('形の違う bk (前の 22 字) は印なし', async () => {
     setUrl(OLD_22_BK);
     const bad = render();
     // 印の計算を終えた (形が違うので印を置かなかった) のを確かめてから押す。
@@ -204,12 +177,30 @@ describe('useStdBillMark: スイッチが ON の端末', () => {
     expect(view.result.current()).toBe(MARK);
   });
 
-  it('準備の後にスイッチを OFF にすると、押した時に印なし', async () => {
+  // 外した試しのスイッチの名残: 古い key が端末に残っていても (どの値でも)・無くても、同じに印を付ける。hook は localStorage を
+  // 読まないので、保存の使えないブラウザ (読むと throw する) でも変わらない。
+  it.each<[string, string | null]>([
+    ['古い key が無い (ほかの全員)', null],
+    ["古い key が '1' (試していた端末)", '1'],
+    ["古い key が 'off' など別の値", 'off'],
+  ])('%s: 印を付ける・localStorage を読まない', async (_name, stored) => {
+    if (stored !== null) window.localStorage.setItem(OLD_TRIAL_KEY, stored);
+    const getItem = vi.spyOn(Storage.prototype, 'getItem');
     const view = render();
     await untilComputed(BK);
     expect(view.result.current()).toBe(MARK);
-    window.localStorage.removeItem(STD_BILL_MARK_TRIAL_KEY);
-    expect(view.result.current()).toBeUndefined();
+    expect(getItem).not.toHaveBeenCalled();
+    // 古い key は消しも書きもしない (残っていても害はない)。
+    expect(window.localStorage.getItem(OLD_TRIAL_KEY)).toBe(stored);
+  });
+
+  it('保存の使えないブラウザ (localStorage を読むと throw する) でも、印を付ける', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError: storage is disabled');
+    });
+    const view = render();
+    await untilComputed(BK);
+    expect(view.result.current()).toBe(MARK);
   });
 
   it('URL が変わったら (urlKey)、前の印を捨てて作り直す。遅れて返った前の計算は、新しい印を上書きしない', async () => {
