@@ -1,6 +1,8 @@
 // @vitest-environment node
 // AI 出品アシスタントの server 側: 入力の境界・Gemini 宛ての request の形・system の指示・Gemini の応答の読み分け。
 // 実 API は使わない (fetch を mock・応答は公式の GenerateContentResponse の形に近い fixture)。文章の質は実 API の試しで判断する。
+import { createServer, type IncomingHttpHeaders, type RequestListener, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { listingAssistantFactsOf } from '@/lib/store/listingAssistant';
 import { geminiApiKey, listingAssistantEnabled } from '@/lib/store/listingAssistantConfig';
@@ -27,6 +29,16 @@ import {
 } from '../../_helpers/listingAssistantFixtures';
 
 const fetchMock = vi.fn<typeof fetch>();
+// 本物の fetch (undici)。転送 (3xx) を追うかを、手元の HTTP server 2 つで確かめるのに使う (beforeEach の stub より前に取る)。
+const realFetch = globalThis.fetch;
+
+async function listen(handler: RequestListener): Promise<{ server: Server; url: string }> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+  return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/` };
+}
+
+const close = (server: Server) => new Promise<void>((resolve) => server.close(() => resolve()));
 const COO_MEMO = 'Coo World向けの木目調スタンドライト';
 const MIB = 1024 * 1024;
 
@@ -58,9 +70,25 @@ describe('設定', () => {
     expect(listingAssistantEnabled()).toBe(true);
     vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', 'true');
     expect(listingAssistantEnabled()).toBe(true);
-    vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', 'yes');
     vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(listingAssistantEnabled()).toBe(false);
+    for (const off of ['0', 'false', 'yes', 'TRUE', ' 1', 'on']) {
+      vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', off);
+      expect(listingAssistantEnabled()).toBe(false);
+    }
+  });
+
+  it('不正なフラグの値はログに写さず、固定の文だけをプロセスごとに 1 回出す', async () => {
+    // 1 回きりの警告の状態を持つので、この test だけ新しい module で確かめる。
+    vi.resetModules();
+    const fresh = await import('@/lib/store/listingAssistantConfig');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const secretLike = 'AIzaSy-looks-like-a-key-0123';
+    vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', secretLike);
+    expect(fresh.listingAssistantEnabled()).toBe(false);
+    expect(fresh.listingAssistantEnabled()).toBe(false);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('[OpenPay] ENABLE_STORE_LISTING_ASSISTANT has an unrecognized value; treating as false.');
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(secretLike);
   });
 
   it('key は空白だけなら未設定', () => {
@@ -154,6 +182,11 @@ describe('入力の境界', () => {
     ['details 2001 字', { details: 'あ'.repeat(2001) }],
     ['specs 9 行', { specs: Array.from({ length: 9 }, (_, i) => `項目${i}: 値`).join('\n') }],
     ['specs の 1 行が長い', { specs: `${'a'.repeat(24)}: ${'b'.repeat(81)}` }],
+    // ラベルが短くても値は保存と同じ 80 字まで (行の合計の長さだけを見ない)。
+    ['specs の値が 81 字 (ラベルが短い)', { specs: `形式: ${'b'.repeat(81)}` }],
+    ['specs の値が 81 字 (全角のコロン)', { specs: `形式：${'b'.repeat(81)}` }],
+    ['specs のラベルが 25 字', { specs: `${'a'.repeat(25)}: b` }],
+    ['specs の区切りの無い行が 25 字', { specs: 'a'.repeat(25) }],
     ['tags 6 個', { tags: 'a, b, c, d, e, f' }],
     ['tags 25 字', { tags: 'a'.repeat(25) }],
     ['category が一覧に無い', { category: 'weapons' }],
@@ -174,7 +207,7 @@ describe('入力の境界', () => {
       facts: {
         ...emptyFacts(),
         title: ` ${'a'.repeat(60)} `,
-        desc: '1 行目\r\n2 行目​',
+        desc: '1 行目\r\n2 行目\u200b',
         details: `${'あ'.repeat(1990)}\n\n\n\n\nend`,
         specs: Array.from({ length: 8 }, (_, i) => `項目${i}: 値`).join('\r\n') + '\n\n',
         tags: 'Coo World, 照明、Coo World, ',
@@ -189,6 +222,19 @@ describe('入力の境界', () => {
       tags: 'Coo World, 照明',
       usageCommercial: 'not_allowed',
     });
+  });
+
+  it('仕様表は各行を保存と同じ「ラベル 24 字・値 80 字」で見て、ちょうどまで通す (区切りの無い行はラベルだけ)', () => {
+    const facts = parsedInput({
+      memo: COO_MEMO,
+      facts: {
+        ...emptyFacts(),
+        specs: [`${'a'.repeat(24)}: ${'b'.repeat(80)}`, `形式：${'c'.repeat(80)}`, 'd'.repeat(24), 'URL: https://example.com/a'].join('\n'),
+      },
+    }).facts;
+    expect(facts.specs).toBe(
+      [`${'a'.repeat(24)}: ${'b'.repeat(80)}`, `形式: ${'c'.repeat(80)}`, 'd'.repeat(24), 'URL: https://example.com/a'].join('\n'),
+    );
   });
 });
 
@@ -315,12 +361,13 @@ describe('Gemini の応答', () => {
     });
   });
 
-  it('長さの超過は 502 にせず、その欄だけ fits=false で返す', () => {
+  it('長さの超過は 502 にせず、その欄だけ fits=false・value は上限の中に切った見本で返す', () => {
     const result = draftFromGeminiResponse(
       geminiBody({
         ...COO_WORLD_DRAFT,
         title: 'あ'.repeat(61),
         tags: ['a'.repeat(25), 'ok'],
+        en: 'e'.repeat(399) + ' tail',
         x: 'x'.repeat(121),
         checks: ['c'.repeat(101)],
       }),
@@ -328,14 +375,39 @@ describe('Gemini の応答', () => {
     expect(result).toMatchObject({
       ok: true,
       draft: {
-        title: { value: 'あ'.repeat(61), fits: false },
+        title: { value: 'あ'.repeat(60), fits: false },
         desc: { fits: true },
-        tags: { value: ['a'.repeat(25), 'ok'], fits: false },
-        en: { fits: true },
-        x: { value: 'x'.repeat(121), fits: false },
-        checks: { value: ['c'.repeat(101)], fits: false },
+        tags: { value: ['a'.repeat(24), 'ok'], fits: false },
+        en: { value: 'e'.repeat(399), fits: false },
+        x: { value: 'x'.repeat(120), fits: false },
+        checks: { value: ['c'.repeat(100)], fits: false },
       },
     });
+  });
+
+  it('件数の超過も見本は上限の件数まで (タグ 5 個・確認候補 5 個)・サロゲートの組を割らない', () => {
+    const result = draftFromGeminiResponse(
+      geminiBody({
+        ...COO_WORLD_DRAFT,
+        title: `${'あ'.repeat(59)}😀b`,
+        tags: ['t1', 't2', 't3', 't4', 't5', 't6', 't7'],
+        checks: ['k1', 'k2', 'k3', 'k4', 'k5', 'k6'],
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      draft: {
+        title: { value: 'あ'.repeat(59), fits: false },
+        tags: { value: ['t1', 't2', 't3', 't4', 't5'], fits: false },
+        checks: { value: ['k1', 'k2', 'k3', 'k4', 'k5'], fits: false },
+      },
+    });
+    if (!result.ok) return;
+    // 返す値はどの欄も上限の中 (画面に長すぎる値・多すぎる件数を返さない)。
+    const { draft } = result;
+    expect(draft.title.value.length).toBeLessThanOrEqual(60);
+    expect(draft.tags.value.length).toBeLessThanOrEqual(5);
+    expect(draft.checks.value.length).toBeLessThanOrEqual(5);
   });
 
   it('上限ちょうどは fits=true・空の商品名は fits=false・確認候補 0 個は fits=true', () => {
@@ -371,6 +443,45 @@ describe('Gemini の応答', () => {
         x: { value: '新作です #CooWorld', fits: true },
         tags: { value: ['照明', '木目調'], fits: true },
       },
+    });
+  });
+
+  it.each([
+    ['日本語のドメイン', 'https://例え.jp/ページ'],
+    ['日本語のパス', 'https://evil.example/商品/1'],
+    ['ゼロ幅の空白で区切った scheme', 'h\u200bttps://evil.example/a'],
+    ['ハングルの埋め字 (見えない文字) で区切った scheme', 'http\u3164s://evil.example/a'],
+    ['語結合子で区切った www', 'w\u2060ww.evil.example'],
+    ['全角の URL', 'ｈｔｔｐｓ：／／ｅｖｉｌ．ｅｘａｍｐｌｅ／ａ'],
+    ['大文字の scheme', 'HTTPS://EVIL.EXAMPLE/A'],
+  ])('6 欄すべてで、文字を正規化してから URL を落とす (%s)', (_label, url) => {
+    const withUrl = (text: string) => `${text} ${url} を見てください`;
+    const result = draftFromGeminiResponse(
+      geminiBody({
+        title: withUrl('木目調のライト'),
+        desc: withUrl('3D 素材です'),
+        tags: [url, '照明'],
+        en: withUrl('A lamp'),
+        x: withUrl('新作です'),
+        checks: [withUrl('形式を確かめる')],
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const values = JSON.stringify(result.draft);
+    expect(values).not.toMatch(/https?:|www\.|evil|例え|ｅｖｉｌ/i);
+    expect(result.draft.title).toEqual({ value: '木目調のライト を見てください', fits: true });
+    expect(result.draft.x).toEqual({ value: '新作です を見てください', fits: true });
+    expect(result.draft.tags.value).toContain('照明');
+  });
+
+  it('全角の英数字は NFKC で半角になり、見えない文字は除かれる (URL でない文字は残す)', () => {
+    const result = draftFromGeminiResponse(
+      geminiBody({ ...COO_WORLD_DRAFT, desc: 'ＧＬＢ形式の\u200bライト\u3164です', tags: ['ＧＬＢ'] }),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      draft: { desc: { value: 'GLB形式のライトです', fits: true }, tags: { value: ['GLB'], fits: true } },
     });
   });
 
@@ -442,6 +553,39 @@ describe('Gemini の応答', () => {
     fetchMock.mockResolvedValue(new Response('<html>', { status: 200 }));
     expect(await generateListingDraft(input())).toEqual({ ok: false, status: 502, error: 'bad_response', upstreamStatus: 200 });
   });
+
+  it.each([307, 308])(
+    'Google が別 origin への %i を返しても追わない (key と資料を転送先に送らず 503 unavailable)',
+    async (status) => {
+      const received: { headers: IncomingHttpHeaders; body: string }[] = [];
+      const target = await listen((req, res) => {
+        let body = '';
+        req.on('data', (chunk: Buffer) => {
+          body += chunk.toString('utf8');
+        });
+        req.on('end', () => {
+          received.push({ headers: req.headers, body });
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(geminiBody()));
+        });
+      });
+      const redirector = await listen((req, res) => {
+        req.resume();
+        res.writeHead(status, { location: target.url });
+        res.end();
+      });
+      try {
+        // Gemini の URL への fetch を、別 origin へ転送する手元の server へ向ける (送る init はそのまま)。
+        fetchMock.mockImplementation((_url, init) => realFetch(redirector.url, init));
+        const result = await generateListingDraft(parsedInput({ memo: COO_MEMO, facts: {} }));
+        expect(result).toEqual({ ok: false, status: 503, error: 'unavailable' });
+        expect(fetchMock.mock.calls[0][1]?.redirect).toBe('error');
+        expect(received).toEqual([]);
+      } finally {
+        await Promise.all([close(redirector.server), close(target.server)]);
+      }
+    },
+  );
 
   it('接続の失敗は 503 unavailable', async () => {
     fetchMock.mockRejectedValue(new TypeError('fetch failed: getaddrinfo ENOTFOUND'));
