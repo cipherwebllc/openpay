@@ -63,7 +63,7 @@ vi.mock('@/lib/history', async (importOriginal) => {
     ...actual,
     appendHistory: (entry: Parameters<typeof actual.appendHistory>[0]) => {
       hold.appends += 1;
-      if (hold.failAppend) throw new Error('storage_broken');
+      if (hold.failAppend) throw new Error(`storage_broken ${entry.txHash}`);
       if (hold.failNext > 0) {
         hold.failNext -= 1;
         throw new Error('storage_broken');
@@ -731,9 +731,10 @@ describe('保存の決まり (同じ tx は 1 行・印が先・印は外さな�
     expect(order.indexOf(HISTORY_STORAGE_KEY)).toBeGreaterThan(0);
   });
 
-  it('履歴の保存が throw しても、印は残し (外さない)、後ろの入金の記録を続ける。警告は 1 回', async () => {
+  it('履歴の保存が throw しても、印は残し (外さない)、後ろの入金の記録を続ける。警告は 1 回で、固定のイベント名だけ (例外の本文を出さない)', async () => {
     show();
     settle(994n, 1);
+    // 例外の本文に tx が入る場合 (共通の logger の伏せ字の対象外)。
     hold.failAppend = true;
     await tick();
     expect(marks()).toEqual([tx(1)]);
@@ -746,8 +747,7 @@ describe('保存の決まり (同じ tx は 1 行・印が先・印は外さな�
     // 印の付いた 1 件目は、二度と書かない。
     expect(marks().sort()).toEqual([tx(1), tx(2)]);
     expect(hold.appends).toBe(2);
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0][0]).toBe('qrSale.save_failed');
+    expect(warn.mock.calls).toEqual([['qrSale.row_not_confirmed', {}]]);
   });
 
   it('印は上限 (履歴の行の上限と同じ 1,000 件) まで持ち、古いものから捨てる', async () => {
@@ -1347,10 +1347,52 @@ describe('画面への知らせ (印を書いた後だけ・書けなかった�
     expect(loadHistory()).toEqual([]);
     expect(hold.appends).toBe(1);
     expect(events).toHaveLength(1);
-    const notConfirmed = warn.mock.calls.filter(([name]) => name === 'qrSale.row_not_confirmed');
-    expect(notConfirmed).toHaveLength(1);
-    expect(JSON.stringify(notConfirmed)).not.toContain(tx(1).slice(2, 20));
-    expect(JSON.stringify(notConfirmed)).not.toContain(BK);
+    // 固定のイベント名だけ (tx・bill key・例外を渡さない)。ほかの警告は storage の共通の読み書きのもの (lib/storage.ts)。
+    expect(warn.mock.calls.filter(([name]) => name.startsWith('qrSale.'))).toEqual([['qrSale.row_not_confirmed', {}]]);
+  });
+
+  it('印を確かめた後・印を書く前に、別のタブが同じ tx の印を書いた: 保存の流れは今までどおり (行を書きにいく) で、読み直せなくても notSaved を知らせない', async () => {
+    const listener = vi.fn();
+    showWith(listener);
+    settle(995n, 1);
+    hold.failAppend = true;
+    const real = Storage.prototype.getItem;
+    let reads = 0;
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      // 保存の直前の確認 (1 回目の読み取り) の後、印を書く所 (2 回目) の前に、別のタブの印が届く。
+      if (key === QR_SALE_MARKS_KEY && ++reads === 2) {
+        window.localStorage.setItem(QR_SALE_MARKS_KEY, JSON.stringify([[tx(1), 1]]));
+      }
+      return real.call(this, key);
+    });
+    await tick();
+    getItem.mockRestore();
+    expect(reads).toBe(2);
+    // 行は今までどおり書きにいく (addQrSaleMark が true を返す流れ)。印は別のタブのまま。
+    expect(hold.appends).toBe(1);
+    expect(window.localStorage.getItem(QR_SALE_MARKS_KEY)).toBe(JSON.stringify([[tx(1), 1]]));
+    expect(loadHistory()).toEqual([]);
+    // このタブは印を書いていないので、「書けなかったかもしれない」を出さない。
+    expect(listener).not.toHaveBeenCalled();
+    expect(warn.mock.calls).toEqual([['qrSale.row_not_confirmed', {}]]);
+  });
+
+  it('同じ順で別のタブの印が届いても、行を読み直せたら今までどおり知らせる (count 1・notSaved なし)', async () => {
+    const events: QrBillRecorded[] = [];
+    showWith((e) => events.push(e));
+    settle(995n, 1);
+    const real = Storage.prototype.getItem;
+    let reads = 0;
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (key === QR_SALE_MARKS_KEY && ++reads === 2) {
+        window.localStorage.setItem(QR_SALE_MARKS_KEY, JSON.stringify([[tx(1), 1]]));
+      }
+      return real.call(this, key);
+    });
+    await tick();
+    getItem.mockRestore();
+    expect(loadHistory().map((e) => e.id)).toEqual([`batch-${tx(1)}`]);
+    expect(events).toEqual([{ billKey: BK, count: 1, amount: (1_000n * ONE).toString() }]);
   });
 
   it('1 件目が書けず 2 件目が書けた: 1 件目は notSaved つき (count 1)、2 件目は今までどおり (count 2・notSaved なし)', async () => {

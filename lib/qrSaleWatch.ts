@@ -80,12 +80,14 @@
 //     またいで読み書きの順を守らせる仕組みが無いので、別のタブが「読む → 書く」のあいだに割り込んだ結果は受け入れる
 //     (既存の appendHistory・受注の書き手と同じ性質)。
 //
-// 画面への知らせ (この書き手が印を書いた後だけ):
+// 画面への知らせ (行を書きにいった入金だけ):
 //   - この書き手が行を書き、その行が履歴にあると読み直せたときに、その会計を出した画面 (showQrBill に渡した受け手) に
 //     bill key・何件目か・額を知らせる。行を書かなかった入金 (同じ tx の行・印が先にあった・印を書けなかった) は知らせない。
-//   - この書き手が印を書いた後に、行を履歴に読み直せなかった (保存の失敗: 容量の上限・private mode の拒否・throw。
+//   - このタブが印を書いた後に、行を履歴に読み直せなかった (保存の失敗: 容量の上限・private mode の拒否・throw。
 //     appendHistory は失敗を握りつぶして返る) ときは、同じ知らせに notSaved を付ける (「入金を確かめたが、この端末の履歴に
-//     書けなかったかもしれない」)。印は残るので、その tx は後から当たっても書かない (書き直しはしない)。
+//     書けなかったかもしれない」)。印は残るので、その tx は後から当たっても書かない (書き直しはしない)。印を確かめた後に
+//     別のタブが同じ tx の印を書いていた (このタブは印を書いていない) ときは、行を読み直せなくても知らせない (その tx の行の
+//     行方は、そのタブの保存しだい)。警告 qrSale.row_not_confirmed は固定のイベント名だけ (例外の本文・tx・bill key を出さない)。
 //   - 何件目か = 上の「行にするもの」の数え方 (1 = 明細つきの行・2 以上 = 明細なしの行)。
 //   - 額 = 書いた行の売上総額 (saleAmount = 着金額 + 利用料 = お客様が払った請求額 = QR の画面に出している金額)。
 //   - 表示中か (閉じた後・出し直した後の会計か) は、受け手 (hooks/useQrBillKey.ts) が決める。ここは書いた行をそのまま知らせる。
@@ -118,7 +120,7 @@ import {
   type StdTx,
   type TransferLog,
 } from './qrSaleHistory';
-import { addQrSaleMark, ORDER_FEED_MARKS_KEY, QR_SALE_MARKS_KEY, readTxMarks } from './qrSaleMarks';
+import { addQrSaleMark, ORDER_FEED_MARKS_KEY, putQrSaleMark, QR_SALE_MARKS_KEY, readTxMarks } from './qrSaleMarks';
 import {
   QR_SALE_RPC_TIMEOUT_MS,
   readBlockTime,
@@ -389,21 +391,24 @@ function saveRow(txHash: string, build: () => HistoryEntry): SaveOutcome {
     addQrSaleMark(hash);
     return 'skipped';
   }
-  // 先に印を書く。書けなければ行を書かない (この書き手が書いた行には、必ず印がある)。
-  if (!addQrSaleMark(hash)) return 'skipped';
+  // 先に印を書く。書けなければ行を書かない (この書き手が書いた行には、必ず印がある)。確かめた後に別のタブがこの tx の印を
+  // 書いていた ('present') ときも、今までどおり行を書く (addQrSaleMark と同じ流れ)。
+  const mark = putQrSaleMark(hash);
+  if (mark === null) return 'skipped';
   try {
     appendHistory(build());
     // appendHistory は localStorage の書き込みの失敗 (容量の上限など) を握りつぶして返る。画面に「取引履歴に記録しました」と
     // 出すのは、行が履歴にあると読み直せたときだけ (書けていない行を「記録した」と言う偽の成功を断つ・掟 13)。
     if (historyHasTx(hash)) return 'recorded';
-  } catch (error) {
-    // 1 件の行の組み立て・保存・読み直しの throw を、残りの入金の記録へ波及させない (掟 13)。印はもう書いてあるので、
-    // 黙った失敗と同じに「書けなかったかもしれない」を画面に知らせる (偽の成功も、知らせの欠けも作らない)。
-    warnOnce('qrSale.save_failed', error);
+  } catch {
+    // 1 件の行の組み立て・保存・読み直しの throw を、残りの入金の記録へ波及させない (掟 13)。黙った失敗と同じに扱う (下)。
+    // 例外の本文は logger に渡さない (本文に tx が入りうる・共通の logger の伏せ字の対象外)。
   }
-  // tx・bill key は出さない。
+  // 行を読み直せなかった。警告は固定のイベント名だけ (例外の本文・名前・tx・bill key を出さない)。
   warnOnce('qrSale.row_not_confirmed');
-  return 'notSaved';
+  // 画面に「書けなかったかもしれない」を出すのは、このタブが印を書いたときだけ ('present' = 確かめた後に別のタブがこの tx の
+  // 印を書いていた: その tx の行の行方は、そのタブの保存しだいで、このタブからは分からない)。
+  return mark === 'added' ? 'notSaved' : 'skipped';
 }
 
 // 保存の結果を、その会計を出した画面に知らせる (頭の注記の「画面への知らせ」)。受け手の失敗 (画面の側の throw) を、
