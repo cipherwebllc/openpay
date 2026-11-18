@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ReactNode } from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -26,12 +28,17 @@ import { readQrStdBill, stdMarkCount, stdTransferCalldata } from '@/lib/qrSaleHi
 import { buildPayUrl } from '@/lib/url';
 import { logPaymentEvent } from '@/lib/paymentLog';
 import { jsonWithBigint } from '../_helpers/relayAttemptCapture';
+import goldenFromMain from '../fixtures/stdBillMarkGoldenHook.json';
 
 // K4b: 通常決済の hook (useStandardPayment) の mutate の第 2 引数 dataSuffix (会計の印) が、ウォレットへ送る calldata に
 // どう載るか。wagmi の useWriteContract は本物のまま (本物の @wagmi/core の writeContract・viem・TanStack Query の Mutation)。
 // mock は境界だけ: ウォレット (EIP-1193 の request = 承認・拒否・失敗まで止めておける promise) と、receipt の照会。
-//   - dataSuffix を渡さない送金 (試しのスイッチ OFF・ほかの全員) は main と同じ: ウォレットへは transfer の 68 byte・
-//     writeContract の引数の object に dataSuffix の key が無い。
+//   - dataSuffix を渡さない送金 (試しのスイッチ OFF・ほかの全員) は main と同じ: 外から見える全部 (ウォレットへの要求・
+//     writeContract の引数・保存の intent の各段・登録簿・決済のログ・結果) が、main 956eb4ff の hook で採った GOLDEN
+//     (tests/fixtures/stdBillMarkGoldenHook.json) と 1 byte も同じ。
+//     GOLDEN の採り方: hooks/useStandardPayment.ts を main 956eb4ff のものにして
+//     STD_BILL_MARK_GOLDEN_CAPTURE=<書き出す dir> npx vitest run tests/hooks/useStandardPayment.dataSuffix.test.tsx -t 'GOLDEN を採る'
+//     → 書き出された hook.json を tests/fixtures/stdBillMarkGoldenHook.json に置く (新しい code から写さない)。
 //   - 渡した送金は transfer(受取先, 額) + 印 の 100 byte で、お店の端末の照合 (lib/qrSaleHistory.ts) の calldata と同じ。
 //   - 利用料の transfer・保存する intent には印が無い。
 //   - MUST-2: 印は writeContract に渡す 1 つの object の中 (登録簿と unmount の後の保存は object の同一性で見る)・送信待ちも対。
@@ -249,7 +256,125 @@ afterEach(async () => {
   await waitFor(() => expect(outstandingRequest()).toBeNull());
 });
 
+// 印を渡さない送金の、外から見える全部。時刻 (issuedAt) と hash は決め打ち。利用料つき (PARAMS): merchant の送信 → 承認 →
+// receipt → 利用料の送信 → 承認 → receipt → 成功、の各段の保存の intent と登録簿・ウォレットへの要求・writeContract の引数
+// (abi は名前に置き換える)・決済のログ・結果。
+// 前の記録の名残 (ウォレットへの要求・receipt・保存・ログ) を消して始める (1 つの test で 2 つ採るため)。
+function freshRecord() {
+  walletSends = [];
+  receiptByHash.clear();
+  window.sessionStorage.clear();
+  vi.mocked(logPaymentEvent).mockClear();
+}
+
+async function offFlowRecord(send: (view: Screen) => void): Promise<Record<string, string>> {
+  freshRecord();
+  const tab = await makeTab();
+  const view = await tab.mountScreen();
+  const intent = () => window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY);
+  const steps: Record<string, unknown> = {};
+  atTime(SUBMITTED_AT, () => act(() => send(view)));
+  await waitForWalletSends(1);
+  steps.pending = { phase: view.result.current.phase, registry: outstandingRequest(), intent: intent() };
+  await act(async () => {
+    walletSends[0].approve(MERCHANT_TX);
+  });
+  await waitFor(() => expect(view.result.current.phase).toBe('merchant-mining'));
+  steps.merchantSent = { registry: outstandingRequest(), intent: intent() };
+  receiptByHash.set(MERCHANT_TX, receipt(MERCHANT_TX, 'success'));
+  view.rerender();
+  await waitForWalletSends(2);
+  steps.feePrompt = { phase: view.result.current.phase, registry: outstandingRequest(), intent: intent() };
+  await act(async () => {
+    walletSends[1].approve(FEE_TX);
+  });
+  await waitFor(() => expect(loadStandardIntent()?.feeTxHash).toBe(FEE_TX));
+  steps.feeSent = { registry: outstandingRequest(), intent: intent() };
+  receiptByHash.set(FEE_TX, receipt(FEE_TX, 'success'));
+  view.rerender();
+  await waitFor(() => expect(view.result.current.phase).toBe('success'));
+  await act(async () => {
+    for (let i = 0; i < 5; i += 1) await new Promise((r) => setTimeout(r, 0));
+  });
+  steps.success = { intent: intent(), data: view.result.current.data, lastSubmittedParams: view.result.current.lastSubmittedParams };
+  const record = {
+    steps: jsonWithBigint(steps),
+    wallet: jsonWithBigint(walletSends.map((w) => w.tx)),
+    variables: jsonWithBigint(
+      tab.mutationVariables().map((v) => ({ ...v, abi: v.abi === erc20Abi ? 'erc20Abi' : 'other' })),
+    ),
+    logged: loggedText(),
+  };
+  view.unmount();
+  return record;
+}
+
+// 送信待ち (storage の読込の前に押した・利用料 0): ウォレットへの要求・writeContract の引数・承認の後の intent。
+async function offQueuedRecord(send: (view: Screen) => void): Promise<Record<string, string>> {
+  freshRecord();
+  // 送信待ちは storage の読込の後の effect で送る (issuedAt はその時刻) ので、Date を通して固定する (timer は本物のまま)。
+  vi.useFakeTimers({ toFake: ['Date'], now: SUBMITTED_AT });
+  try {
+    const tab = await makeTab();
+    const view = tab.renderScreen();
+    expect(view.result.current.isRestoring).toBe(true);
+    act(() => send(view));
+    await waitForWalletSends(1);
+    await act(async () => {
+      walletSends[0].approve(MERCHANT_TX);
+    });
+    await waitFor(() => expect(loadStandardIntent()?.merchantTxHash).toBe(MERCHANT_TX));
+    const record = {
+      wallet: jsonWithBigint(walletSends.map((w) => w.tx)),
+      variables: jsonWithBigint(
+        tab.mutationVariables().map((v) => ({ ...v, abi: v.abi === erc20Abi ? 'erc20Abi' : 'other' })),
+      ),
+      intent: String(window.sessionStorage.getItem(STANDARD_INTENT_STORAGE_KEY)),
+    };
+    view.unmount();
+    return record;
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+const capturePath = process.env.STD_BILL_MARK_GOLDEN_CAPTURE;
+// 採る test は、環境変数があるときだけ定義する (普段の実行では登録しない = skipped として数えない)。
+if (capturePath) {
+  describe('GOLDEN を採る (main 956eb4ff の hook で走らせる)', () => {
+    it('hook.json', async () => {
+      const golden = {
+        flow: await offFlowRecord((view) => view.result.current.mutate(PARAMS)),
+        queued: await offQueuedRecord((view) => view.result.current.mutate(PARAMS_NO_FEE)),
+      };
+      writeFileSync(join(capturePath, 'hook.json'), `${JSON.stringify(golden, null, 2)}\n`);
+    });
+  });
+}
+const GOLDEN = goldenFromMain as { flow: Record<string, string>; queued: Record<string, string> };
+
 describe('useStandardPayment の dataSuffix (K4b): 印を渡さない送金は main と 1 byte も変わらない', () => {
+  it.each([
+    ['mutate(params)', (view: Screen) => view.result.current.mutate(PARAMS)],
+    ['mutate(params, undefined)', (view: Screen) => view.result.current.mutate(PARAMS, undefined)],
+  ])('%s: 利用料つきの支払いの、ウォレットへの要求・writeContract の引数・保存の intent の各段・登録簿・決済のログ・結果が main の GOLDEN と同じ', async (_name, send) => {
+    const record = await offFlowRecord(send);
+    // 走査が中身を見ていることの確かめ。
+    expect(record.wallet).toContain(MERCHANT_CALLDATA);
+    expect(record.steps).toContain(MERCHANT_TX.slice(2));
+    expect(record.logged).toContain(FEE_TX.slice(2));
+    expect(record).toEqual(GOLDEN.flow);
+  });
+
+  it.each([
+    ['mutate(params)', (view: Screen) => view.result.current.mutate(PARAMS_NO_FEE)],
+    ['mutate(params, undefined)', (view: Screen) => view.result.current.mutate(PARAMS_NO_FEE, undefined)],
+  ])('%s: 送信待ち (storage の読込の前に押した) も main の GOLDEN と同じ', async (_name, send) => {
+    const record = await offQueuedRecord(send);
+    expect(record.wallet).toContain(MERCHANT_CALLDATA);
+    expect(record).toEqual(GOLDEN.queued);
+  });
+
   it.each([
     ['mutate(params)', (view: Screen) => view.result.current.mutate(PARAMS_NO_FEE)],
     ['mutate(params, undefined)', (view: Screen) => view.result.current.mutate(PARAMS_NO_FEE, undefined)],

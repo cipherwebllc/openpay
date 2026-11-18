@@ -1,12 +1,18 @@
 // K4b: /pay (PaymentForm) と /checkout (CheckoutForm) の通常決済の会計の印 (その端末だけの試しのスイッチ)。本物のフォームと
 // 本物の hooks/useStdBillMark.ts・useJpycEip3009Payment を動かし、通常決済の hook (useStandardPayment) の mutate の引数を受ける。
 // 境界の mock は wagmi・ほかの決済 hook・見積り・fetch だけ (tests/components/billKeyForms.integration.test.tsx と同じ形)。
-//   - スイッチ OFF (既定): mutate は今までどおり引数 1 つ (第 2 引数の印が無い)・印の計算もしない。
+//   - スイッチ OFF (既定): mutate の呼び出し (引数の全体) が、main 956eb4ff のフォームで採った GOLDEN
+//     (tests/fixtures/stdBillMarkGoldenForms.json) と 1 byte も同じ (引数 1 つ・第 2 引数の印が無い)・印の計算もしない。
+//     GOLDEN の採り方: components/PaymentForm.tsx・CheckoutForm.tsx を main 956eb4ff のものにして
+//     STD_BILL_MARK_GOLDEN_CAPTURE=<書き出す dir> npx vitest run tests/components/stdBillMarkForms.integration.test.tsx -t 'GOLDEN を採る'
+//     → 書き出された forms.json を tests/fixtures/stdBillMarkGoldenForms.json に置く (新しい code から写さない)。
 //   - スイッチ ON: JPYC の通常決済で、URL の bk の印 (billKeyStdMark の golden) を第 2 引数に渡す。第 1 引数 (保存の intent・
 //     contextKey の元) は OFF と 1 byte も同じ。
 //   - 押した時の URL の bk が準備した bk と違う・無い・形が違うときと、対象でない会計 (金額なし・USDC・注文に結び付く会計) は
 //     印なし。ガスレスの支払いは変わらない。ガスレスの画面から通常決済へ切り替えた支払いには付ける。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { NextIntlClientProvider } from 'next-intl';
@@ -94,6 +100,7 @@ import { buildCheckoutUrl, parseCheckoutParams, type CheckoutParams } from '@/li
 import { STD_BILL_MARK_TRIAL_KEY } from '@/lib/stdBillMarkTrial';
 import { mockHook } from '../_helpers/wagmiMock';
 import { FIXED_NOW_MS, jsonWithBigint, stubRandom, stubRelayFetch } from '../_helpers/relayAttemptCapture';
+import goldenFromMain from '../fixtures/stdBillMarkGoldenForms.json';
 
 const MERCHANT: Address = '0x1111111111111111111111111111111111111111';
 const CUSTOMER: Address = '0x9999999999999999999999999999999999999999';
@@ -211,12 +218,30 @@ afterEach(() => {
   window.history.replaceState(null, '', '/');
 });
 
-describe('試しのスイッチ OFF (既定・ほかの全員): 通常決済の mutate は今までどおり', () => {
-  it.each(FORM_NAMES)('%s: bk のある URL でも、引数は 1 つ (印が無い)・印を計算しない・bk の無い URL と同じ引数', async (form) => {
-    const plain = await payStandard(form, STD_QUERY[form]);
+const capturePath = process.env.STD_BILL_MARK_GOLDEN_CAPTURE;
+// 採る test は、環境変数があるときだけ定義する (普段の実行では登録しない = skipped として数えない)。
+if (capturePath) {
+  describe('GOLDEN を採る (main 956eb4ff の PaymentForm・CheckoutForm で走らせる)', () => {
+    it('forms.json', async () => {
+      const golden: Record<string, string> = {};
+      for (const form of FORM_NAMES) {
+        golden[form] = jsonWithBigint(await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`));
+      }
+      writeFileSync(join(capturePath, 'forms.json'), `${JSON.stringify(golden, null, 2)}\n`);
+    });
+  });
+}
+// main のフォームが、同じ会計 (bk つきの URL) で通常決済の mutate に渡した引数の全体 (呼び出し 1 つ分の配列)。
+const GOLDEN = goldenFromMain as Record<FormName, string>;
+
+describe('試しのスイッチ OFF (既定・ほかの全員): 通常決済の mutate は main と同じ', () => {
+  it.each(FORM_NAMES)('%s: bk のある URL でも、mutate の引数の全体が main の GOLDEN と同じ (引数 1 つ)・印を計算しない', async (form) => {
     const withKey = await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`);
+    expect(GOLDEN[form]).toContain(MERCHANT);
+    expect(jsonWithBigint(withKey)).toBe(GOLDEN[form]);
     expect(withKey).toHaveLength(1);
-    expect(jsonWithBigint(withKey)).toBe(jsonWithBigint(plain));
+    // bk の無い URL も同じ。
+    expect(jsonWithBigint(await payStandard(form, STD_QUERY[form]))).toBe(GOLDEN[form]);
     expect(stdMark.calls).toEqual([]);
   });
 });
@@ -238,14 +263,11 @@ describe('試しのスイッチの読み込みが throw するブラウザ (保�
 describe('試しのスイッチ ON の端末: JPYC の通常決済の受取先への transfer に印を付ける', () => {
   beforeEach(() => switchOn());
 
-  it.each(FORM_NAMES)('%s: 第 2 引数が URL の bk の印 (golden)・第 1 引数は OFF と 1 byte も同じ (intent・contextKey に印が入らない)', async (form) => {
-    window.localStorage.removeItem(STD_BILL_MARK_TRIAL_KEY);
-    const off = await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`);
-    switchOn();
+  it.each(FORM_NAMES)('%s: 第 2 引数が URL の bk の印 (golden)・第 1 引数は main の GOLDEN と 1 byte も同じ (intent・contextKey に印が入らない)', async (form) => {
     const on = await payStandard(form, `${STD_QUERY[form]}&bk=${BK}`);
     expect(on).toHaveLength(2);
     expect(on[1]).toBe(MARK);
-    expect(jsonWithBigint(on[0])).toBe(jsonWithBigint(off[0]));
+    expect(jsonWithBigint([on[0]])).toBe(GOLDEN[form]);
     expect(jsonWithBigint(on[0])).toContain(MERCHANT);
     expect(jsonWithBigint(on[0])).not.toContain(MARK.slice(2));
     expect(stdMark.calls).toEqual([BK]);
