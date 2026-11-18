@@ -173,7 +173,22 @@ function scrubTraceUrlFields(event: Event): void {
 
 // 認可に使うヘッダ (お店の端末の受け渡しトークン・受注フィードのトークン)。RequestData integration が
 // error event の request.headers に生値を残すので、大文字小文字を問わず落とす。
-const SECRET_HEADER_NAMES = new Set(['x-store-handoff-token', 'x-order-token']);
+// 受けた request の header のうち、秘密の値を持つもの。x402 の支払いの署名 (v2 の PAYMENT-SIGNATURE・v1 の X-PAYMENT) は
+// captureRequestError の request.headers と transaction の http.request.header.* の両方に載る (Codex が実 SDK で確かめた)。
+// 署名を第三者 (Sentry) へ波及させない。authorization・cookie も同じ理由で落とす。
+const SECRET_HEADER_NAMES = new Set([
+  'x-store-handoff-token',
+  'x-order-token',
+  'payment-signature',
+  'x-payment',
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+]);
+// span の属性の形 (http.request.header.<小文字・- は _>)。
+const SECRET_TRACE_HEADER_KEYS = new Set(
+  [...SECRET_HEADER_NAMES].map((name) => `http.request.header.${name.replace(/-/g, '_')}`),
+);
 
 function scrubRefererHeaders(headers: Record<string, string> | undefined): void {
   if (!headers) return;
@@ -192,7 +207,8 @@ function scrubServerTraceData(data: Record<string, unknown> | undefined): void {
   delete data['url.query'];
   // 受けた request の本文 (http.request.body.*) を span に持たせない (下の scrubSentryServerEvent の request.data と同じ理由)。
   for (const key of Object.keys(data)) {
-    if (key.toLowerCase().startsWith('http.request.body')) delete data[key];
+    const lower = key.toLowerCase();
+    if (lower.startsWith('http.request.body') || SECRET_TRACE_HEADER_KEYS.has(lower)) delete data[key];
   }
   // span 側にも同じ別表現が付き得る (上の scrubUrlFields と同じ理由)。
   delete data['http.query'];

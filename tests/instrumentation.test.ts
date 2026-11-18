@@ -51,8 +51,10 @@ describe('server instrumentation telemetry hooks', () => {
     const { register } = await import('@/instrumentation');
     await register();
     const options = sentry.init.mock.calls[0][0] as { integrations: unknown[] };
-    expect(sentry.httpIntegration).toHaveBeenCalledWith({ maxIncomingRequestBodySize: 'none' });
-    expect(options.integrations).toEqual([{ name: 'Http', options: { maxIncomingRequestBodySize: 'none' } }]);
+    // @sentry/nextjs の既定の Http の設定 (disableIncomingRequestSpans: true) を保ったまま、本文を採らない。
+    const expected = { disableIncomingRequestSpans: true, maxIncomingRequestBodySize: 'none' };
+    expect(sentry.httpIntegration).toHaveBeenCalledWith(expected);
+    expect(options.integrations).toEqual([{ name: 'Http', options: expected }]);
   });
 
   // 手元の dev / next start (VERCEL なし) の event は local-<network> にして mainnet の通知に混ぜない。
