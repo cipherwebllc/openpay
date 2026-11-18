@@ -106,8 +106,8 @@ vi.mock('@/lib/orderFeedReceipt', () => ({
 }));
 
 // QR の会計の入金の見張り (lib/qrSaleWatch.ts) は、決済QR・レジが QR を出している間、お店の端末から RPC で forwarder の
-// Settled を読む (lib/qrSaleRpc.ts)。既定は「読めない」スタブ: テストが外の RPC を叩かない。読めたときの動きを確かめる
-// テストは、その file の vi.mock で上書きする。
+// Settled (通常決済の会計は JPYC の Transfer と tx) を読む (lib/qrSaleRpc.ts)。既定は「読めない」スタブ: テストが外の RPC を
+// 叩かない。読めたときの動きを確かめるテストは、その file の vi.mock で上書きする。
 vi.mock('@/lib/qrSaleRpc', () => {
   const unreadable = async () => {
     throw new Error('qr_sale_rpc_stubbed_in_tests');
@@ -117,6 +117,8 @@ vi.mock('@/lib/qrSaleRpc', () => {
     readChainHead: unreadable,
     readSettledLogs: unreadable,
     readBlockTime: unreadable,
+    readTransferLogs: unreadable,
+    readTransaction: unreadable,
   };
 });
 

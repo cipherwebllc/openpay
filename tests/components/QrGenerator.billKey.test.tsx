@@ -1,9 +1,10 @@
 // 決済QR (components/QrGenerator.tsx) と会計ごとの印 (bill key):
-//   - 載せるのは、画面に表示中の「JPYC・回収 (forwarder のあるチェーンのガスレス)・金額あり・通常の QR」だけ。
+//   - 載せるのは、画面に表示中の「JPYC・回収 (forwarder のあるチェーンのガスレス)・金額あり・通常の QR」と、
+//     「JPYC・通常決済 (mode=standard)・金額あり」の QR だけ。
 //   - 画面の外へ出るもの (リンクの表示・コピー・印刷・SVG / PNG の保存・前回の受け取り QR) には載せない。
 //     保存した SVG / PNG は、実際に画像にして QR として読み (sharp + jsQR)、中身の URL に bk が無いことを確かめる。
-//   - 載せない QR (金額なし・通常決済と互換 QR・USDC・forwarder の無いチェーン・中継が無効・お店負担) では、見張りを呼ばず、
-//     RPC を 1 回も読まない。
+//   - 載せない QR (金額なし・互換 QR (EIP-681)・USDC・forwarder の無いチェーンのガスレス・中継が無効・お店負担) では、
+//     見張りを呼ばず、RPC を 1 回も読まない。
 //   - QR の画面の DOM・残高の見張りに渡す値は、bill key を載せても載せなくても同じ (違うのは QR の中身だけ)。
 //   - 画面 → 見張り → 履歴: 画面が出した bill key で署名された入金が、画面の設定 (店名・商品名・管理番号) つきの行になる。
 // 差し替えるのは、ウォレット (wagmi)・為替・経路の判定の入力 (中継の有無・forwarder)・お店の端末の状態・RPC の読み取りだけ。
@@ -36,7 +37,7 @@ const sd = vi.hoisted(() => ({
   stop: vi.fn(),
   releaseForNormal: vi.fn(),
 }));
-const rpc = vi.hoisted(() => ({ head: vi.fn(), logs: vi.fn(), time: vi.fn() }));
+const rpc = vi.hoisted(() => ({ head: vi.fn(), logs: vi.fn(), time: vi.fn(), transfers: vi.fn(), tx: vi.fn() }));
 
 vi.mock('wagmi', () => ({
   useAccount: () => ({ address: undefined, isConnected: false }),
@@ -131,6 +132,8 @@ vi.mock('@/lib/qrSaleRpc', () => ({
   readChainHead: rpc.head,
   readSettledLogs: rpc.logs,
   readBlockTime: rpc.time,
+  readTransferLogs: rpc.transfers,
+  readTransaction: rpc.tx,
 }));
 // 見張りは本物。画面が渡した会計を記録するだけ包む。
 vi.mock('@/lib/qrSaleWatch', async (importOriginal) => {
@@ -162,7 +165,8 @@ import { useQrSaleWatchScope } from '@/hooks/useQrBillKey';
 import { loadHistory } from '@/lib/history';
 import { stopQrSaleWatch } from '@/lib/qrSaleWatch';
 import { formatStoreDeviceAmount } from '@/lib/storeDevicePayment';
-import { billNonce, settledRpcLog } from '../_helpers/qrSale';
+import { deploymentForSlug } from '@/lib/tokens';
+import { billNonce, markedTransfer, settledRpcLog, transferRpcLog } from '../_helpers/qrSale';
 
 const L = ja.QrGenerator;
 const RECEIVER: Address = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -176,6 +180,7 @@ const NOW = Date.parse('2026-11-17T03:00:00.000Z');
 const BLOCK_TIME = BigInt(NOW / 1000) + 10n;
 const ONE = 10n ** 18n;
 const BK_SUFFIX = /&bk=([A-Za-z0-9_-]{11})$/;
+const JPYC_AMOY = deploymentForSlug('jpyc', 'polygon');
 
 function seed(settings: Record<string, unknown> = {}) {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ receiver: RECEIVER, receiverSource: 'manual', ...settings }));
@@ -251,6 +256,8 @@ beforeEach(() => {
   rpc.head.mockReset().mockResolvedValue(1_000n);
   rpc.logs.mockReset().mockResolvedValue([]);
   rpc.time.mockReset().mockResolvedValue(BLOCK_TIME);
+  rpc.transfers.mockReset().mockResolvedValue([]);
+  rpc.tx.mockReset().mockRejectedValue(new Error('no tx in this test'));
 });
 afterEach(() => {
   stopQrSaleWatch();
@@ -371,6 +378,38 @@ describe('決済QR: bill key を載せる QR', () => {
     expect(mainQrValue(d)).toMatch(BK_SUFFIX);
   });
 
+  it('JPYC の通常決済 (mode=standard) の金額ありの QR: 画面の QR だけが `&bk=<11 字>` つき。互換 QR (EIP-681)・リンクの表示・コピー・前回の受け取り QR は元のまま', async () => {
+    const writeText = vi.fn(async (_value: string) => {});
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+    const { dialog: d } = await openQr('1000', { payMode: 'standard' });
+    const plain = `https://test.local/pay?to=${RECEIVER}&token=jpyc&amount=1000&mode=standard`;
+    const value = mainQrValue(d);
+    expect(value.replace(BK_SUFFIX, '')).toBe(plain);
+    const billKey = BK_SUFFIX.exec(value)![1];
+    // 互換 QR (EIP-681) は bill key を知らない (払う人のウォレットが直接読む・印は付かない)。
+    const eip681 = d.querySelector('svg[data-qr-value][width="180"]')!.getAttribute('data-qr-value')!;
+    expect(eip681).toMatch(/^ethereum:/);
+    expect(eip681).not.toMatch(/bk/);
+    expect(shownLink(d)).toBe(plain);
+    expect(JSON.parse(localStorage.getItem(LAST_QR_KEY)!).payUrl).toBe(plain);
+    await act(async () => { fireEvent.click(within(d).getByRole('button', { name: L.qrCopy })); });
+    expect(writeText.mock.calls).toEqual([[plain]]);
+    // 見張りに渡す会計は、bill key を足す前の URL。見張りは Transfer を読む (forwarder の Settled は読まない)。
+    expect(h.shown).toEqual([{ billKey, kind: 'pay', url: plain, itemName: 'お支払い' }]);
+    await tick();
+    expect(rpc.transfers).toHaveBeenCalledWith(80002, JPYC_AMOY.address, [RECEIVER], 910n, 997n);
+    expect(rpc.logs).not.toHaveBeenCalled();
+    expect(await decodeQr(mainQr(d).outerHTML)).toBe(value);
+    Reflect.deleteProperty(navigator, 'clipboard');
+  });
+
+  it('forwarder の無いチェーンでも、JPYC の通常決済の QR には載る (払う人のウォレットが送る)', async () => {
+    h.forwarders = {};
+    const { dialog: d } = await openQr('1000', { payMode: 'standard' });
+    expect(mainQrValue(d).replace(BK_SUFFIX, '')).toBe(`https://test.local/pay?to=${RECEIVER}&token=jpyc&amount=1000&mode=standard`);
+    expect(mainQrValue(d)).toMatch(BK_SUFFIX);
+  });
+
   it('StrictMode でも bill key は 1 つで、見張りも 1 つ (6 秒に先頭を読むのは 1 回)', async () => {
     seed();
     renderWithIntl(<StrictMode><QrGenerator /></StrictMode>);
@@ -399,6 +438,8 @@ describe('決済QR: bill key を載せない QR (見張りも呼ばず、RPC を
     expect(rpc.head).not.toHaveBeenCalled();
     expect(rpc.logs).not.toHaveBeenCalled();
     expect(rpc.time).not.toHaveBeenCalled();
+    expect(rpc.transfers).not.toHaveBeenCalled();
+    expect(rpc.tx).not.toHaveBeenCalled();
   };
 
   it('金額なし (据え置き) の QR', async () => {
@@ -407,10 +448,9 @@ describe('決済QR: bill key を載せない QR (見張りも呼ばず、RPC を
     await expectNoBillKey(d);
   });
 
-  it('通常決済の QR と、互換 QR (EIP-681)', async () => {
-    const { dialog: d } = await openQr('1000', { payMode: 'standard' });
-    expect(mainQrValue(d)).toBe(`https://test.local/pay?to=${RECEIVER}&token=jpyc&amount=1000&mode=standard`);
-    expect(d.querySelector('svg[data-qr-value][width="180"]')!.getAttribute('data-qr-value')).toMatch(/^ethereum:/);
+  it('通常決済の金額なし (据え置き) の QR', async () => {
+    const { dialog: d } = await openQr(null, { payMode: 'standard' });
+    expect(mainQrValue(d)).toBe(`https://test.local/pay?to=${RECEIVER}&token=jpyc&mode=standard`);
     await expectNoBillKey(d);
   });
 
@@ -664,6 +704,28 @@ describe('決済QR: 入金の確認の表示 (見張りが表示中の会計の�
     await tick();
     expect(loadHistory()).toHaveLength(3);
     expect(dialog()!.textContent).not.toContain(another('1400 JPYC'));
+  });
+
+  it('通常決済の QR: 印の付いた transfer の入金の行 (払った側の通常決済の行と同じ欄) を書いたら、同じ緑の文を出す (額 = 請求額)', async () => {
+    const { dialog: d } = await openQr('1400', { payMode: 'standard' });
+    const billKey = billKeyOf(d);
+    expect(within(d).queryByText(first('1400 JPYC'))).toBeNull();
+    rpc.head.mockResolvedValue(1_010n);
+    rpc.transfers.mockResolvedValue([
+      transferRpcLog({ token: JPYC_AMOY.address, from: CUSTOMER, to: RECEIVER, value: 1_400n * ONE, txHash: TX1, blockNumber: 1_003n }),
+    ]);
+    // お客様の EOA が JPYC へ直接送った tx (transfer(受取先, 額) + この会計の印)。
+    rpc.tx.mockResolvedValue({ from: CUSTOMER, to: JPYC_AMOY.address, input: markedTransfer(billKey, RECEIVER, 1_400n * ONE) });
+    await tick();
+    expect(rpc.tx).toHaveBeenCalledWith(80002, TX1);
+    const [row] = loadHistory();
+    expect(row).toMatchObject({
+      id: `standard-merchant-${TX1}`, flow: 'standard-merchant', payMode: 'standard', gasMode: null,
+      saleAmount: (1_400n * ONE).toString(), merchantAmount: (1_400n * ONE).toString(), feeAmount: '0',
+      networkFeeEquivalent: null, blockNumber: '1003', customer: CUSTOMER,
+    });
+    expect(status().textContent).toBe(first('1400 JPYC'));
+    expect(status()).toHaveClass('border-emerald-200', 'bg-emerald-50');
   });
 
   it('en: 同じ中身の文', async () => {

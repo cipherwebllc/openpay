@@ -1,13 +1,14 @@
-// QR の会計の入金 (bill key) のテストで使う道具: 払う側が署名する nonce と、RPC が返す Settled の log。
+// QR の会計の入金 (bill key) のテストで使う道具: 払う側が署名する nonce と、RPC が返す Settled の log。通常決済の会計の
+// テストには、印の付いた transfer の calldata と、RPC が返す Transfer の log。
 // nonce は払う側と同じ関数 (lib/relay/forwarderIntent の buildForwarderNonce・lib/relay/billKeySalt の billKeySalt) で作る。
 // log は viem で encode した本物の形 (lib/order/agentOrderReceipt.ts の strict な decode を通る)。
 
-import type { Address, Hex } from 'viem';
+import { concatHex, encodeFunctionData, erc20Abi, type Address, type Hex } from 'viem';
 import { env } from '@/lib/env';
 import type { QrSaleLog } from '@/lib/qrSaleRpc';
-import { billKeySalt } from '@/lib/relay/billKeySalt';
+import { billKeySalt, billKeyStdMark } from '@/lib/relay/billKeySalt';
 import { buildForwarderNonce } from '@/lib/relay/forwarderIntent';
-import { settledLog } from './orderSaleReceipt';
+import { settledLog, transferLog } from './orderSaleReceipt';
 
 export type SignedSale = {
   from: Address;
@@ -68,6 +69,36 @@ export function settledRpcLog(a: {
       feeValue: a.feeValue,
       nonce: a.nonce,
     }),
+    transactionHash: a.txHash,
+    logIndex: a.logIndex ?? 0,
+    blockNumber: a.blockNumber,
+  };
+}
+
+/** ERC-20 の transfer(to, value) の calldata (印なし = 今の払う側の通常決済が送る形)。 */
+export function plainTransfer(to: Address, value: bigint): Hex {
+  return encodeFunctionData({ abi: erc20Abi, functionName: 'transfer', args: [to, value] });
+}
+
+/** 通常決済の印の付いた transfer の calldata (transfer(to, value) + この bill key の印 32 byte)。 */
+export function markedTransfer(billKey: string, to: Address, value: bigint): Hex {
+  const mark = billKeyStdMark(billKey);
+  if (!mark) throw new Error(`形の違う bill key: ${billKey}`);
+  return concatHex([plainTransfer(to, value), mark]);
+}
+
+/** RPC (getLogs) が返す token の Transfer の log 1 つ。 */
+export function transferRpcLog(a: {
+  token: Address;
+  from: Address;
+  to: Address;
+  value: bigint;
+  txHash: string;
+  blockNumber: bigint;
+  logIndex?: number;
+}): QrSaleLog {
+  return {
+    ...transferLog(a.token, a.from, a.to, a.value),
     transactionHash: a.txHash,
     logIndex: a.logIndex ?? 0,
     blockNumber: a.blockNumber,
