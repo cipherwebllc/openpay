@@ -2006,7 +2006,7 @@
     "filterJpyc": "JPYC ({count})",
     "filterUsdc": "USDC ({count})",
     "browserScopeNote": "History is stored only in this browser ({count}/{max} entries, oldest auto-deleted on overflow).",
-    "notInHistoryNote": "Some incoming payments do not show up in your history (standard payments other than mobile orders, USDC and others). For details, see the <link>“History & accounting CSV” guide</link>.",
+    "notInHistoryNote": "Some incoming payments do not show up in your history (USDC, payments to printed QR codes and others). For details, see the <link>“History & accounting CSV” guide</link>.",
     "columnStatus": "Status",
     "columnFee": "OpenPay fee",
     "feeOneWei": "1 wei (by design, ¥0)",
@@ -3488,7 +3488,6 @@
       }
     },
     "note": "No account needed. History is stored on this device; purchases and selling use your wallet connection.",
-    "stdMarkTrial": "Trial: standard payments from this device carry the bill mark (this device only; open with ?stdmark=off to turn it off)",
     "tipInbox": {
       "title": "Tips & messages received",
       "signInDesc": "See messages of support attached to your tips (sign-in required)",

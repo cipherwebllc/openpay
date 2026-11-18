@@ -219,12 +219,13 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     merchantHash: Hex;
     merchantBlockNumber: bigint;
   } | null>(null);
-  // K4b (通常決済の会計の印・その端末だけの試しのスイッチ・hooks/useStdBillMark.ts): 印 (dataSuffix) は writeContract に渡す vars の
+  // K4b (通常決済の会計の印・hooks/useStdBillMark.ts): 印 (dataSuffix) は writeContract に渡す vars の
   // 1 つの object の中にだけ置く (Fable の MUST-2: 登録簿と unmount の後の保存は object の同一性で見るので、後から spread した別の
   // object を渡さない)。
   // K4b (Fable の MUST-1): 印つきの送信は、この画面で 1 回まで。印つきで merchant の writeContract を呼ぶ直前に、同期で印を予約する
   // (mutate の中)。予約の後のこの画面の送信は印なし (印つき A の応答待ちの間に始めた B も印なし = 同じ画面で印つきが 2 本出ない)。
-  // 予約を解くのは、印つきの送信が「ウォレットが tx を出さずに断った」と確かめられる形で終わったときだけ (次はまた印つき):
+  // 予約を解くのは、印つきの送信が「ウォレットが tx を出さずに断った」と確かめられる形で終わったときだけで (次はまた印つき)、
+  // この画面で 1 回まで (下の markReleasedRef)。確かめられる形 = 次の両方:
   //   1. error の cause の連なりの、いちばん奥の error (ウォレットが投げた元の error) の code が EIP-1193 の 4001 で、途中に 4001 で
   //      ない code が無い (lib/walletRejectionProof の isEip1193UserRejection)。文言では決めない ('Connection request reset' のような code
   //      の無い失敗は、ウォレットが tx を出した後に hash の応答だけが失われたのかもしれない)。viem が 4001 として包む WalletConnect
@@ -242,6 +243,13 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
   // 1 回の writeContract の中のことで、hook からは見えない。
   // null = 予約していない。true・false = 予約している (true は、予約した送信の 4001 で解いてよい接続で送った)。
   const markReservedRef = useRef<boolean | null>(null);
+  // K4b (Fable の最終監査の MUST・全員に付けるときの条件): 4001 で予約を解くのは、この画面で 1 回まで。1 回目の 4001 で解き
+  // (2 回目の送信は印つき)、2 回目の印つきも 4001 なら解かない (3 回目からの送信は印なし)。画面 = この hook の 1 つの mount
+  // (読み直す・開き直すと新しい画面)。
+  // 断つ波及: 余った calldata のある送金を、確認の画面を出さずに 4001 で断るウォレットで、毎回予約が解けて印つきを送り続け、
+  // この画面から払えなくなること (お客様には、ウォレットが何も出さずに失敗が続くように見える)。お客様が自分で 2 回断った後の
+  // 3 回目も印なしになる (履歴の行が出ないだけで、送金は今までどおり)。
+  const markReleasedRef = useRef(false);
   // H-D (Codex の MUST): 同じタブの中で、結果の出ていないウォレットへの要求を同時に 1 つだけにする登録簿
   // (lib/standardPaymentOutstanding) での、この hook (1 つの画面) の持ち主の印。
   // 登録は hook の options の onMutate (Mutation が mutationFn = ウォレットへの要求を呼ぶ前に、writeContract の中で同期に呼ぶ)。
@@ -275,7 +283,11 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
       onError: (error, variables) => {
         removeStandardWalletRequest(variables);
         // K4b (MUST-1): 印つきの送信を、ウォレットが tx を出さずに断った (4001) と確かめられたときだけ、印の予約を解く (次はまた印つき)。
-        if (variables.dataSuffix && markReservedRef.current && isEip1193UserRejection(error)) markReservedRef.current = null;
+        // 解くのはこの画面で 1 回まで (2 回目の 4001 では解かない = 以後の送信は印なし・上の markReleasedRef)。
+        if (variables.dataSuffix && markReservedRef.current && !markReleasedRef.current && isEip1193UserRejection(error)) {
+          markReservedRef.current = null;
+          markReleasedRef.current = true;
+        }
       },
     },
   });
@@ -637,8 +649,8 @@ export function useStandardPayment({ enabled = true }: { enabled?: boolean } = {
     if (intent) restoreStoredIntent(storage, intent);
   }, [requestElsewhere, restoreStoredIntent]);
 
-  // dataSuffix (K4b): 受取先への transfer の calldata の後ろに足す会計の印 (試しのスイッチが ON の端末の /pay・/checkout だけが
-  // 渡す・hooks/useStdBillMark.ts)。渡さない呼び出し (ほかの全員・チップ等) の送金は今までと 1 byte も変わらない。
+  // dataSuffix (K4b): 受取先への transfer の calldata の後ろに足す会計の印 (/pay・/checkout の、URL に会計の印 `bk` のある対象の
+  // 会計だけが渡す・hooks/useStdBillMark.ts)。渡さない呼び出し (bk の無い URL・対象でない会計・チップ等) の送金は今までと 1 byte も変わらない。
   // 利用料の transfer (submitFee・retryFee) には付けない。保存する intent・ログ (params) にも入れない。
   function mutate(params: StandardPaymentParams, dataSuffix?: Hex): void {
     if (!enabled) return;

@@ -145,7 +145,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
   // sessionStorage に broadcast 済み standard intent が残る場合、元 URL が gasless でも
   // standard の receipt 復元を本線に固定する。storage 読込中は下の readiness で全経路を止める。
   const standard = useStandardPayment();
-  // 通常決済の会計の印 (K4b・その端末だけの試しのスイッチが ON のときだけ・hooks/useStdBillMark.ts)。対象は JPYC のレジの会計
+  // 通常決済の会計の印 (K4b・URL に会計の印 `bk` があるときだけ・hooks/useStdBillMark.ts)。対象は JPYC のレジの会計
   // (お店の端末が照合する会計と同じ形: lib/qrSaleHistory.ts の readQrStdBill)。注文に結び付く会計 (webhook・@handle・
   // モバイル注文の利用料・受付番号・ship=ask の注文リンク・お店の端末で送る) には付けない。付けるのは onSubmit の通常決済の
   // 分岐で、受取先へ送る transfer だけ (経路を通常決済へ切り替えた後も)。
@@ -1025,7 +1025,7 @@ export function CheckoutForm({ params }: { params: CheckoutParams }) {
         ...(orderLinkKey ? { orderLinkKey } : {}),
       };
       // 会計の印 (K4b): 押した瞬間に同期で読む (印の対象の会計では、押してからここまでに await は無い)。無ければ今までどおり
-      // 引数 1 つで呼ぶ (スイッチ OFF は main と同じ)。印は contextKey・intent には入らない (送金の calldata だけ)。
+      // 引数 1 つで呼ぶ (bk の無い URL・対象でない会計は、印を足す前と同じ)。印は contextKey・intent には入らない (送金の calldata だけ)。
       const stdMark = takeStdBillMark();
       if (stdMark) standard.mutate(standardParams, stdMark);
       else standard.mutate(standardParams);

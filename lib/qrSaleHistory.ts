@@ -26,7 +26,7 @@
 //
 // 通常決済 (URL の mode=standard・JPYC) の会計 (readQrStdBill): 払う人のウォレットが JPYC の transfer(受取先, 額) を送る。
 // 払う側は transfer の calldata の後ろに、bill key から作った 32 byte の印 (lib/relay/billKeySalt の billKeyStdMark) を足す
-// (払う側が印を付けるのは別の変更から。それまでは、この会計に一致する入金は無い)。この会計の支払いとして扱うのは、次の
+// (払う側の hooks/useStdBillMark.ts。印の付いていない入金は、この会計に一致しない)。この会計の支払いとして扱うのは、次の
 // 全部が成り立つ JPYC の `Transfer` だけ (lib/qrSaleWatch.ts が順に確かめる):
 //   1. log を出したのが、この会計のチェーンの JPYC の deployment (readTransferLog)。
 //   2. 受取先・額が、この会計の期待値 (払う側と同じ calcBreakdown の通常決済の着金額 = 今は請求額そのもの) とちょうど同じで、

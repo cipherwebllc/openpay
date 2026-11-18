@@ -467,12 +467,12 @@ describe.skipIf(capturePath)('約束 3 の柵: bk つきの URL でも、bill ke
   });
 });
 
-// お店は JPYC の通常決済の QR (mode=standard) にも bk を載せる (hooks/useQrBillKey.ts)。払う側が通常決済の transfer に印を
-// 付けるのは、その端末だけの試しのスイッチ (lib/stdBillMarkTrial.ts・K4b) が ON の端末だけ (tests/components/
-// stdBillMarkForms.integration.test.tsx)。既定の OFF (この file の beforeEach は localStorage を空にする) では、bk のある URL でも、
-// 今の支払いは 1 byte も変わらない (mutate の引数の数も同じ = 第 2 引数の印が無い)。
-describe.skipIf(capturePath)('通常決済 (mode=standard・JPYC) の URL の bk: 試しのスイッチ OFF (既定) では、今の支払いは 1 byte も変わらない', () => {
-  // 押した時の通常決済の mutate の引数 (送る相手・額・保存の key) と、押した後の storage の中身。
+// お店は JPYC の通常決済の QR (mode=standard) にも bk を載せる (hooks/useQrBillKey.ts)。払う側は、bk から作った印 (hash) を
+// 通常決済の mutate の第 2 引数に渡す (K4b・hooks/useStdBillMark.ts。印の値と付く条件は tests/components/
+// stdBillMarkForms.integration.test.tsx)。ここでは、bk があっても mutate の第 1 引数 (送る相手・額・保存の key) と storage が
+// 1 byte も変わらないこと・bk の文字列そのものが引数にも storage にも残らないことを見る (印の準備が間に合ったかによらない)。
+describe.skipIf(capturePath)('通常決済 (mode=standard・JPYC) の URL の bk: 送る相手・額・保存の key と storage は変わらず、bk の文字列は残らない', () => {
+  // 押した時の通常決済の mutate の第 1 引数 (送る相手・額・保存の key)・呼び出しの全体と、押した後の storage の中身。
   async function payStandard(form: FormName, query: string) {
     standardMutate.mockClear();
     window.sessionStorage.clear();
@@ -480,18 +480,23 @@ describe.skipIf(capturePath)('通常決済 (mode=standard・JPYC) の URL の bk
     const view = FORMS[form].render(query);
     await clickWhenEnabled(/JPYC を支払う/);
     expect(standardMutate).toHaveBeenCalledOnce();
-    const out = { args: jsonWithBigint(standardMutate.mock.calls), storage: dumpStorage() };
+    const calls = standardMutate.mock.calls as unknown[][];
+    const out = { params: jsonWithBigint(calls[0][0]), calls: jsonWithBigint(calls), storage: dumpStorage() };
     view.unmount();
     return out;
   }
 
-  it.each(Object.keys(FORMS) as FormName[])('%s: bk の有無で、mutate の引数と storage が同じ。relay へ POST せず、署名もしない', async (form) => {
+  it.each(Object.keys(FORMS) as FormName[])('%s: bk の有無で、mutate の第 1 引数と storage が同じ。relay へ POST せず、署名もしない', async (form) => {
     const plain = await payStandard(form, `${FORMS[form].query}&mode=standard`);
     const withKey = await payStandard(form, `${FORMS[form].query}&mode=standard&bk=${VALID_BK}`);
-    expect(plain.args).toContain(MERCHANT);
-    expect(withKey.args).toBe(plain.args);
+    expect(plain.params).toContain(MERCHANT);
+    // bk の無い URL は引数 1 つ (印を足す前と同じ呼び出し)。
+    expect(JSON.parse(plain.calls)).toEqual([[JSON.parse(plain.params)]]);
+    expect(withKey.params).toBe(plain.params);
     expect(withKey.storage).toBe(plain.storage);
-    expect(withKey.args).not.toContain(VALID_BK);
+    // 第 2 引数の印 (あれば) も含めて、bk の文字列と、ガスレスの intentSalt (bk の別の hash) は入らない。
+    expect(withKey.calls).not.toContain(VALID_BK);
+    expect(withKey.calls).not.toContain(VALID_BK_SALT.slice(2));
     expect(withKey.storage).not.toContain(VALID_BK);
     expect(relay.posts).toHaveLength(0);
     expect(signTypedData).not.toHaveBeenCalled();

@@ -627,8 +627,8 @@ function RegisterModeContent({
   // 会計ごとの印 (bill key) を、画面に表示中の通常の QR にだけ載せる: JPYC の回収 (forwarder のあるチェーンのガスレス) と
   // JPYC の通常決済 (mode=standard・forwarder の有無を問わない)。お店負担の QR・USDC・forwarder の無いチェーンのガスレスには
   // 載せない。URL の表示とコピーは checkoutUrl のまま (hooks/useQrBillKey.ts)。入金は、お店の端末がチェーンで確かめて取引履歴に
-  // 書き、書いたら表示中のこの会計の QR の画面に出す (billConfirmed)。通常決済の QR の bill key は、払う側が transfer に印を
-  // 付けるようになるまで使われない (載せても今の支払いは変わらない)。
+  // 書き、書いたら表示中のこの会計の QR の画面に出す (billConfirmed)。通常決済の QR の bill key は、払う側 (/checkout) が
+  // transfer の calldata の後ろに付ける印の元になる (hooks/useStdBillMark.ts。送金の宛先・額は変わらない)。
   const isJpycStandard = settings.payMode === 'standard' && settings.token === 'jpyc';
   const { screenUrl: screenQrValue, confirmed: billConfirmed } = useQrBillKey({
     kind: 'checkout',

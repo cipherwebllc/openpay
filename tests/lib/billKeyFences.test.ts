@@ -3,8 +3,8 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 // 会計ごとの印 (bill key・URL の `bk`) に触れる file を、名前で数えて固定する柵。
-// 払う側で bill key を使うのは「/pay と /checkout の JPYC ガスレス (forwarder のある経路・束縛なし)」と、その端末だけの試しの
-// スイッチ (lib/stdBillMarkTrial.ts) が ON の端末の「/pay と /checkout の JPYC の通常決済」(K4b・hooks/useStdBillMark.ts が
+// 払う側で bill key を使うのは「/pay と /checkout の JPYC ガスレス (forwarder のある経路・束縛なし)」と、
+// 「/pay と /checkout の JPYC の通常決済」(K4b・どの端末でも・hooks/useStdBillMark.ts が
 // 印 = lib/relay/billKeySalt.ts の billKeyStdMark を作り、通常決済の hook が transfer の calldata の後ろに足す) だけ。チップ・
 // お店の端末で送る・USDC・クロスチェーン・URL の parser と builder・履歴・控え・記録の送信・復旧の枠・server は bill key を
 // 知らない。通常決済の hook (hooks/useStandardPayment.ts) も bill key を知らない (渡された印 = dataSuffix を足すだけ)。
@@ -54,7 +54,7 @@ describe('bill key に触れる file の柵', () => {
       'hooks/useJpycEip3009Payment.ts',
       // お店の側: bill key を作って画面の QR に載せる hook・入金を確かめる code (遅延 chunk)。
       'hooks/useQrBillKey.ts',
-      // 払う側: 通常決済の会計の印を準備する hook (試しのスイッチが ON の端末だけ・K4b)。
+      // 払う側: 通常決済の会計の印を準備する hook (K4b)。
       'hooks/useStdBillMark.ts',
       'lib/qrSaleHistory.ts',
       'lib/qrSaleWatch.ts',
@@ -91,7 +91,7 @@ describe('bill key に触れる file の柵', () => {
     expect(std).not.toMatch(/^import .*billKeySalt/m);
   });
 
-  it('通常決済の印の関数を呼ぶのは、払う側の印の hook (試しのスイッチ) と、入金を確かめる code だけ', () => {
+  it('通常決済の印の関数を呼ぶのは、払う側の印の hook と、入金を確かめる code だけ', () => {
     // 呼び出しの形と import の名前 (注記の中の名前は数えない: 名前の後ろに ( か , か } が続く所だけ)。
     expect(matching(/\bbillKeyStdMark\s*[(,}]/)).toEqual([
       'hooks/useStdBillMark.ts',
@@ -105,7 +105,7 @@ describe('bill key に触れる file の柵', () => {
     expect(files.find(({ file }) => file === 'hooks/useStandardPayment.ts')!.source).not.toMatch(/bill[-_ ]?key|readBillKeyParam/i);
   });
 
-  it('通常決済の印 (K4b) を使うのは /pay と /checkout のフォームだけ・calldata に足すのは通常決済の hook だけ・スイッチを書くのはマイページの部品だけ', () => {
+  it('通常決済の印 (K4b) を使うのは /pay と /checkout のフォームだけ・calldata に足すのは通常決済の hook だけ・外した試しのスイッチの名残は無い', () => {
     // 印の hook を呼ぶのは 2 つのフォームだけ (チップ・お店の端末で送る・USDC の専用画面は使わない)。
     expect(matching(/\buseStdBillMark\(/)).toEqual([
       'components/CheckoutForm.tsx',
@@ -114,11 +114,11 @@ describe('bill key に触れる file の柵', () => {
     ]);
     // viem の writeContract の dataSuffix に触れるのは通常決済の hook (と、その名前を注記で説明する印の hook) だけ。
     expect(matching(/dataSuffix/)).toEqual(['hooks/useStandardPayment.ts', 'hooks/useStdBillMark.ts']);
-    // スイッチの保存の key を知っているのは、読む lib と、書くマイページの部品だけ。書く (setItem / removeItem) のは部品だけ。
-    expect(matching(/std-bill-mark-trial/)).toEqual(['lib/stdBillMarkTrial.ts']);
-    expect(matching(/\bSTD_BILL_MARK_TRIAL_KEY\b/)).toEqual(['components/StdBillMarkTrialSwitch.tsx', 'lib/stdBillMarkTrial.ts']);
-    expect(files.find(({ file }) => file === 'lib/stdBillMarkTrial.ts')!.source).not.toMatch(/\.(setItem|removeItem)\(/);
-    expect(matching(/<StdBillMarkTrialSwitch\b/)).toEqual(['app/[locale]/me/page.tsx']);
+    // その端末だけの試しのスイッチ (2026-11-18 の lib/stdBillMarkTrial.ts・components/StdBillMarkTrialSwitch.tsx・/me?stdmark=on) は
+    // 外した: 保存の key・module・部品・URL の param の名前が、どの source にも無い (古い key を読む・消す code も足さない)。
+    expect(matching(/std-?bill-?mark-?trial|stdMarkTrial|[?&]stdmark=|['"]stdmark['"]/i)).toEqual([]);
+    // 印の hook は端末の保存を読まない (対象かどうかと URL の bk だけで決まる)。
+    expect(files.find(({ file }) => file === 'hooks/useStdBillMark.ts')!.source).not.toMatch(/(local|session)Storage/);
   });
 
   it('URL の param の名前 bk を知っているのは、読む lib/url/billKey.ts と、画面の QR に足す lib/url/billKeyQr.ts だけ (parser・builder は知らない)', () => {

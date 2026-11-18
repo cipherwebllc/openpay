@@ -1,7 +1,7 @@
 // QR の会計の通常決済 (mode=standard・JPYC) の同じ支払いを、払った側 (本物の PaymentForm / CheckoutForm + usePaymentHistory) と、
 // お店の端末 (本物の見張り lib/qrSaleWatch.ts + 照合 + 行の組み立て) の両方で通して、つながることを確かめる:
 //   1. 払う側が通常決済で送る transfer (受取先・額 = 本物のフォームが useStandardPayment の mutate に渡す値) に、本物のフォームが
-//      mutate の第 2 引数に渡す会計の印 (その端末だけの試しのスイッチが ON の端末だけ・K4b) を足した calldata が、お店の側が
+//      mutate の第 2 引数に渡す会計の印 (URL に bk のある対象の会計・K4b) を足した calldata が、お店の側が
 //      同じ URL から作る「transfer + 印」(stdTransferCalldata) とちょうど同じ。足し方は viem の writeContract の dataSuffix と同じ
 //      (本物の viem でウォレットへ届く calldata は tests/hooks/useStandardPayment.dataSuffix.test.tsx が確かめる)。
 //   2. お店の端末が書く行が、払った側が同じ支払いで書く行 (flow standard-merchant) と欄ごとに同じ (違ってよいのは ts だけ)。
@@ -79,7 +79,6 @@ import { billKeyStdMark } from '@/lib/relay/billKeySalt';
 import { deploymentForSlug } from '@/lib/tokens';
 import { withBillKey } from '@/lib/url/billKeyQr';
 import { buildCheckoutUrl, buildPayUrl, parseCheckoutParams, type CheckoutParams, type PayParams } from '@/lib/url';
-import { STD_BILL_MARK_TRIAL_KEY } from '@/lib/stdBillMarkTrial';
 import { mockHook } from '../_helpers/wagmiMock';
 import { transferRpcLog } from '../_helpers/qrSale';
 import { FIXED_NOW_MS } from '../_helpers/relayAttemptCapture';
@@ -260,7 +259,6 @@ const calldataFromPayer = (paid: { args: StandardArgs; mark: Hex | undefined }) 
     encodeFunctionData({ abi: erc20Abi, functionName: 'transfer', args: [paid.args.merchant, paid.args.merchantAmount] }),
     ...(paid.mark ? [paid.mark] : []),
   ]);
-const switchOn = () => window.localStorage.setItem(STD_BILL_MARK_TRIAL_KEY, '1');
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: FIXED_NOW_MS });
@@ -291,9 +289,8 @@ afterEach(() => {
 
 describe('通常決済の QR の会計: 払う側の transfer + 印にお店の側の照合が一致し、お店の行は払った側の行と欄ごとに同じ', () => {
   it.each(CASES)('$name', async (c) => {
-    // お店: 画面の QR にだけ bill key を足す。払う側は試しのスイッチが ON の端末 (印を付ける)。
+    // お店: 画面の QR にだけ bill key を足す。払う側は、その QR を開いたどの端末でも印を付ける。
     const screenUrl = withBillKey(plainUrl(c), BK);
-    switchOn();
     const paid = await payFromScreenQr(c, screenUrl);
     const payer = paid.row!;
     expect(payer).toMatchObject({ id: `standard-merchant-${TX}`, flow: 'standard-merchant', customer: SHOP, merchant: SHOP });
@@ -345,9 +342,10 @@ describe('通常決済の QR の会計: 払う側の transfer + 印にお店の�
     }
   });
 
-  it('試しのスイッチが OFF (既定・ほかの全員) の払う側は印を渡さず、その印なしの transfer の入金は、お店の側の照合に一致しない = 行にならない', async () => {
+  // 印刷・保存・コピーした QR (bill key の無い元の URL) を開いた払う側。お店の端末は、画面の QR の会計 (bill key つき) を見張っている。
+  it('bk の無い URL (印刷・保存・コピーした QR) を開いた払う側は印を渡さず、その印なしの transfer の入金は、お店の側の照合に一致しない = 行にならない', async () => {
     const c = CASES[0];
-    const paid = await payFromScreenQr(c, withBillKey(plainUrl(c), BK));
+    const paid = await payFromScreenQr(c, plainUrl(c));
     expect(paid.mark).toBeUndefined();
     clearHistory();
     const plainTransfer = encodeFunctionData({ abi: erc20Abi, functionName: 'transfer', args: [paid.args.merchant, paid.args.merchantAmount] });
@@ -358,7 +356,6 @@ describe('通常決済の QR の会計: 払う側の transfer + 印にお店の�
 
   it('同じブラウザに両方が書いても 1 行 (払った側が先): 払った側の行が残り、お店の端末は書かない', async () => {
     const c = CASES[1];
-    switchOn();
     const paid = await payFromScreenQr(c, withBillKey(plainUrl(c), BK));
     expect(paid.mark).toBe(billKeyStdMark(BK));
     expect(await shopWatches(c, paid.args, calldataFromPayer(paid))).toEqual([paid.row]);

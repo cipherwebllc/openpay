@@ -2,11 +2,16 @@
 // 取引履歴 (/history・このブラウザの localStorage) に売上が出る払い方と出ない入金、会計 CSV、保存の注意をまとめる。
 // 本文 (lead・各節) は運営者の承認済みの文 (2026-11-18)。表の外で作った短い文 (メタ・副題・ボタン・帯の見出し) も、
 // その中身から作り、新しい事実を足さない。
+// 2026-11-19: 払う側が通常決済の送金にも会計の印を付けるようになった (hooks/useStdBillMark.ts・K4b) ので、① に通常決済を足し、
+// 「履歴に出ない入金」から通常決済を外した。① の通常決済は「Polygon で」と書く (運営者の裁定 A・2026-11-19): 印の code は
+// チェーンを選ばないが、実機で確かめたのは Polygon だけ (公開文言は試した範囲だけ)。ほかのチェーンの通常決済は、① にも
+// 「履歴に出ない入金」にも書かない。
 // ⚠️ 上限の件数: 受取の履歴は lib/history/model.ts の HISTORY_MAX_ENTRIES から描く。支払いの控えの 200 件は
 // lib/payerReceipt.ts の PAYER_RECEIPTS_MAX と tests/lib/historyGuide.test.ts で照合する (payerReceipt を import すると、このガイドの
 // First Load JS が 240 → 246 kB に増えた・2026-11-18 の build で実測)。
 // ① の対象 (金額を入れて画面に表示している QR だけ) は components/QrGenerator.tsx の会計の印を載せる条件 (url / shown)、
-// 「通常決済 (モバイルオーダーを除く)」は lib/orderFeedHistory.ts (通常決済の受注も行にする) と、テストで照合する。
+// ① の通常決済は払う側の印 (hooks/useStdBillMark.ts) とお店の端末の照合 (lib/qrSaleWatch.ts)、③ のモバイルオーダーは
+// lib/orderFeedHistory.ts (通常決済の受注も行にする) と、テストで照合する。
 // 「QR を閉じてから 60 秒」は lib/qrSaleWatch.ts の QR_SALE_KEEP_AFTER_HIDE_MS と tests/lib/historyGuide.test.ts で照合する
 // (qrSaleWatch は viem を読むので、この server の content からは import しない)。
 // 会計 CSV の形式の名前は、履歴ページの選択肢 (messages の History.accountingFormat*) とテストで照合する。
@@ -67,7 +72,7 @@ const JA: HistoryGuideContent = {
   inHistory: [
     {
       mark: '①',
-      text: 'お客様がお店の QR (決済QR・レジ) を JPYC のガス代不要の払い方で払ったとき (QR を出していた端末に・QR を閉じてから 60 秒まで)',
+      text: 'お客様がお店の QR (決済QR・レジ) を JPYC で払ったとき (ガス代不要の払い方と、Polygon でガス代を自分で払う通常決済・QR を出していた端末に・QR を閉じてから 60 秒まで)',
     },
     { mark: '②', text: 'お店がガス代を肩代わりして送る支払い (その端末に)' },
     { mark: '③', text: 'モバイルオーダー (店主としてサインインし、受注の画面を開いた端末に)' },
@@ -77,8 +82,10 @@ const JA: HistoryGuideContent = {
 
   notInHistoryTitle: '履歴に出ない入金',
   notInHistory: [
-    '通常決済 (ガス代を自分で払う払い方・モバイルオーダーを除く)',
     'USDC',
+    // 同じ画面で、うまくいかなかった後に払い直した通常決済は会計の印を付けない (hooks/useStandardPayment.ts の逃げ道) ので、
+    // お店の端末の履歴にも QR の画面の確認にも出ない (2026-11-19 運営者の承認)。
+    '通常決済で、うまくいかなかった後に同じ画面から払い直した入金',
     'ウォレットのアプリで読む QR',
     '印刷・保存・コピーした QR や、金額なしの QR での入金',
     '注文リンク',
@@ -109,7 +116,7 @@ const EN: HistoryGuideContent = {
   inHistory: [
     {
       mark: '①',
-      text: 'When a customer pays your shop’s QR (Payment QR or Register) in JPYC with the no-gas-fee method (on the device that showed the QR, up to 60 seconds after the QR is closed)',
+      text: 'When a customer pays your shop’s QR (Payment QR or Register) in JPYC, with the no-gas-fee method or, on Polygon, a standard payment where they pay the gas fee themselves (on the device that showed the QR, up to 60 seconds after the QR is closed)',
     },
     { mark: '②', text: 'Payment sent with the store paying gas (on that device)' },
     { mark: '③', text: 'Mobile ordering (on the device where you signed in as the shop owner and opened the Orders screen)' },
@@ -119,8 +126,8 @@ const EN: HistoryGuideContent = {
 
   notInHistoryTitle: 'Incoming payments that do not show up in your history',
   notInHistory: [
-    'Standard payments (where the payer pays the gas fee themselves; except mobile orders)',
     'USDC',
+    'Standard payments made again from the same screen after an attempt that did not go through',
     'QR codes scanned with a wallet app',
     'Payments to QR codes that were printed, saved or copied, or that have no amount',
     'Order links',

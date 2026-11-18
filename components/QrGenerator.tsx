@@ -792,8 +792,8 @@ export function QrGenerator() {
   // JPYC の通常決済 (mode=standard・forwarder の有無を問わない) で、金額のある QR。お店負担の QR・金額なし・USDC・
   // forwarder の無いチェーンのガスレスには載せない。URL のコピー・印刷・保存・互換 QR (EIP-681)・前回の受け取り QR は
   // payUrl のまま (hooks/useQrBillKey.ts)。入金は、お店の端末がチェーンで確かめて取引履歴に書き、書いたら表示中のこの会計の
-  // QR の画面に出す (billConfirmed)。通常決済の QR の bill key は、払う側が transfer に印を付けるようになるまで使われない
-  // (載せても今の支払いは変わらない)。
+  // QR の画面に出す (billConfirmed)。通常決済の QR の bill key は、払う側 (/pay) が transfer の calldata の後ろに付ける印の
+  // 元になる (hooks/useStdBillMark.ts。送金の宛先・額は変わらない)。
   const isJpycStandard = isStandard && settings.token === 'jpyc';
   const { screenUrl: screenPayUrl, confirmed: billConfirmed } = useQrBillKey({
     kind: 'pay',
