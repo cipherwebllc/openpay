@@ -33,8 +33,11 @@
 //      送り手が forwarder でない (forwarder から出た Transfer はガスレスの決済の分け前・transferMatchesExpected)。
 //   3. その tx の input に、この会計の印の付いた transfer がある (stdMarkCount の注記)。
 // 印が保証するのは「その tx を送った人 (または、その人のスマートアカウント) が、この bill key の印を付けた transfer を
-// この受取先へこの額で送ろうとしたこと」。bill key を知った人にできるのは、ガスレスと同じく、その金額をその受取先へ実際に
-// 払うことだけ。行の欄は、払った側が通常決済で書く行 (hooks/usePaymentHistory の standard の成功・flow standard-merchant) に合わせる。
+// この受取先へこの額で送ろうとしたこと」。bill key を知った人にできるのは、ほぼ、その金額をその受取先へ実際に払うことだけ。
+// ただしスマートアカウント等の tx (宛先が JPYC でない) では、forwarder を通らない第三者の EIP-3009 の authorization を
+// mempool で先取りして自分の tx に包むと、その人の入金を自分の会計に見せられる (同じ受取先・同じ額・会計の窓の中・頻度は
+// 低いと見る・受け入れた限界)。1 回の入金で 2 つの会計を確かめたことにする順は stdCallsExceedTransfers で断つ。
+// 行の欄は、払った側が通常決済で書く行 (hooks/usePaymentHistory の standard の成功・flow standard-merchant) に合わせる。
 
 import {
   concatHex,
@@ -349,6 +352,31 @@ export function stdMarkCount(tx: StdTx, transfer: TransferLog, bill: QrStdBill):
     if (at % 2 === 0) count += 1;
   }
   return count;
+}
+
+/**
+ * スマートアカウント等の tx (宛先が JPYC でない) で、input の中の「transfer(受取先, 額)」の calldata (4 + 64 byte・印の有無を
+ * 問わない・byte の境界) の数が、同じ tx の中の、この会計の期待値に合う `Transfer` の log の数 (sameTxTransfers) を超えるか。
+ * 超えるなら、その tx は 1 つの入金に対して複数の会計の印を並べている (例: 自作の contract が Transfer 1 つの tx の input に、
+ * 別の端末の会計 A と B の「transfer + 印」を両方入れる) ので、どの会計の入金ともしない (確かめた数 ≤ 入金の数にする)。
+ * 宛先が JPYC の直接の送金は stdMarkCount が input のちょうどの一致を見るので、ここでは数えない (false)。
+ */
+export function stdCallsExceedTransfers(tx: StdTx, bill: QrStdBill, sameTxTransfers: number): boolean {
+  if (tx.to !== null && tx.to.toLowerCase() === bill.deployment.address.toLowerCase()) return false;
+  const call = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: 'transfer',
+    args: [bill.merchant, bill.expected.value],
+  })
+    .slice(2)
+    .toLowerCase();
+  const hay = tx.input.slice(2).toLowerCase();
+  let calls = 0;
+  // hex の 2 字が 1 byte。奇数の位置 (半 byte ずれ) から始まる一致は数えない (stdMarkCount と同じ)。
+  for (let at = hay.indexOf(call); at >= 0; at = hay.indexOf(call, at + 1)) {
+    if (at % 2 === 0) calls += 1;
+  }
+  return calls > sameTxTransfers;
 }
 
 // 会計の写しから作る欄 (払った側の historyCtx と同じ組み方)。

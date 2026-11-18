@@ -104,6 +104,7 @@ import {
   readSettledLog,
   readTransferLog,
   settledMatchesExpected,
+  stdCallsExceedTransfers,
   stdMarkCount,
   transferMatchesExpected,
   type QrBill,
@@ -477,6 +478,7 @@ async function checkTransfer(
   id: string,
   reads: { count: number },
   startedGeneration: number,
+  sameTxTransfers: (txHash: string) => readonly TransferLog[],
 ): Promise<'done' | 'defer' | 'stale'> {
   const transfer = readTransferLog(log, token);
   // 受取先・額・送り手が、どの通常決済の会計の期待値とも違う log は照合しない (block の時刻も tx も読まない)。
@@ -518,6 +520,10 @@ async function checkTransfer(
     // この会計の印の付いた transfer が、この tx の input にいくつあるか。そのうち、まだ別の Transfer に数えていない分だけ使う。
     const key = `${chainId}:${txHash.toLowerCase()}:${w.bill.billKey}`;
     const used = txMarkUses.get(key) ?? 0;
+    // 1 つの入金で複数の会計を確かめたことにしない: input の transfer の数が、同じ tx のこの会計に合う Transfer の数を
+    // 超える tx は、どの会計の入金ともしない (lib/qrSaleHistory.ts の stdCallsExceedTransfers)。
+    const fitting = sameTxTransfers(txHash).filter((t) => transferMatchesExpected(t, w.bill)).length;
+    if (stdCallsExceedTransfers(tx, w.bill, fitting)) continue;
     if (stdMarkCount(tx, transfer, w.bill) <= used) continue;
     txMarkUses.set(key, used + 1);
     // 明細を付けるのは、その会計の 1 件目の一致だけ (ガスレスと同じ)。
@@ -596,6 +602,20 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
       a.blockNumber === b.blockNumber ? a.logIndex - b.logIndex : a.blockNumber < b.blockNumber ? -1 : 1,
     );
 
+  // 通常決済の照合に使う、tx ごとの受取先への Transfer (この回に読んだ範囲の全部・1 つの tx の log は同じ block にあるので、
+  // その tx の Transfer はこの回にそろっている)。stdCallsExceedTransfers の「同じ tx の Transfer の数」に使う。
+  const transfersByTx = new Map<string, TransferLog[]>();
+  for (const stream of streams) {
+    if (stream.source.kind !== 'transfer') continue;
+    for (const log of stream.logs) {
+      if (!isTxHashLike(log.transactionHash)) continue;
+      const t = readTransferLog(log, stream.source.token);
+      if (!t) continue;
+      const k = log.transactionHash.toLowerCase();
+      transfersByTx.set(k, [...(transfersByTx.get(k) ?? []), t]);
+    }
+  }
+
   // この回に照合した (Settled の log, 会計) の組の数 (上限 QR_SALE_MAX_PAIRS_PER_PASS)。
   let pairs = 0;
   // この回に読んだ tx の数 (上限 QR_SALE_MAX_TX_READS_PER_PASS)。
@@ -608,7 +628,17 @@ async function pollChain(chainId: number, startedGeneration: number): Promise<vo
     if (seenLogs.has(id)) continue;
     const { source } = stream;
     if (source.kind === 'transfer') {
-      const step = await checkTransfer(chainId, source.token, log, txHash, blockNumber, id, txReads, startedGeneration);
+      const step = await checkTransfer(
+        chainId,
+        source.token,
+        log,
+        txHash,
+        blockNumber,
+        id,
+        txReads,
+        startedGeneration,
+        (hash) => transfersByTx.get(hash.toLowerCase()) ?? [],
+      );
       if (step === 'stale') return;
       // ここまでの分は書き、この log から後ろ (Transfer) は次の回に回す。
       if (step === 'defer') stream.stoppedAt = blockNumber;

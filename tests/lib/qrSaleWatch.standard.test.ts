@@ -536,6 +536,25 @@ describe('1 tx 1 行・払った側の行', () => {
     expect(seen.map((e) => e.count)).toEqual([1, 2]);
   });
 
+  it.each([
+    ['別の会計の印つき', () => markedTransfer(BK2, SHOP, 1_000n * ONE)],
+    ['印なし', () => plainTransfer(SHOP, 1_000n * ONE)],
+  ])(
+    'Transfer が 1 つの tx の input に transfer が 2 つ (%s) あれば、どの会計の入金ともしない (1 つの入金で 2 つの会計を確かめない)',
+    async (_name, second) => {
+      const a: QrBillRecorded[] = [];
+      const b: QrBillRecorded[] = [];
+      show(BK, { receiptNo: 'R-1' }, NOW, (e) => a.push(e));
+      show(BK2, { receiptNo: 'R-2' }, NOW, (e) => b.push(e));
+      const input = handleOps(executeBatch([markedTransfer(BK, SHOP, 1_000n * ONE), second()]));
+      pay(995n, 1, { logIndex: 0, input, txFrom: BUNDLER, txTo: ENTRY_POINT });
+      await tick();
+      expect(loadHistory()).toEqual([]);
+      expect(a).toEqual([]);
+      expect(b).toEqual([]);
+    },
+  );
+
   it('1 tx に候補 2 つ (同じ額の 2 つの会計への Transfer が 1 つの bundle に): 1 行。印はそれぞれの会計に 1 つずつ数える', async () => {
     const a: QrBillRecorded[] = [];
     const b: QrBillRecorded[] = [];

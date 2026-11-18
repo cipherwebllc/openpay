@@ -17,6 +17,7 @@ import {
   readQrBill,
   readQrStdBill,
   readTransferLog,
+  stdCallsExceedTransfers,
   stdMarkCount,
   stdTransferCalldata,
   transferMatchesExpected,
@@ -136,6 +137,31 @@ describe('払う側が送る calldata と、tx の input の印', () => {
     expect(stdMarkCount({ from: CUSTOMER, to: null, input: `0xff${seq}` }, transfer(), bill)).toBe(1);
     // 印だけ (transfer の calldata が前に無い) は数えない。
     expect(stdMarkCount({ from: CUSTOMER, to: other, input: `0x${'00'.repeat(36)}${MARK}` }, transfer(), bill)).toBe(0);
+  });
+});
+
+describe('1 つの入金で複数の会計を確かめたことにしない (stdCallsExceedTransfers)', () => {
+  const other = '0x0000000071727De22E5E9d8BAf0edAc6f37da032';
+  it('スマートアカウント等の tx: input の transfer(受取先, 額) の数が、同じ tx の合う Transfer の数を超えたら true', () => {
+    const bill = stdBill()!;
+    const seq = stdTransferCalldata(bill).slice(2);
+    const plain = seq.slice(0, -64);
+    const markB = billKeyStdMark('AAAAAAAAAAA')!.slice(2);
+    // Transfer 1 つ + 「transfer + 印 A」と「transfer + 印 B」(別の端末の 2 つの会計) → 超える。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}${plain}${markB}` }, bill, 1)).toBe(true);
+    // Transfer 1 つ + 印つきと印なしの transfer → 超える。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}${plain}` }, bill, 1)).toBe(true);
+    // Transfer 2 つ + transfer 2 つ → 超えない (同じ額の 2 件の入金が 1 つの bundle に入った)。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}${plain}${markB}` }, bill, 2)).toBe(false);
+    // Transfer 1 つ + transfer 1 つ → 超えない。半 byte ずれた並びは数えない。
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x1234${seq}` }, bill, 1)).toBe(false);
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: other, input: `0x${seq}0${plain}0` }, bill, 1)).toBe(false);
+  });
+
+  it('宛先が JPYC の直接の送金は数えない (stdMarkCount がちょうどの一致を見る)', () => {
+    const bill = stdBill()!;
+    const input = stdTransferCalldata(bill);
+    expect(stdCallsExceedTransfers({ from: CUSTOMER, to: POLYGON.address, input }, bill, 0)).toBe(false);
   });
 });
 
