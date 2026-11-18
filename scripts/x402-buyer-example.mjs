@@ -11,7 +11,10 @@
 //   - asset / forwarder が SDK の既知値 (SUPPORTED_JPYC_ASSETS / SUPPORTED_JPYC_FORWARDERS) と
 //     一致しなければ署名しない (別 token の署名・攻撃者 EOA への総額付け替えを止める)
 //   - validBefore は min(402 の maxTimeoutSeconds, facilitator 上限) で頭打ちにする
-//   - RESOURCE_URL は SDK の parseSafePaymentUrl を通してから fetch する (SSRF ガード)
+//   - RESOURCE_URL は SDK の parseSafePaymentUrl を通してから fetch する (SSRF ガード)。
+//     さらに https だけにする (平文 HTTP の 402 は経路の途中で書き換えられる・SDK の executor と同じ)
+//   - 402 の取得も支払いの再送も転送 (3xx) を追わない。最初の URL と別の origin の応答には署名しない
+//   - 支払条件に resource があれば、その origin が最初の URL の origin と同じでなければ署名しない
 
 import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
@@ -291,6 +294,52 @@ export function clampAuthorizationTimeout(maxTimeoutSeconds) {
   return Math.min(maxTimeoutSeconds, MAX_AUTHORIZATION_TIMEOUT_SECONDS);
 }
 
+// 平文 HTTP の 402 は経路の途中で書き換えられ、改竄された支払条件に署名させられる。署名する購入先は
+// https の公開ホストだけにする (SDK の executor と同じ扱い・localhost の http も通さない)。
+export function parsePurchaseUrl(raw) {
+  // SSRF ガード: 内部/リンクローカル/認証情報付き URL へは 1 バイトも送らない。
+  const safeUrl = parseSafePaymentUrl(raw);
+  if (!safeUrl || safeUrl.protocol !== 'https:') {
+    throw new Error(
+      `RESOURCE_URL ${raw} は支払い先として不正です (https の公開ホストのみ・認証情報付き不可) — 中止します`,
+    );
+  }
+  return safeUrl;
+}
+
+// 転送 (3xx) を追うと、別の origin が返した支払条件に署名したり、署名した支払い (X-PAYMENT) を
+// 別の origin へ運んだりする。fetch は redirect: 'manual' で呼び、応答が最初の URL の origin の
+// ものであることをここで確かめる。
+export function assertSameOriginResponse(response, origin, label) {
+  if (
+    response.type === 'opaqueredirect' ||
+    response.redirected ||
+    (response.status >= 300 && response.status < 400)
+  ) {
+    throw new Error(
+      `${label}の応答が転送 (HTTP ${response.status}) でした — 転送先は追わずに中止します`,
+    );
+  }
+  if (response.url && new URL(response.url).origin !== origin) {
+    throw new Error(`${label}の応答が ${origin} 以外から届きました — 中止します`);
+  }
+}
+
+// 支払条件の resource が別の origin を指していたら、別の売り手の支払条件を中継されている疑いがある。
+// resource がある場合は、その origin が最初の URL の origin と同じことを署名の前に確かめる。
+export function assertResourceOrigin(rawAccept, origin) {
+  if (!isObject(rawAccept) || rawAccept.resource === undefined) return;
+  const resourceOrigin =
+    typeof rawAccept.resource === 'string' && URL.canParse(rawAccept.resource)
+      ? new URL(rawAccept.resource).origin
+      : null;
+  if (resourceOrigin !== origin) {
+    throw new Error(
+      `支払条件の resource ${String(rawAccept.resource)} が購入先 ${origin} と別の origin です — 署名せず中止します`,
+    );
+  }
+}
+
 export function encodePaymentPayload(payload) {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }
@@ -327,25 +376,24 @@ export async function main() {
   if (!privateKey || !isHex(privateKey) || privateKey.length !== 66) {
     throw new Error('BUYER_PRIVATE_KEY=0x... is required');
   }
-  const rawResourceUrl = process.env.RESOURCE_URL || DEFAULT_RESOURCE_URL;
-  // SSRF ガード: 内部/リンクローカル/認証情報付き URL へは 1 バイトも送らない。
-  const safeUrl = parseSafePaymentUrl(rawResourceUrl);
-  if (!safeUrl) {
-    throw new Error(
-      `RESOURCE_URL ${rawResourceUrl} は支払い先として不正です (http/https の公開ホストのみ・認証情報付き不可) — 中止します`,
-    );
-  }
+  const safeUrl = parsePurchaseUrl(process.env.RESOURCE_URL || DEFAULT_RESOURCE_URL);
   const resourceUrl = safeUrl.toString();
+  const origin = safeUrl.origin;
   const maxJpyc = process.env.MAX_JPYC ?? DEFAULT_MAX_JPYC;
   const capAtomic = parseJpycCap(maxJpyc);
   const account = privateKeyToAccount(privateKey);
 
   console.log(`[1/3] Requesting ${resourceUrl}`);
-  const first = await fetch(resourceUrl, { headers: { accept: 'application/json' } });
+  const first = await fetch(resourceUrl, {
+    headers: { accept: 'application/json' },
+    redirect: 'manual',
+  });
+  assertSameOriginResponse(first, origin, '402 の取得');
   const challenge = await readJson(first);
   if (first.status !== 402 || !isObject(challenge) || !Array.isArray(challenge.accepts)) {
     throw new Error(`expected HTTP 402 challenge, got ${first.status}`);
   }
+  assertResourceOrigin(challenge.accepts[0], origin);
   const accept = assertSupportedAssetAndForwarder(
     normalizePaymentRequirements(challenge.accepts[0]),
   );
@@ -374,11 +422,13 @@ export async function main() {
   const paymentPayload = paymentPayloadFor(accept, authorization, signature);
 
   console.log('[3/3] Retrying with X-PAYMENT');
+  // 署名した支払いは最初の URL へだけ送る (転送を追うと X-PAYMENT が転送先へも運ばれる)。
   const unlocked = await fetch(resourceUrl, {
     headers: {
       accept: 'application/json',
       'X-PAYMENT': encodePaymentPayload(paymentPayload),
     },
+    redirect: 'manual',
   });
   const body = await readJson(unlocked);
   const paymentResponse = decodePaymentResponse(unlocked.headers.get('x-payment-response'));
@@ -388,6 +438,8 @@ export async function main() {
     console.log('X-PAYMENT-RESPONSE');
     console.log(JSON.stringify(paymentResponse, null, 2));
   }
+  // 受領 (X-PAYMENT-RESPONSE) を表示してから、転送を追わなかったことを失敗として伝える。
+  assertSameOriginResponse(unlocked, origin, '支払いの再送');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

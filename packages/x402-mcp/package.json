@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
-    "openpay-x402-sdk": "^0.10.1",
+    "openpay-x402-sdk": "^0.10.5",
     "viem": "^2.45.0"
   }
 }

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Raise the `openpay-x402-sdk` floor from `^0.10.1` to `^0.10.5` (the version with the byte cap on seller responses that 0.20.2 relies on). New installs already resolved to 0.10.5; this makes the minimum explicit and keeps the lockfile and the declared range in step.
+
 ## 0.20.2 — 2026-10-30
 
 - With `openpay-x402-sdk` 0.10.5, seller responses are read with a byte cap. `x402_quote` / `x402_pay` refuse a 402 challenge over 256 KiB before signing, and when the seller's response to a paid call exceeds 16 MiB, `x402_pay` returns `error: 'paid_body_too_large'` and `body: null` together with the usual `receipt`, `settlement` and `settlementNote`, `txHash` (verified receipts only) and `authorizationNonce`, instead of holding the whole body in memory. The tools and their inputs are unchanged; the `openpay-x402-sdk` range stays `^0.10.1`, so a fresh install resolves the latest 0.10.x SDK.

@@ -6,13 +6,13 @@
 // dual-rail 402 では支払い先を選ぶ前に throw する。本スクリプトは network==='base' の accept
 // だけを選び、EIP-3009 (TransferWithAuthorization) に署名して X-PAYMENT で支払う。
 //
-// 使い方 (署名する鍵はどちらか 1 つ):
+// 使い方 (署名する鍵はどちらか 1 つ・RESOURCE_URL は https だけ):
 //   1. 鍵を env で渡す (このファイル単体で動く・鍵はファイルに書かない):
 //        BUYER_PRIVATE_KEY=0x... RESOURCE_URL=https://seller.example/api/paid/x \
-//          [MAX_USDC=0.01] node x402-dual-buyer-example.mjs
+//          [MAX_USDC=0.01] [EXPECTED_PAY_TO=0x...] node x402-dual-buyer-example.mjs
 //   2. OpenPay Agent のウォレットで署名する (鍵を入力しない・画面にも出さない):
 //        USE_AGENT_WALLET=1 RESOURCE_URL=https://seller.example/api/paid/x \
-//          [MAX_USDC=0.01] node scripts/x402-dual-buyer-example.mjs
+//          [MAX_USDC=0.01] [EXPECTED_PAY_TO=0x...] node scripts/x402-dual-buyer-example.mjs
 //      openpay-x402-mcp (SIGNER_MODE=keystore) がこの端末に作ったウォレット (~/.openpay-x402/wallet.json・
 //      OPENPAY_X402_HOME で変更可) を、MCP と同じ読み込み処理 (packages/x402-mcp/src/keystore.mjs・権限と
 //      ファイルの差し替えを検査) で読む。**信頼できる、手を加えていない OpenPay の checkout からだけ実行する**
@@ -22,9 +22,13 @@
 //      効かない。上限は MAX_USDC (1 回の実行ごと・実行をまたいで合算しない) だけ。
 //
 // 金銭ガード:
+//   - RESOURCE_URL は https だけ (平文 HTTP の 402 は経路の途中で payTo や額を書き換えられる)
+//   - 402 の取得も支払いの再送も転送 (3xx) を追わない。最初の URL と別の origin の応答には署名しない
+//   - 支払条件に resource があれば、その origin が最初の URL の origin と同じでなければ支払わない
 //   - asset が Base mainnet の native USDC (0x8335…2913) でなければ支払わない
 //   - 要求額が MAX_USDC (既定 0.01 = 1 セント) を超えたら支払わない
-//   - 支払い先 (payTo) と額を表示してから署名する
+//   - EXPECTED_PAY_TO (受け取り先のアドレス) を渡せば、payTo がそれと違うときは支払わない。
+//     渡さなければ payTo は照合せず、402 が示した宛先と「確かめていない」旨を表示してから署名する
 // ガス代は不要 (署名のみ・broadcast は facilitator 側)。ウォレットには USDC だけあれば良い。
 
 import { privateKeyToAccount } from 'viem/accounts';
@@ -34,6 +38,19 @@ const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const TARGET = process.env.RESOURCE_URL;
 if (!TARGET) {
   console.error('RESOURCE_URL env が必要です (購入する dual-rail 402 の URL)');
+  process.exit(1);
+}
+// 平文 HTTP の 402 は経路の途中で書き換えられ、改竄された支払条件 (payTo・額) に署名させられる。
+// 購入先は https だけにする (OpenPay の SDK の executor と同じ扱い・localhost の http も通さない)。
+const targetUrl = URL.canParse(TARGET) ? new URL(TARGET) : null;
+if (!targetUrl || targetUrl.protocol !== 'https:') {
+  console.error(`RESOURCE_URL は https の URL にしてください: ${TARGET}`);
+  process.exit(1);
+}
+const ORIGIN = targetUrl.origin;
+const EXPECTED_PAY_TO = process.env.EXPECTED_PAY_TO;
+if (EXPECTED_PAY_TO !== undefined && !/^0x[0-9a-fA-F]{40}$/.test(EXPECTED_PAY_TO)) {
+  console.error(`EXPECTED_PAY_TO はアドレス (0x と 16 進 40 桁) で渡してください: ${EXPECTED_PAY_TO}`);
   process.exit(1);
 }
 const MAX_USDC = process.env.MAX_USDC ?? '0.01';
@@ -82,7 +99,29 @@ if (useAgentWallet) {
 console.log('buyer :', account.address);
 console.log('buying:', TARGET);
 
-const challenge = await fetch(TARGET);
+// 転送 (3xx) を追うと、別の origin が返した支払条件に署名したり、署名した支払い (x-payment) を
+// 別の origin へ運んだりする。fetch は redirect: 'manual' で呼び、応答が最初の URL の origin の
+// ものであることをここで確かめる (問題があればその説明を返す)。
+function originProblem(response, label) {
+  if (
+    response.type === 'opaqueredirect' ||
+    response.redirected ||
+    (response.status >= 300 && response.status < 400)
+  ) {
+    return `${label}の応答が転送 (HTTP ${response.status}) でした — 転送先は追わずに中止します`;
+  }
+  if (response.url && new URL(response.url).origin !== ORIGIN) {
+    return `${label}の応答が ${ORIGIN} 以外から届きました — 中止します`;
+  }
+  return null;
+}
+
+const challenge = await fetch(targetUrl.href, { redirect: 'manual' });
+const challengeProblem = originProblem(challenge, '402 の取得');
+if (challengeProblem) {
+  console.error(challengeProblem);
+  process.exit(1);
+}
 if (challenge.status !== 402) {
   console.error('402 ではありません:', challenge.status, (await challenge.text()).slice(0, 200));
   process.exit(1);
@@ -98,6 +137,17 @@ if (!accept) {
   );
   process.exit(1);
 }
+// 支払条件の resource が別の origin を指していたら、別の売り手の支払条件を中継されている疑いがある。
+if (accept.resource !== undefined) {
+  const resourceOrigin =
+    typeof accept.resource === 'string' && URL.canParse(accept.resource)
+      ? new URL(accept.resource).origin
+      : null;
+  if (resourceOrigin !== ORIGIN) {
+    console.error(`支払条件の resource が購入先 ${ORIGIN} と別の origin のため中止:`, accept.resource);
+    process.exit(1);
+  }
+}
 if (String(accept.asset).toLowerCase() !== BASE_USDC.toLowerCase()) {
   console.error('asset が Base native USDC ではないため中止:', accept.asset);
   process.exit(1);
@@ -109,6 +159,19 @@ if (amount > MAX_ATOMIC) {
 }
 console.log(`price : ${accept.maxAmountRequired} atomic (= $${Number(amount) / 1e6})`);
 console.log('payTo :', accept.payTo);
+// payTo の期待値はこのスクリプトでは作らない (売り手のアドレスを知っているのは買い手だけ)。
+// 渡されたときだけ照合し、渡されなければ照合していないことをはっきり出す。
+if (EXPECTED_PAY_TO !== undefined) {
+  if (typeof accept.payTo !== 'string' || accept.payTo.toLowerCase() !== EXPECTED_PAY_TO.toLowerCase()) {
+    console.error(`payTo が EXPECTED_PAY_TO=${EXPECTED_PAY_TO} と違うため中止 (署名していません)`);
+    process.exit(1);
+  }
+  console.log('payTo は EXPECTED_PAY_TO と一致');
+} else {
+  console.warn(
+    'payTo は確かめていません (402 が示した宛先へ払う署名をします・照合するには EXPECTED_PAY_TO=0x... を付ける)',
+  );
+}
 
 const validBefore = BigInt(Math.floor(Date.now() / 1000) + 300);
 const nonce =
@@ -162,7 +225,8 @@ const header = Buffer.from(
   'utf8',
 ).toString('base64');
 
-const res = await fetch(TARGET, { headers: { 'x-payment': header } });
+// 署名した支払いは最初の URL へだけ送る (転送を追うと x-payment が転送先へも運ばれる)。
+const res = await fetch(targetUrl.href, { headers: { 'x-payment': header }, redirect: 'manual' });
 console.log('HTTP', res.status);
 const text = await res.text();
 console.log('body :', text.slice(0, 600));
@@ -171,4 +235,10 @@ if (receipt) {
   console.log('settlement:', JSON.parse(Buffer.from(receipt, 'base64').toString('utf8')));
 } else {
   console.log('settlement: (x-payment-response ヘッダなし)');
+}
+// 受領 (x-payment-response) を表示してから、転送を追わなかったことを失敗として伝える。
+const paidProblem = originProblem(res, '支払いの再送');
+if (paidProblem) {
+  console.error(paidProblem);
+  process.exit(1);
 }

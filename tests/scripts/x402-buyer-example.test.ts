@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { resolve, join } from 'node:path';
 import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -26,6 +26,10 @@ type NormalizedAccept = {
 };
 
 type BuyerScript = {
+  main: () => Promise<void>;
+  parsePurchaseUrl: (raw: string) => URL;
+  assertSameOriginResponse: (response: Response, origin: string, label: string) => void;
+  assertResourceOrigin: (rawAccept: unknown, origin: string) => void;
   DEFAULT_MAX_JPYC: string;
   parseJpycCap: (raw: string, label?: string) => bigint;
   assertWithinCap: (total: bigint, cap: bigint, capLabel: string) => void;
@@ -210,6 +214,146 @@ describe('scripts/x402-buyer-example.mjs: 署名前ガード', () => {
   });
 });
 
+// 購入先の固定 (外部レビュー P2-3)。平文 HTTP・転送・別 origin の resource から来た支払条件には署名しない。
+describe('scripts/x402-buyer-example.mjs: 購入先の origin の固定', () => {
+  const ORIGIN = 'https://open-pay.jp';
+  const RESOURCE = `${ORIGIN}/api/paid/stores`;
+  const KNOWN_AMOY_FORWARDER = '0x752B7AaD0089286EB7b553d84D05233d80c9FCB4';
+
+  function challenge(resource: unknown = RESOURCE): Record<string, unknown> {
+    const base = accept();
+    const extra = base.extra as Record<string, unknown>;
+    const openpay = extra.openpay as Record<string, unknown>;
+    return {
+      ...base,
+      resource,
+      payTo: KNOWN_AMOY_FORWARDER,
+      extra: { ...extra, openpay: { ...openpay, forwarder: KNOWN_AMOY_FORWARDER } },
+    };
+  }
+
+  function withUrl(response: Response, url: string, redirected = false): Response {
+    Object.defineProperty(response, 'url', { value: url });
+    Object.defineProperty(response, 'redirected', { value: redirected });
+    return response;
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('購入先は https の公開ホストだけ (http は localhost も含めて通さない)', async () => {
+    const buyer = await loadBuyerScript();
+    expect(buyer.parsePurchaseUrl(RESOURCE).href).toBe(RESOURCE);
+    for (const raw of [
+      'http://open-pay.jp/api/paid/stores',
+      'http://localhost:3000/api/paid/stores',
+      'https://127.0.0.1/api/paid/stores',
+      'https://user:pass@open-pay.jp/api/paid/stores',
+      'ftp://open-pay.jp/x',
+      'not a url',
+    ]) {
+      expect(() => buyer.parsePurchaseUrl(raw), raw).toThrow(/https の公開ホストのみ/);
+    }
+  });
+
+  it('転送 (3xx・redirected・opaqueredirect) と別 origin の応答を拒む', async () => {
+    const buyer = await loadBuyerScript();
+    expect(() => buyer.assertSameOriginResponse(new Response(null, { status: 402 }), ORIGIN, '402 の取得')).not.toThrow();
+    expect(() =>
+      buyer.assertSameOriginResponse(withUrl(new Response(null, { status: 402 }), `${ORIGIN}/api/paid/x`), ORIGIN, '402 の取得'),
+    ).not.toThrow();
+    expect(() =>
+      buyer.assertSameOriginResponse(
+        new Response(null, { status: 302, headers: { location: 'https://evil.example/' } }),
+        ORIGIN,
+        '402 の取得',
+      ),
+    ).toThrow(/402 の取得の応答が転送 \(HTTP 302\)/);
+    expect(() =>
+      buyer.assertSameOriginResponse(withUrl(new Response(null, { status: 402 }), 'https://evil.example/x', true), ORIGIN, '402 の取得'),
+    ).toThrow(/転送/);
+    expect(() =>
+      buyer.assertSameOriginResponse(withUrl(new Response(null, { status: 402 }), 'https://evil.example/x'), ORIGIN, '402 の取得'),
+    ).toThrow(/https:\/\/open-pay\.jp 以外から届きました/);
+    const opaque = new Response(null, { status: 200 });
+    Object.defineProperty(opaque, 'type', { value: 'opaqueredirect' });
+    expect(() => buyer.assertSameOriginResponse(opaque, ORIGIN, '402 の取得')).toThrow(/転送/);
+  });
+
+  it('支払条件の resource は (あれば) 最初の URL と同じ origin でなければ拒む', async () => {
+    const buyer = await loadBuyerScript();
+    expect(() => buyer.assertResourceOrigin(accept(), ORIGIN)).not.toThrow();
+    expect(() => buyer.assertResourceOrigin({ ...accept(), resource: undefined }, ORIGIN)).not.toThrow();
+    expect(() => buyer.assertResourceOrigin({ ...accept(), resource: `${ORIGIN}/api/paid/other` }, ORIGIN)).not.toThrow();
+    for (const resource of ['https://evil.example/api/paid/stores', 'http://open-pay.jp/api/paid/stores', 'https://open-pay.jp:8443/x', 'nope', 42, null]) {
+      expect(() => buyer.assertResourceOrigin({ ...accept(), resource }, ORIGIN), String(resource)).toThrow(
+        /別の origin です — 署名せず中止します/,
+      );
+    }
+  });
+
+  function stubRun(responses: Array<() => Response>) {
+    vi.stubEnv('BUYER_PRIVATE_KEY', `0x${'11'.repeat(32)}`);
+    vi.stubEnv('MAX_JPYC', '7');
+    vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => {
+      const next = responses.shift();
+      if (!next) throw new Error('unexpected fetch');
+      return next();
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  it('main: http の RESOURCE_URL は 1 バイトも送らずに止まる', async () => {
+    const buyer = await loadBuyerScript();
+    const fetchMock = stubRun([]);
+    vi.stubEnv('RESOURCE_URL', 'http://open-pay.jp/api/paid/stores');
+    await expect(buyer.main()).rejects.toThrow(/https の公開ホストのみ/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('main: 402 の取得が転送なら追わずに、署名せず止まる', async () => {
+    const buyer = await loadBuyerScript();
+    const fetchMock = stubRun([
+      () => new Response(null, { status: 307, headers: { location: 'https://evil.example/api/paid/stores' } }),
+    ]);
+    vi.stubEnv('RESOURCE_URL', RESOURCE);
+    await expect(buyer.main()).rejects.toThrow(/402 の取得の応答が転送 \(HTTP 307\)/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ redirect: 'manual' });
+  });
+
+  it('main: resource が別の origin の支払条件には署名しない', async () => {
+    const buyer = await loadBuyerScript();
+    const fetchMock = stubRun([
+      () => Response.json({ accepts: [challenge('https://evil.example/api/paid/stores')] }, { status: 402 }),
+    ]);
+    vi.stubEnv('RESOURCE_URL', RESOURCE);
+    await expect(buyer.main()).rejects.toThrow(/別の origin です/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('main: 署名した支払いの再送が転送で返っても追わず、失敗で終わる', async () => {
+    const buyer = await loadBuyerScript();
+    const fetchMock = stubRun([
+      () => Response.json({ accepts: [challenge()] }, { status: 402 }),
+      () => new Response(null, { status: 302, headers: { location: 'https://evil.example/' } }),
+    ]);
+    vi.stubEnv('RESOURCE_URL', RESOURCE);
+    await expect(buyer.main()).rejects.toThrow(/支払いの再送の応答が転送 \(HTTP 302\)/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [url, init] of fetchMock.mock.calls) {
+      expect(url).toBe(RESOURCE);
+      expect(init).toMatchObject({ redirect: 'manual' });
+    }
+    expect((fetchMock.mock.calls[1][1].headers as Record<string, string>)['X-PAYMENT']).toBeTruthy();
+  });
+});
+
 describe('E12: standalone public onboarding', () => {
   it('runs the downloaded JPYC example offline with only its documented npm packages', () => {
     const dir = mkdtempSync(join(tmpdir(), 'openpay-buyer-offline-'));
@@ -238,6 +382,8 @@ describe('E12: standalone public onboarding', () => {
         let calls = 0;
         globalThis.fetch = async (url, init) => {
           assert.equal(url, 'https://open-pay.jp/api/paid/stores');
+          // 402 の取得も支払いの再送も転送を追わない
+          assert.equal(init.redirect, 'manual');
           if (++calls === 1) return Response.json({ accepts: [challenge] }, { status: 402 });
           assert.equal(calls, 2);
           const payment = JSON.parse(Buffer.from(init.headers['X-PAYMENT'], 'base64').toString());
