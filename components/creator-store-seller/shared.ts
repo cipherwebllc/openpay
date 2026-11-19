@@ -68,6 +68,8 @@ export type SellerResponse = {
   seller: SellerDisclosure | null;
   /** GET だけが返す: AI 出品アシスタントの入口を出すか (server のフラグ ON かつ運営者)。 */
   listingAssistant?: boolean;
+  /** GET だけが返す: 画像の欄 (アップロード) を出すか (段階・権限・秘密と Blob の設定がそろったとき)。 */
+  imageUpload?: boolean;
 };
 
 export type ProductDetailResponse = {

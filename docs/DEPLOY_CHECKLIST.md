@@ -3410,6 +3410,69 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 - `ENABLE_STORE_LISTING_ASSISTANT` を空にして再 deploy する (route は 404・出品者の GET の `listingAssistant` は false)。
   案は保存していないので片づけは無い。key は外さなくても使われない。
 
+## §20 画像のアップロード (運営者だけの試し)
+
+`POST /api/images/upload` が画像 (JPEG / PNG・1 MiB まで) を受けて Vercel Blob の **public** store に置き、その URL を返す。
+PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品アシスタントの「この画像を表紙に使う」。保存の形は今と同じ URL の文字列で、
+お金の動き (relay・settle・fee・order) と購入の snapshot には触れない。env の説明は docs/ENV.md。
+
+### 20.1 前提
+- Vercel の Storage で Blob の store を **public** で作る (OpenPay 専用)。Preview でも試すなら store を分ける。
+- store を project に **OIDC** でつなぐ (つなぐ Environment を選ぶ)。`BLOB_STORE_ID` が入る。`BLOB_READ_WRITE_TOKEN` は入れない
+  (入っていたら消す: OIDC が取れないときに SDK がその長く生きる token を使う。つないだときに自動で入るかは Vercel の docs で
+  確かめきれていないので、env の一覧で見る。入っていても、OIDC と `BLOB_STORE_ID` がそろっていれば SDK は OIDC を先に使う
+  (@vercel/blob 2.8.2 の実体で確認))。
+- `IMAGE_OWNER_KEY_SECRET` (Sensitive・32 byte 以上) を作って入れ、控えを安全な所に残す。作り方は手元で
+  `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` (.env.local.example と同じ)。Sensitive は
+  後から Vercel の画面で読めないので、**入れる前に**控えを取る。**回さない** (回すと同じウォレットの画像が
+  別の path になり、枚数の数え方と PR 3 の一覧・削除が前の画像に届かなくなる)。値をチャット・ログ・PR に貼らない。
+- `ADMIN_WALLETS` に運営者本人の wallet だけが入っている。KV (Upstash) が動いている (全体の 1 日の枠を数える。数えられないと
+  アップロードは止まる = fail-closed。URL の欄は使えるので保存と決済には波及しない)。
+- `IP_HASH_SECRET` (32 byte 以上) が入っている。無い・短いと IP の枠を数えられないので、アップロードは 503 `not_configured` で
+  止まる (この route だけ。ほかの route は従来どおり IP の枠を飛ばして通す)。
+- 本番に `DEBUG` / `NEXT_PUBLIC_DEBUG` の `blob` を入れない。入れると SDK が送り直しのときに path (`v1/<ownerKey>/…`) を
+  console.debug に出す (受け入れる限界: path は公開の URL の一部で秘密ではないが、ログには残さない方針)。
+- Vercel の Spend Management で通知の金額を決めて設定する (点灯の条件)。project 全体を止める設定はしない (決済まで止まる)。
+
+### 20.2 点灯 (admin)
+1. Production に `IMAGE_UPLOAD_MODE=admin` を入れて再 deploy する (server の env は deploy し直すまで効かない)。
+2. 運営者の wallet で出品フォームに「画像を選ぶ」が出て、ほかの wallet では今の URL の欄のままなことを見る
+   (出品者の GET の `imageUpload`)。
+3. 試す順: 表紙 → 追加画像 (4 枚まで・外す・「URL で指定する ›」) → AI 出品アシスタントの「この画像を表紙に使う」(押す前は
+   アップロードしない)。それぞれ保存し、Store の一覧・商品ページ・OG に出ることを見る。
+4. 写真は JPEG、透過の PNG (ロゴ) は透けたままの PNG になることを見る。
+
+### 20.3 見張る
+- Vercel の Usage の Blob: 保存の量・Advanced Operations (成功したアップロード 1 回で put 1 回・list は読んだページの数。
+  ふつうは 1 ページ。list は置けなかった要求 = 上限 200 枚・全体の枠・締切でも数える)・Data Transfer。
+- Upstash: 1 回のアップロードで 9 コマンド前後 (セッションの読み取り・IP の分・ウォレットと IP の日・全体の日の INCR と EXPIRE NX)。
+- ログ (Sentry にも出る) の `images.upload.failed` の `code`: `list_failed`・`list_deadline` (Blob の list・cursor を追う全体で
+  5 秒の締切)・`global_count_unavailable` (KV)・`put_failed`・`put_deadline` (Blob の put・10 秒の締切)・`route_deadline`
+  (要求を受けてから 15 秒の絶対の期限。関数の上限 20 秒より前に、どの段で待っていても 503 `storage_unavailable` を返す。
+  list か put の最中なら `list_deadline` / `put_deadline` も続けて出る。`route_deadline` だけなら KV か本文で待っていた)。
+  エラーの応答とログにアドレス・ownerKey・path・URL は出ない。成功の応答の `url` だけは公開の Blob の URL そのもの (path を含む・設計どおりの例外)。
+  request の `x-vercel-oidc-token` は Sentry の event と transaction から落とす (lib/telemetryRedaction)。
+- 上限: 1 ウォレット 200 枚 (Blob の list で数える)・1 日 (UTC) にウォレット 30 回・IP 60 回・全体 200 回。
+- `list_failed` が毎回出るとき (アップロードが 1 回も通らない): route は SDK の例外の文を捨てるので、ログからは原因が分からない。
+  次を順に見る: Production の env に `BLOB_STORE_ID` があるか・store が Production の Environment につながっているか・project の
+  OIDC (Secure backend access) が有効か・store が public で作られているか。`not_configured` なら `IMAGE_OWNER_KEY_SECRET`・
+  `BLOB_STORE_ID`・`IP_HASH_SECRET` のどれかが無いか短い。
+
+### 20.4 戻し方
+- `IMAGE_UPLOAD_MODE` を空 (または `off`) にして再 deploy する (route は 404・出品者の GET の `imageUpload` は false で、フォームは
+  今の URL の欄に戻る)。置いた画像と、それを使っている商品の欄はそのまま残る (消さない)。
+
+### 20.5 通報のとき
+- 画像の URL の path (`v1/<ownerKey>/…`) を Vercel の Storage の Blob の画面で探して消す。表示する側は読めない画像を隠すが、
+  商品の欄には URL が残るので、その商品の表紙・追加画像の欄も外す (既存の takedown の手順と合わせる)。
+- ライセンス NFT の metadata (`/api/license/metadata/[id]`) は商品の `imageUrl` を返し続けるので、欄を外すまで消した画像の URL を返す。
+- ブラウザなどのキャッシュには残りうる (置くときの cacheControlMaxAge は 1 年)。
+
+### 20.6 `all` にする前
+- アップロードした画像の一覧と削除 (PR 3) がそろってから (上限 200 枚に届いた人が自分で消せないため)。
+- 規約・プライバシーポリシー・画像 URL のガイド・llms.txt の「画像を預からない」の直し (公開文言・運営者の承認) の後。
+- 外した・替えた画像は、本人が消すまで公開の URL で残る (自動では消さない・運営者の裁定 2026-11-19)。
+
 ## サブドメイン運用ルール (2026-10-12)
 
 - open-pay.jp のサブドメインには、第三者が中身を書けるホスティング (docs・blog・status・フォーラムなど) を置かない。

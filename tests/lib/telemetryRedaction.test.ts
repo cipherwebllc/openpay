@@ -190,6 +190,36 @@ describe('telemetry URL redaction', () => {
     expect(JSON.stringify(event)).not.toContain(SECRET);
   });
 
+  it('Vercel の OIDC の token (x-vercel-oidc-token) を error の event と transaction の両方から落とす', () => {
+    const error = scrubSentryServerEvent({
+      request: {
+        method: 'POST',
+        url: 'https://open-pay.jp/api/images/upload',
+        headers: { 'x-vercel-oidc-token': SECRET, 'X-Vercel-OIDC-Token': SECRET, 'content-type': 'image/jpeg' },
+      },
+      contexts: {
+        trace: { trace_id: 't', span_id: 's', data: { 'http.request.header.x_vercel_oidc_token': SECRET, 'http.method': 'POST' } },
+      },
+    } as Parameters<typeof scrubSentryServerEvent>[0]);
+    expect(error?.request?.headers).toEqual({ 'content-type': 'image/jpeg' });
+    expect(error?.contexts?.trace?.data).toEqual({ 'http.method': 'POST' });
+    expect(JSON.stringify(error)).not.toContain(SECRET);
+
+    const transaction = scrubSentryServerTransaction({
+      type: 'transaction',
+      transaction: 'POST /api/images/upload',
+      request: { method: 'POST', headers: { 'x-vercel-oidc-token': SECRET, accept: '*/*' } },
+      contexts: {
+        trace: { trace_id: 't', span_id: 's', data: { 'http.request.header.x_vercel_oidc_token': SECRET, 'http.method': 'POST' } },
+      },
+      spans: [{ span_id: 'a', trace_id: 't', start_timestamp: 0, data: { 'HTTP.Request.Header.X_Vercel_OIDC_Token': SECRET, 'http.method': 'POST' } }],
+    } as Parameters<typeof scrubSentryServerTransaction>[0]);
+    expect(transaction?.request?.headers).toEqual({ accept: '*/*' });
+    expect(transaction?.contexts?.trace?.data).toEqual({ 'http.method': 'POST' });
+    expect(transaction?.spans?.[0].data).toEqual({ 'http.method': 'POST' });
+    expect(JSON.stringify(transaction)).not.toContain(SECRET);
+  });
+
   it('instrumentation.ts の node の Sentry は、受けた request の本文を採らない (httpIntegration の maxIncomingRequestBodySize: none)', () => {
     const source = readFileSync(join(process.cwd(), 'instrumentation.ts'), 'utf8');
     expect(source).toContain("Sentry.httpIntegration({ disableIncomingRequestSpans: true, maxIncomingRequestBodySize: 'none' })");

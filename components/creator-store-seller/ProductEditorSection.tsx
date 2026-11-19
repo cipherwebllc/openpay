@@ -5,8 +5,9 @@
 // この境界の外 (より長寿命の component や共有 cache) に置くとアカウント切替後に旧本文が残り得るため、
 // ここには state を持たせない。AI 出品アシスタントの開閉と、その画像・メモ・案は、この部品の子
 // (ListingAssistantEntry・ListingAssistant) が持つ — 親の key の内側なので、アカウントを切り替えると一緒に消える。
+// ここが持つのは「画像をアップロード中か」と「表紙の操作の番号」だけ (中身を持たない・アップロード中は保存を止める)。
 
-import { Component, useState, type FormEventHandler, type ReactNode } from 'react';
+import { Component, Fragment, useCallback, useLayoutEffect, useRef, useState, type FormEventHandler, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import dynamic, { type DynamicOptionsLoadingProps } from 'next/dynamic';
 import Link from 'next/link';
@@ -16,6 +17,10 @@ import { DELIVERY_FORMATS, deliveryFormatFields, type DeliveryFormatId } from '@
 import { MAX_USAGE_NOTE_LEN, type UsagePermission } from '@/lib/store/usageTerms';
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { CreatorStoreLicenseFields } from '@/components/CreatorStoreLicenseFields';
+import { ImageField } from '@/components/ImageField';
+import { nextImageOperation, type ImageOperationCounter } from '@/hooks/useImageUpload';
+import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
+import { ProductGalleryField } from './ProductGalleryField';
 import { errorCode, errorDetailKey, errorMessageKey } from './request';
 import { inputClass, type EditingProductState, type MutationView, type ProductForm } from './shared';
 
@@ -58,9 +63,15 @@ const LISTING_ASSISTANT_PANEL_ID = 'creator-store-listing-assistant';
 function ListingAssistantEntry({
   productForm,
   updateProduct,
+  imageUpload,
+  onImageBusyChange,
+  coverOperation,
 }: {
   productForm: ProductForm;
   updateProduct: (patch: Partial<ProductForm>) => void;
+  imageUpload: boolean;
+  onImageBusyChange: (busy: boolean) => void;
+  coverOperation: ImageOperationCounter;
 }) {
   const t = useTranslations('CreatorStoreSeller.assistant');
   const [open, setOpen] = useState(false);
@@ -117,7 +128,13 @@ function ListingAssistantEntry({
       {loaded ? (
         <div id={LISTING_ASSISTANT_PANEL_ID} hidden={!open} className="mt-4">
           <ListingAssistantBoundary key={attempt} fallback={fallback}>
-            <ListingAssistant productForm={productForm} updateProduct={updateProduct} />
+            <ListingAssistant
+              productForm={productForm}
+              updateProduct={updateProduct}
+              imageUpload={imageUpload}
+              onImageBusyChange={onImageBusyChange}
+              coverOperation={coverOperation}
+            />
           </ListingAssistantBoundary>
         </div>
       ) : null}
@@ -153,6 +170,11 @@ type Props = {
   /** 出品者の GET の listingAssistant (server のフラグ ON かつ運営者)。true のときだけ AI 出品アシスタントの入口を出す。 */
   listingAssistant?: boolean;
   /**
+   * 出品者の GET の imageUpload (段階・権限・秘密と Blob の設定がそろったとき)。true のときだけ表紙と追加画像を画像の欄
+   * (アップロード) にする。false なら今の URL の欄のまま。
+   */
+  imageUpload?: boolean;
+  /**
    * フォームを別の商品・新規に入れ替えるたびに変わる値。アシスタントの key にして、前の商品の案・画像・メモ・「元に戻す」の
    * 履歴を捨てる (A に入れた案の「元に戻す」が、同じ値を持つ B で効かないように)。
    */
@@ -163,9 +185,44 @@ export function ProductEditorSection({
   productForm, editingId, editingProductState, isLicense, licenseReadOnly, deliveryFormat,
   handle, locale, sellerComplete, canChangeUsdc, atLimit, licenseValidationError,
   productSaved, updateProduct, cancelEdit, onSubmit, saveProduct, loadProduct, listingAssistant = false, formSession = 0,
+  imageUpload = false,
 }: Props) {
   const t = useTranslations('CreatorStoreSeller');
   const tCatalog = useTranslations('StoreCatalog');
+  const tImage = useTranslations('ImageField');
+  // アップロード中の欄 (表紙・追加画像・AI の表紙)。1 つでもあれば保存を止める (届く前に保存すると画像が抜ける)。
+  const [busyImages, setBusyImages] = useState<ReadonlySet<string>>(() => new Set());
+  const setImageBusy = useCallback((key: string, busy: boolean) => {
+    setBusyImages((current) => {
+      if (current.has(key) === busy) return current;
+      const next = new Set(current);
+      if (busy) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+  const imageBusy = busyImages.size > 0;
+  // 表紙 (imageUrl) を書き換える操作の番号。表紙の欄 (選ぶ・外す・URL の手入力) と AI 出品アシスタント (この画像を表紙に
+  // 使う・元に戻す) が共有し、最後の操作だけが表紙に反映される (hooks/useImageUpload)。追加画像は足すだけなので使わない。
+  const coverOperation = useRef(0);
+  // imageUpload が切り替わったら (出品者の GET の取り直し) 表紙の操作を 1 つ進め、切り替わる前に始まった AI の表紙の
+  // アップロードを入れない。false の枝の URL の欄は今のまま (番号を進めない) なので、そこでの手入力を後から届いた画像が
+  // 上書きしないように、ここで先に無効にする。layout effect にして描画の前に番号を進める (再び true になって出たボタンを
+  // 押した新しい送信が、後から走る effect に番号を進められて捨てられないように)。
+  const imageUploadSeen = useRef(imageUpload);
+  useLayoutEffect(() => {
+    if (imageUploadSeen.current === imageUpload) return;
+    imageUploadSeen.current = imageUpload;
+    nextImageOperation(coverOperation);
+  }, [imageUpload]);
+  const submitUnlessImageBusy: FormEventHandler<HTMLFormElement> = (event) => {
+    // Enter での送信も止める (保存のボタンは無効にしてあるが、送信の経路はボタンだけではない)。
+    if (imageBusy) {
+      event.preventDefault();
+      return;
+    }
+    onSubmit(event);
+  };
 
   return (
     <section
@@ -180,12 +237,19 @@ export function ProductEditorSection({
       </h3>
       {/* フォームの外に置く (案の欄で Enter を押しても商品の保存を送らない)。 */}
       {listingAssistant ? (
-        <ListingAssistantEntry key={formSession} productForm={productForm} updateProduct={updateProduct} />
+        <ListingAssistantEntry
+          key={formSession}
+          productForm={productForm}
+          updateProduct={updateProduct}
+          imageUpload={imageUpload}
+          onImageBusyChange={(busy) => setImageBusy('assistant', busy)}
+          coverOperation={coverOperation}
+        />
       ) : null}
 
       <form
         className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"
-        onSubmit={onSubmit}
+        onSubmit={imageUpload ? submitUnlessImageBusy : onSubmit}
       >
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 sm:col-span-2">
           <h4>{t('formGroupWhat')}</h4>
@@ -458,6 +522,46 @@ export function ProductEditorSection({
                 </label>
               </fieldset>
             )}
+            {imageUpload ? (
+              // 表紙と追加画像を画像の欄にする。編集の対象を替えたら作り直す (前の商品のアップロードの応答を、次の商品の欄に
+              // 入れない・アップロード中の印も外れる)。
+              <Fragment key={formSession}>
+                <div className="sm:col-span-2">
+                  <ImageField
+                    id="creator-store-product-image"
+                    label={t('coverImageLabel')}
+                    urlLabel={t('imageUrlLabel')}
+                    value={productForm.imageUrl}
+                    onChange={(imageUrl) => updateProduct({ imageUrl })}
+                    purpose="product"
+                    onBusyChange={(busy) => setImageBusy('cover', busy)}
+                    operation={coverOperation}
+                    urlMaxLength={512}
+                    hint={<p className="text-xs leading-relaxed text-slate-500">{tImage('hint', { max: IMAGE_MAX_EDGE.product })}</p>}
+                    urlHint={
+                      <p className="mt-1 text-xs text-slate-500">
+                        {t('imageUrlHint')}{' '}
+                        <Link
+                          href={`/${locale}/guide/image-url`}
+                          prefetch={false}
+                          className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                        >
+                          {t('imageGuideLink')}
+                        </Link>
+                      </p>
+                    }
+                  />
+                </div>
+                <ProductGalleryField
+                  value={productForm.galleryUrls}
+                  onChange={(galleryUrls) => updateProduct({ galleryUrls })}
+                  onBusyChange={(busy) => setImageBusy('gallery', busy)}
+                  isLicense={isLicense}
+                />
+              </Fragment>
+            ) : (
+              <>
+              {/* imageUpload が false の画面は今のまま (この中は変えない)。 */}
             <label
               htmlFor="creator-store-product-image-url"
               className="block text-sm font-medium text-slate-700"
@@ -502,6 +606,8 @@ export function ProductEditorSection({
                 className={`${inputClass}${isLicense ? ' min-h-11' : ''}`} 
               />
             </label>
+              </>
+            )}
             <label
               htmlFor="creator-store-product-emoji"
               className="block text-sm font-medium text-slate-700"
@@ -672,7 +778,7 @@ export function ProductEditorSection({
           <button
             type="submit"
             disabled={
-              saveProduct.isPending || (atLimit && editingId === null)
+              saveProduct.isPending || (atLimit && editingId === null) || imageBusy
             }
             className={`${isLicense ? 'min-h-11 ' : ''}rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50`}
           >
@@ -695,6 +801,11 @@ export function ProductEditorSection({
           {productSaved ? (
             <p className="text-sm font-medium text-emerald-700">
               {t('productSaved')}
+            </p>
+          ) : null}
+          {imageBusy ? (
+            <p role="status" className="text-xs text-slate-600">
+              {t('imageBusySave')}
             </p>
           ) : null}
         </div>

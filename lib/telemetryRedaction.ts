@@ -176,6 +176,8 @@ function scrubTraceUrlFields(event: Event): void {
 // 受けた request の header のうち、秘密の値を持つもの。x402 の支払いの署名 (v2 の PAYMENT-SIGNATURE・v1 の X-PAYMENT) は
 // captureRequestError の request.headers と transaction の http.request.header.* の両方に載る (Codex が実 SDK で確かめた)。
 // 署名を第三者 (Sentry) へ波及させない。authorization・cookie も同じ理由で落とす。
+// x-vercel-oidc-token は Vercel が関数への request に付ける OIDC の token (画像のアップロードの Blob の認証に使う・
+// lib/images/blobStore)。持っていればその project として Blob などに書けるので、同じく落とす。
 const SECRET_HEADER_NAMES = new Set([
   'x-store-handoff-token',
   'x-order-token',
@@ -184,6 +186,7 @@ const SECRET_HEADER_NAMES = new Set([
   'authorization',
   'proxy-authorization',
   'cookie',
+  'x-vercel-oidc-token',
 ]);
 // span の属性の形 (http.request.header.<小文字・- は _>)。
 const SECRET_TRACE_HEADER_KEYS = new Set(

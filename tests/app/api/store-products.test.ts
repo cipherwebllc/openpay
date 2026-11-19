@@ -758,7 +758,8 @@ describe('creator store seller routes', () => {
     const empty = await getSeller(request('/api/store/seller'));
     expect(empty.status).toBe(200);
     // listingAssistant = AI 出品アシスタントの入口 (フラグ OFF・ADMIN_WALLETS 未設定のこの test では false)。
-    expect(await empty.json()).toEqual({ ok: true, seller: null, listingAssistant: false });
+    // imageUpload = 画像の欄 (IMAGE_UPLOAD_MODE 未設定 = off のこの test では false)。
+    expect(await empty.json()).toEqual({ ok: true, seller: null, listingAssistant: false, imageUpload: false });
 
     getSellerDisclosure.mockResolvedValue({
       name: 'Alice',
