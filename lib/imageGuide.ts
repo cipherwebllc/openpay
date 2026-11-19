@@ -1,5 +1,5 @@
 // /guide/image-url 「画像 URL の用意のしかた」の content SOT (裁定 2026-08-17・user 原文ベース)。
-// OpenPay は画像を預からず https:// の画像 URL を設定する方式 — その「URL の用意」を
+// 画像の欄は「画像を選ぶ」でアップロードするか、https:// の画像 URL を設定する (2026-11-20 からアップロードも可) — その「URL の用意」を
 // 初心者向けに 1 ページで案内する。画像 URL 欄 4 箇所 (プロフィール/出品/レジ商品/
 // モバイル注文アイコン) のヒントからリンクされる実務ページ。
 // 長文を messages/*.json に置かない方針は lib/qrGuide.ts 等と同じ。数値・料率は扱わない。
@@ -27,12 +27,12 @@ export type ImageGuideContent = {
 const JA: ImageGuideContent = {
   metaTitle: '画像 URL の用意のしかた — OpenPayで画像を設定する | OpenPay',
   metaDescription:
-    'OpenPay は画像を預からず、公開されている画像の URL (https://〜) を設定する方式です。Imgur などへのアップロードから URL の確認方法、つまずきやすいポイントまでを 1 ページで案内します。',
+    'OpenPay の画像の欄は、サインインして画像の欄からアップロードするか、公開されている画像の URL (https://〜) を貼って設定します。URL で設定する場合の、Imgur などへのアップロードから URL の確認方法、つまずきやすいポイントまでを 1 ページで案内します。',
   backHome: '← OpenPay トップへ',
 
-  heroTitle: 'アップロードは不要です',
+  heroTitle: 'URL で画像を設定する方法',
   heroLead: [
-    'インターネットに公開されている画像の URL (https://〜) を、OpenPay の画像の欄に貼ると表示されます。',
+    'サインインすると、各画像の欄の「画像を選ぶ」(ストアの追加画像は「画像を追加」) から画像をアップロードできます。このページは、URL を貼って設定する場合 (サインインしないとき・自分のサイトの画像を使いたいとき・欄の「URL で指定する」) の案内です。',
   ],
 
   sections: [
@@ -99,10 +99,14 @@ const JA: ImageGuideContent = {
       ],
     },
     {
-      title: 'なぜ OpenPay に画像をアップロードしないの?',
-      body: [
-        'OpenPay では、決済だけでなくサービス全体で、できるだけユーザーのデータを OpenPay 側で預からないことを重視しています。画像についても OpenPay が保管するのではなく、ユーザー自身が管理する画像を URL から表示します。',
-        'つまり「画像はあなたが管理する。OpenPay は表示する」というシンプルな仕組みです。',
+      title: 'OpenPay にアップロードした画像について',
+      body: ['サインインして画像の欄からアップロードした画像は、次のように扱います。'],
+      bullets: [
+        '送る前に端末の中で描き直し (大きい画像は縮めます)、撮影場所などの情報を消してから OpenPay の保存先に保存し、URL を知っている人なら誰でも見られる状態で公開します',
+        '1 つのウォレットで 200 枚まで置けます',
+        '欄から外したり替えたりした画像は、自動では消えません。マイページの「アップロードした画像」から消せます。あなたのウォレットの商品・プロフィール・店舗に保存して使っている画像は消せませんが、端末の中のレジの商品や下書き、配った注文リンクや QR、ほかのウォレットの店舗などだけで使っている画像は消せてしまい、そこでの表示が切れます',
+        '消した画像も、ブラウザなどのキャッシュにしばらく残ることがあります',
+        '自分が使う権利を持っている画像だけをアップロードしてください。権利を侵害する画像などは、当社が削除することがあります',
       ],
     },
   ],
@@ -113,12 +117,12 @@ const JA: ImageGuideContent = {
 const EN: ImageGuideContent = {
   metaTitle: 'How to prepare an image URL | OpenPay',
   metaDescription:
-    'OpenPay never stores your images — you set a public image URL (https://…) instead. This page walks through uploading to a service like Imgur, copying the right URL, and the common pitfalls.',
+    'Set an image in OpenPay by signing in and uploading it from the image field, or by pasting a public image URL (https://…). This page walks through the URL route: uploading to a service like Imgur, copying the right URL, and the common pitfalls.',
   backHome: '← Back to OpenPay',
 
-  heroTitle: 'No upload needed',
+  heroTitle: 'Setting an image by URL',
   heroLead: [
-    'Paste the URL (https://…) of an image that is public on the internet into an image field in OpenPay and it shows up.',
+    'After signing in, you can upload an image with "Choose image" in each image field ("Add image" for extra store images). This page covers setting an image by pasting its URL instead (when you are not signed in, to use an image from your own site, or via "Use a URL" in the field).',
   ],
 
   sections: [
@@ -182,10 +186,14 @@ const EN: ImageGuideContent = {
       ],
     },
     {
-      title: 'Why not upload to OpenPay?',
-      body: [
-        'Across the whole service — not just payments — OpenPay holds as little of your data as it can. Images are no exception: rather than storing them, OpenPay displays the image you manage, from your URL.',
-        'In short: you own the image; OpenPay displays it.',
+      title: 'About images uploaded to OpenPay',
+      body: ['Images you upload from an image field after signing in are handled as follows.'],
+      bullets: [
+        'They are redrawn on your device before sending (large images are resized), stripped of information such as the shooting location, saved to OpenPay\'s storage and published so that anyone who knows the URL can view them',
+        'Each wallet can keep up to 200 images',
+        'Images you remove or replace in a field are not deleted automatically. You can delete them from "Uploaded images" on My Page. Images saved and used in your own wallet\'s products, profiles or shops cannot be deleted, but images used only in register items or drafts on a device, in order links and QR codes you have handed out, or in another wallet\'s shop can be deleted, and they will stop showing there',
+        'Deleted images may remain in browser and other caches for a while',
+        'Only upload images you have the right to use. The Company may delete images that infringe rights',
       ],
     },
   ],
