@@ -7,8 +7,10 @@
 // - imageUpload: セッションの本人が画像のアップロード・一覧・削除を使える (imageUploadAvailableFor)。
 // - imageUploadSignIn: サインインすると画像の機能を使えるかもしれない (段階が admin / all で設定がそろっている)。
 //   ヘッダのサインインの導線 (WalletBadge の siweEnabled・掟 7) と、/me/images の「サインインする」に使う。
+// - imageUploadOpen: サインインすれば誰でもアップロードできる (段階が all で設定がそろっている)。レジの商品・モバイル注文の
+//   店の「サインインすると画像をアップロードできます」の 1 行に使う (admin の段階では出さない)。
 import { NextResponse } from 'next/server';
-import { imageUploadAvailableFor, imageUploadSignInOffered } from '@/lib/images/config';
+import { imageUploadAvailableFor, imageUploadOpenToAll, imageUploadSignInOffered } from '@/lib/images/config';
 import { readSession } from '../_session';
 
 export const runtime = 'nodejs';
@@ -32,6 +34,7 @@ export async function GET(): Promise<NextResponse> {
       address,
       ...(address !== null && imageUploadAvailableFor(address) ? { imageUpload: true } : {}),
       ...(imageUploadSignInOffered() ? { imageUploadSignIn: true } : {}),
+      ...(imageUploadOpenToAll() ? { imageUploadOpen: true } : {}),
     },
     { headers: { 'Cache-Control': 'private, no-store' } },
   );

@@ -26,6 +26,8 @@ const h = vi.hoisted(() => ({
   sessionAddress: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' as string | null,
   imageUpload: true as boolean | undefined,
   imageUploadSignIn: true as boolean | undefined,
+  /** 段階 all (サインインすれば誰でも使える)。サインインの前の 1 行はこれだけで出す。 */
+  imageUploadOpen: false as boolean | undefined,
 }));
 const prepare = vi.hoisted(() => ({ upload: vi.fn() }));
 
@@ -53,6 +55,7 @@ vi.mock('@/hooks/useSiweSession', () => ({
     sessionAddress: h.signedIn ? h.sessionAddress : null,
     imageUpload: h.imageUpload,
     imageUploadSignIn: h.imageUploadSignIn,
+    imageUploadOpen: h.imageUploadOpen,
     mismatch: false,
     isLoading: false,
     signIn: vi.fn(),
@@ -170,6 +173,7 @@ beforeEach(() => {
   h.sessionAddress = ADDR;
   h.imageUpload = true;
   h.imageUploadSignIn = true;
+  h.imageUploadOpen = false;
   localStorage.clear();
   localStorage.setItem(PRESETS_KEY, JSON.stringify(stored(ROWS)));
   localStorage.setItem(QR_KEY, JSON.stringify({ receiver: ADDR, token: 'jpyc', chain: 'polygon' }));
@@ -191,7 +195,9 @@ describe('画像の欄を出すか (/api/auth/siwe/me)', () => {
   it.each([
     ['段階 off (imageUpload も imageUploadSignIn も無い)', () => { h.imageUpload = undefined; h.imageUploadSignIn = undefined; }],
     ['サインイン済みでも imageUpload が false (運営者でない・設定が無い)', () => { h.imageUpload = false; }],
-    ['/me の取得の失敗 (どちらも false)', () => { h.imageUpload = false; h.imageUploadSignIn = false; }],
+    ['/me の取得の失敗 (どれも false)', () => { h.imageUpload = false; h.imageUploadSignIn = false; h.imageUploadOpen = false; }],
+    // 段階 admin: サインインの前は運営者かどうか分からない (ヘッダのサインインの導線だけ・画面の 1 行は出さない)。
+    ['段階 admin でサインインしていない (imageUploadSignIn だけ)', () => { h.signedIn = false; h.imageUpload = false; }],
   ])('%s なら今の URL の欄のまま (案内の 1 行も出さない)', async (_label, setup) => {
     setup();
     renderWithIntl(tree());
@@ -202,9 +208,10 @@ describe('画像の欄を出すか (/api/auth/siwe/me)', () => {
     expect(screen.getByRole('dialog').querySelector('input[type="file"]')).toBeNull();
   });
 
-  it('サインインしていなくて imageUploadSignIn なら「サインインすると画像をアップロードできます」の 1 行と今の URL の欄', async () => {
+  it('段階 all でサインインしていなければ「サインインすると画像をアップロードできます」の 1 行と今の URL の欄', async () => {
     h.signedIn = false;
     h.imageUpload = false;
+    h.imageUploadOpen = true;
     renderWithIntl(tree());
     await openSheet();
     expect(sheet().getByText(I.signInToUpload)).toBeInTheDocument();
@@ -308,6 +315,31 @@ describe('遅れて届いた結果', () => {
   });
 });
 
+describe('商品の id と追加のフォームの key', () => {
+  it('id が `#new` の商品と追加のフォームを同時に送っても、結果と取り込みの保留が混ざらない', async () => {
+    const rows: Row[] = [{ id: '#new', name: 'ナイトブレンド', unitPrice: '700' }, ROWS[1]];
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(stored(rows)));
+    renderWithIntl(tree());
+    await openSheet();
+    await waitFor(() => expect(imageGroups()).toHaveLength(rows.length + 1));
+    await pick(imageGroups()[0], 1);
+    await pick(imageGroups()[rows.length], 2);
+    // 商品の行の結果は、追加のフォームの送信に捨てられない。
+    await answer(0, `${BLOB}/night.jpg`);
+    await waitFor(() => expect(savedImage('#new')).toBe(`${BLOB}/night.jpg`));
+    expect(within(imageGroups()[rows.length]).getByText(I.empty)).toBeInTheDocument();
+    // 追加のフォームがまだ送っているので、別のタブの商品は取り込まない (商品の行の完了で保留が外れない)。
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(stored([{ ...rows[0], name: '別のタブの名前', image: `${BLOB}/night.jpg` }, rows[1]])));
+    focusTab();
+    expect(nameInputs()[0].value).toBe('ナイトブレンド');
+    await answer(1, `${BLOB}/new.jpg`);
+    expect(previewSrc(imageGroups()[rows.length])).toBe(`${BLOB}/new.jpg`);
+    expect(savedImage('#new')).toBe(`${BLOB}/night.jpg`);
+    // 両方が終わったら、保留していた取り込みをする。
+    await waitFor(() => expect(nameInputs()[0].value).toBe('別のタブの名前'));
+  });
+});
+
 describe('追加のフォーム', () => {
   it('画像を送っている間は「追加」を止め (押しても足さない)、届いたら追加で画像つきの行になる', async () => {
     await renderWithImageFields();
@@ -353,6 +385,32 @@ describe('別のタブの変更 (送っている間は取り込まず、書く�
     await openSheet();
     await waitFor(() => expect(nameInputs().slice(0, 2).map((input) => input.value)).toEqual(['ブレンド', 'チーズケーキ']));
     expect(previewSrc(imageGroups()[1])).toBe(`${BLOB}/c.jpg`);
+  });
+
+  it('別のタブの行が壊れていても (打ちかけの空の価格・数値の画像)、別の商品の画像が届いたときにレジの描画は落ちない', async () => {
+    await renderWithImageFields();
+    await pick(imageGroups()[2], 1);
+    // 別のタブの保存値: コーヒーの画像が数値・紅茶の価格が空 (打ちかけ)。どちらも sanitize が直す値。
+    const broken = stored(ROWS).presets.map((row) =>
+      row.id === 'a' ? { ...row, image: 123 } : row.id === 'b' ? { ...row, unitPrice: '' } : row,
+    );
+    localStorage.setItem(PRESETS_KEY, JSON.stringify({ presets: broken, receipt: { day: '', n: 0 } }));
+    focusTab();
+    await answer(0, `${BLOB}/c.jpg`);
+    // 保存には別のタブの値のまま画像だけを重ねる (別のタブの打ちかけを消さない)。
+    await waitFor(() => expect(savedImage('c')).toBe(`${BLOB}/c.jpg`));
+    expect(savedRows().map((row) => [row.id, row.image, row.unitPrice])).toEqual([
+      ['a', 123, '500'],
+      ['b', undefined, ''],
+      ['c', `${BLOB}/c.jpg`, '600'],
+    ]);
+    // 画面はこのタブの一覧のまま (壊れた行を描画に渡さない)・描画は続く。
+    expect(nameInputs().slice(0, ROWS.length).map((input) => input.value)).toEqual(['コーヒー', '紅茶', 'ケーキ']);
+    expect(previewSrc(imageGroups()[0])).toBe(OLD);
+    expect(previewSrc(imageGroups()[2])).toBe(`${BLOB}/c.jpg`);
+    // 次の書き込みでこのタブの一覧に戻さない (別のタブの値が保存に残る)。
+    await act(async () => undefined);
+    expect(savedRows()[1].unitPrice).toBe('');
   });
 
   it('別のタブが一覧を丸ごと入れ替えた (一括読込) 後に届いた結果は入らない', async () => {

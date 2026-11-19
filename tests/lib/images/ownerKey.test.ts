@@ -18,6 +18,7 @@ import {
   imageUploadAllowedFor,
   imageUploadAvailableFor,
   imageUploadMode,
+  imageUploadOpenToAll,
   imageUploadSignInOffered,
 } from '@/lib/images/config';
 import { IMAGE_PURPOSES, isImagePurpose } from '@/lib/images/purpose';
@@ -207,6 +208,24 @@ describe('server の設定', () => {
       vi.stubEnv(key, saved);
     }
     expect(imageUploadSignInOffered()).toBe(true);
+  });
+
+  it('誰でも使える段階 (imageUploadOpenToAll) は all で、秘密・Blob・IP の枠の秘密がそろったときだけ (admin では false)', () => {
+    vi.stubEnv('IMAGE_OWNER_KEY_SECRET', SECRET);
+    vi.stubEnv('BLOB_STORE_ID', 'store_test');
+    vi.stubEnv('IP_HASH_SECRET', 'test-ip-hash-secret-0123456789abcdef');
+    for (const [mode, open] of [['all', true], ['admin', false], ['off', false], [undefined, false]] as const) {
+      vi.stubEnv('IMAGE_UPLOAD_MODE', mode);
+      expect(imageUploadOpenToAll()).toBe(open);
+    }
+    vi.stubEnv('IMAGE_UPLOAD_MODE', 'all');
+    for (const key of ['IMAGE_OWNER_KEY_SECRET', 'BLOB_STORE_ID', 'IP_HASH_SECRET']) {
+      const saved = process.env[key];
+      vi.stubEnv(key, '');
+      expect(imageUploadOpenToAll()).toBe(false);
+      vi.stubEnv(key, saved);
+    }
+    expect(imageUploadOpenToAll()).toBe(true);
   });
 
   it('Retry-After は次の UTC 日までの秒数', () => {

@@ -6,7 +6,7 @@
 //
 // 商品の画像 (アップロード): /api/auth/siwe/me の imageUpload (サインイン済みで、セッションが接続中の wallet と一致し、今の
 // 取得が成功しているときだけ) が true で、商品の一覧を読み込んだ後だけ、画像の URL の欄を画像の欄 (components/ImageField・
-// 用途 preset・長辺 800) にする。サインインしていなくて imageUploadSignIn が true なら「サインインすると画像を
+// 用途 preset・長辺 800) にする。サインインしていなくて imageUploadOpen (段階 all) が true なら「サインインすると画像を
 // アップロードできます」の 1 行と今の URL の欄。それ以外 (段階 off・設定が無い・取得の失敗) は今の画面のまま。保存の形は今と
 // 同じ (この端末の localStorage の https URL の文字列)・レジと会計と URL の入力はいつも使える。
 // - 欄ごと (商品の id・追加のフォーム) に操作の番号 (hooks/useImageUpload)。送り始め・URL の手入力 (今の URL の欄でも)・外す・
@@ -62,8 +62,13 @@ type Props = {
   onImageBusyChange?: (key: string, busy: boolean) => void;
 };
 
-/** 追加のフォームの画像の欄の key (商品の id とぶつからない)。 */
-const NEW_ROW = '#new';
+/**
+ * 画像の欄の key (操作の番号と、親へ知らせる busy の両方に使う)。既存の行は `row:<商品の id>`、追加のフォームは `new`。商品の
+ * id はどんな文字列もありうる (公開中のメニューから読み込んだ id も入る) ので、id をそのまま key にせず、必ず接頭辞を付ける
+ * (追加のフォームの key とぶつかると、片方の結果が捨てられ、送っている間の取り込みの保留も外れる)。
+ */
+const NEW_ROW = 'new';
+const rowKey = (id: string) => `row:${id}`;
 // この部品を作るたびの通し番号 (シートを開き直したときの欄の印を、前に開いていたときの欄の印と分ける)。
 let managerSeq = 0;
 
@@ -233,7 +238,7 @@ export function ProductPresetManager({
                   onClick={() => {
                     if (window.confirm(t('removeConfirm', { name: p.name }))) {
                       // 消した行に向けて送っている画像は、届いても入れない (同じ id の行がまたできても)。
-                      images.advance(p.id);
+                      images.advance(rowKey(p.id));
                       removePreset(p.id);
                     }
                   }}
@@ -252,15 +257,15 @@ export function ProductPresetManager({
                   // 同じ id の行の image だけに入る (updatePreset・行が消えていたら入らない)。
                   <div className="w-full">
                     <ImageField
-                      key={`${imageScope.key}:${p.id}`}
+                      key={`${imageScope.key}:${rowKey(p.id)}`}
                       id={`${formId}-image-${i}`}
                       label={t('imageUploadLabel')}
                       urlLabel={t('imageLabel')}
                       value={p.image ?? ''}
                       onChange={(url) => updatePreset(p.id, { image: url.trim() || undefined })}
                       purpose="preset"
-                      onBusyChange={(busy) => onImageBusyChange?.(busyKey(p.id), busy)}
-                      operation={images.operation(p.id)}
+                      onBusyChange={(busy) => onImageBusyChange?.(busyKey(rowKey(p.id)), busy)}
+                      operation={images.operation(rowKey(p.id))}
                       urlMaxLength={PRESET_IMAGE_MAX}
                       previewClassName="h-16 w-16 rounded-lg"
                     />
@@ -275,7 +280,7 @@ export function ProductPresetManager({
                     placeholder={t('imagePlaceholder')}
                     onChange={(e) => {
                       // 手で書いた URL が最後の操作 (画像の欄から切り替わる前に始まった送信の結果で上書きしない)。
-                      images.advance(p.id);
+                      images.advance(rowKey(p.id));
                       updatePreset(p.id, { image: e.target.value.trim() || undefined });
                     }}
                     className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"

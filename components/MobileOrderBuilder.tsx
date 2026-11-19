@@ -10,13 +10,13 @@
 //
 // 店のアイコン・カバーの画像 (アップロード): 出すかは /api/auth/siwe/me の imageUpload (セッションを読む StorefrontPublishPanel が
 // 描画の確定で知らせる)。true で下書きを読み込んだ後だけ、URL の欄を画像の欄 (components/ImageField・用途 storefront・前処理の
-// 長辺はアイコン 512・カバー 1280) にする。サインインしていなくて imageUploadSignIn が true なら「サインインすると画像を
+// 長辺はアイコン 512・カバー 1280) にする。サインインしていなくて imageUploadOpen (段階 all) が true なら「サインインすると画像を
 // アップロードできます」の 1 行と今の URL の欄。それ以外は今の画面のまま。保存の形は今と同じ (下書きの https URL の文字列)・
 // 公開は今と同じ POST /api/handle。
 // - 欄ごとに操作の番号 (送り始め・URL の手入力 (今の URL の欄でも)・外す・公開中の店の読み込みで進める・本人・段階が替わったら
 //   layout effect で全部進める)。
-// - 1 欄でも送っている間は、公開のボタン (帯の 2 つ)・公開中の店の自動 / 手動の読み込みを止め、別のタブの下書きを取り込まない
-//   (最後の 1 欄が終わるまで)。
+// - 1 欄でも送っている間は、公開のボタン (帯の 2 つ)・公開中の店の自動 / 手動の読み込みを止め、別のタブの下書きと商品 (メニュー)
+//   を取り込まない (最後の 1 欄が終わるまで)。
 
 import { useCallback, useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -125,10 +125,11 @@ export function MobileOrderBuilder({
   const t = useTranslations('MobileOrder');
   const tImage = useTranslations('ImageField');
   const locale = useLocale();
-  // 店のアイコン・カバーをアップロード中の欄。1 つでもあれば公開と読み込みを止め、別のタブの下書きを取り込まない。
+  // 店のアイコン・カバーをアップロード中の欄。1 つでもあれば公開と読み込みを止め、別のタブの下書きも商品 (公開するメニュー) も
+  // 取り込まない (送っている間に公開の中身が黙って変わらないように・終わったら 1 度取り込む)。
   const imageBusy = useImageBusyKeys();
   const { settings: draft, setSettings, hydrated, setReceiver } = useMobileOrderDraft(imageBusy.busy);
-  const { presets, replaceAll, hydrated: presetsHydrated } = useProductPresets();
+  const { presets, replaceAll, hydrated: presetsHydrated } = useProductPresets({ holdImport: imageBusy.busy });
   // 画像の欄を出すか (StorefrontPublishPanel が /me の imageUpload から知らせる)。下書きを読み込むまでは出さない (読み込みで
   // 下書きが入れ替わるため)。
   const [imageUploadScope, setImageUploadScope] = useState<ImageUploadScope>(IMAGE_UPLOAD_OFF);

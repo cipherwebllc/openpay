@@ -30,13 +30,15 @@ describe('imageUploadScopeOf', () => {
     ['サインイン済みで imageUpload が false', { isSignedIn: true, sessionAddress: ADDR, imageUpload: false, imageUploadSignIn: true }],
     ['imageUpload が無い (古い mock・段階 off)', { isSignedIn: true, sessionAddress: ADDR }],
     ['サインインしていない・imageUploadSignIn も無い', { isSignedIn: false, sessionAddress: null }],
+    // 段階 admin: ヘッダのサインインの導線 (imageUploadSignIn) はあるが、サインインしても運営者でなければ使えないので 1 行は出さない。
+    ['サインインしていなくて imageUploadSignIn だけ (段階 admin)', { isSignedIn: false, sessionAddress: null, imageUploadSignIn: true }],
     ['サインインしていないのに imageUpload だけ true (別のウォレットのセッション)', { isSignedIn: false, sessionAddress: null, imageUpload: true }],
   ])('%s は off', (_label, session) => {
     expect(imageUploadScopeOf(session)).toEqual(IMAGE_UPLOAD_OFF);
   });
 
-  it('サインインしていなくて imageUploadSignIn なら signIn', () => {
-    expect(imageUploadScopeOf({ isSignedIn: false, sessionAddress: null, imageUploadSignIn: true })).toEqual({ access: 'signIn', key: 'signIn' });
+  it('サインインしていなくて imageUploadOpen (段階 all) なら signIn', () => {
+    expect(imageUploadScopeOf({ isSignedIn: false, sessionAddress: null, imageUploadOpen: true })).toEqual({ access: 'signIn', key: 'signIn' });
   });
 });
 
@@ -130,13 +132,26 @@ const sanitizeList = (loaded: Partial<ListStore>): ListStore => ({
   rows: Array.isArray(loaded.rows) ? loaded.rows : [],
   note: typeof loaded.note === 'string' ? loaded.note : '',
 });
+// 名前が文字列でない行は落とす (レジの商品の sanitize が、価格が空の行や壊れた値を直すのと同じ働き)。
+const sanitizeStrict = (loaded: Partial<ListStore>): ListStore => ({
+  rows: Array.isArray(loaded.rows) ? loaded.rows.filter((row) => typeof row?.name === 'string') : [],
+  note: typeof loaded.note === 'string' ? loaded.note : '',
+});
 const DEFAULT_LIST: ListStore = { rows: [], note: '' };
 const RULES: SettingsSyncRules<ListStore> = { rebase: { rows: rebaseRowField<Row>('image') } };
 const stored = () => JSON.parse(localStorage.getItem(KEY) ?? 'null') as ListStore;
 
 describe('useLocalStorageSettings の rules.rebase', () => {
-  function Harness({ rules, hold }: { rules?: SettingsSyncRules<ListStore>; hold: boolean }) {
-    const { settings, setSettings, hydrated } = useLocalStorageSettings<ListStore>(KEY, DEFAULT_LIST, sanitizeList, rules, hold);
+  function Harness({
+    rules,
+    hold,
+    sanitize = sanitizeList,
+  }: {
+    rules?: SettingsSyncRules<ListStore>;
+    hold: boolean;
+    sanitize?: (loaded: Partial<ListStore>) => ListStore;
+  }) {
+    const { settings, setSettings, hydrated } = useLocalStorageSettings<ListStore>(KEY, DEFAULT_LIST, sanitize, rules, hold);
     const [, force] = useState(0);
     return (
       <>
@@ -154,11 +169,11 @@ describe('useLocalStorageSettings の rules.rebase', () => {
     );
   }
 
-  function setup(rules?: SettingsSyncRules<ListStore>) {
+  function setup(rules?: SettingsSyncRules<ListStore>, otherTabRows: unknown[] = [{ id: 'a', name: 'A2' }, { id: 'b', name: 'B' }], sanitize = sanitizeList) {
     localStorage.setItem(KEY, JSON.stringify({ rows: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }], note: '' }));
-    const view = render(<Harness rules={rules} hold />);
+    const view = render(<Harness rules={rules} hold sanitize={sanitize} />);
     // 別のタブが A を改名して保存した (このタブは取り込みを保留している)。
-    localStorage.setItem(KEY, JSON.stringify({ rows: [{ id: 'a', name: 'A2' }, { id: 'b', name: 'B' }], note: 'other' }));
+    localStorage.setItem(KEY, JSON.stringify({ rows: otherTabRows, note: 'other' }));
     act(() => {
       window.dispatchEvent(new Event('focus'));
     });
@@ -173,6 +188,25 @@ describe('useLocalStorageSettings の rules.rebase', () => {
     expect(stored().rows).toEqual([{ id: 'a', name: 'A2' }, { id: 'b', name: 'B', image: 'https://x/b.jpg' }]);
     expect(stored().note).toBe('other');
     expect(JSON.parse(view.getByTestId('rows').textContent ?? '[]')).toEqual(stored().rows);
+  });
+
+  it('重ねた一覧に sanitize で直る行 (別のタブの打ちかけ・壊れた値) があれば、保存には重ねて書くが画面には出さず、書き戻しもしない', () => {
+    const otherTab = [{ id: 'a', name: 5 }, { id: 'b', name: 'B' }];
+    const view = setup(RULES, otherTab, sanitizeStrict);
+    const written = [{ id: 'a', name: 5 }, { id: 'b', name: 'B', image: 'https://x/b.jpg' }];
+    expect(stored().rows).toEqual(written);
+    // 画面はこのタブの一覧のまま (壊れた行を描画に渡さない)。
+    expect(JSON.parse(view.getByTestId('rows').textContent ?? '[]')).toEqual([{ id: 'a', name: 'A' }, { id: 'b', name: 'B', image: 'https://x/b.jpg' }]);
+    // 次の effect でこのタブの一覧を書き戻さない (別のタブの値は保存に残る)。
+    act(() => undefined);
+    expect(stored().rows).toEqual(written);
+    // 別のタブが直して保存したら、(保留が終わって) 前面に戻ったときに今までどおり取り込む。
+    view.rerender(<Harness rules={RULES} hold={false} sanitize={sanitizeStrict} />);
+    localStorage.setItem(KEY, JSON.stringify({ rows: [{ id: 'a', name: 'A3' }, written[1]], note: 'other' }));
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(JSON.parse(view.getByTestId('rows').textContent ?? '[]')).toEqual([{ id: 'a', name: 'A3' }, written[1]]);
   });
 
   it('rebase の無い設定は今までどおり (このタブの一覧で書く)', () => {

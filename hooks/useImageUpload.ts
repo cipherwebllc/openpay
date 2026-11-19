@@ -98,7 +98,7 @@ export function useImageFieldOperations(scope: string) {
   return { operation, advance, advanceAll };
 }
 
-/** 画像の欄を出すか (/api/auth/siwe/me の imageUpload・imageUploadSignIn から)。 */
+/** 画像の欄を出すか (/api/auth/siwe/me の imageUpload・imageUploadOpen から)。 */
 export type ImageUploadAccess = 'upload' | 'signIn' | 'off';
 
 export type ImageUploadScope = {
@@ -113,20 +113,21 @@ export const IMAGE_UPLOAD_OFF: ImageUploadScope = { access: 'off', key: 'off' };
  * useSiweSession の値から、画像の欄を出すかを決める (純関数)。
  * - upload: サインイン済み (セッションが接続中の wallet と一致) で /me の imageUpload が true (useSiweSession は今の取得が成功
  *   しているときだけ true にする)。
- * - signIn: サインインしていなくて /me の imageUploadSignIn が true (「サインインすると画像をアップロードできます」の 1 行と今の
- *   URL の欄)。
- * - off: それ以外 (段階 off・設定が無い・/me の取得の失敗・読み込み中) は今の画面のまま。
+ * - signIn: サインインしていなくて /me の imageUploadOpen が true (段階 all・「サインインすると画像をアップロードできます」の
+ *   1 行と今の URL の欄)。段階 admin ではサインインの前に運営者かどうか分からないので出さない (ヘッダのサインインの導線は
+ *   imageUploadSignIn のまま WalletBadge が出す)。
+ * - off: それ以外 (段階 off・admin でサインインの前・設定が無い・/me の取得の失敗・読み込み中) は今の画面のまま。
  */
 export function imageUploadScopeOf(session: {
   isSignedIn: boolean;
   sessionAddress: string | null;
   imageUpload?: boolean;
-  imageUploadSignIn?: boolean;
+  imageUploadOpen?: boolean;
 }): ImageUploadScope {
   if (session.isSignedIn && session.imageUpload === true && session.sessionAddress) {
     return { access: 'upload', key: `upload:${session.sessionAddress.toLowerCase()}` };
   }
-  if (!session.isSignedIn && session.imageUploadSignIn === true) return { access: 'signIn', key: 'signIn' };
+  if (!session.isSignedIn && session.imageUploadOpen === true) return { access: 'signIn', key: 'signIn' };
   return IMAGE_UPLOAD_OFF;
 }
 

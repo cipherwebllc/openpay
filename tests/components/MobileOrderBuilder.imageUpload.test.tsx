@@ -24,6 +24,8 @@ const h = vi.hoisted(() => ({
   sessionAddress: '0x52d4901142e2B5680027da5EB47C86CB02a3cA81' as string,
   imageUpload: true as boolean | undefined,
   imageUploadSignIn: true as boolean | undefined,
+  /** 段階 all (サインインすれば誰でも使える)。サインインの前の 1 行はこれだけで出す。 */
+  imageUploadOpen: false as boolean | undefined,
   /** GET /api/handle の応答を保留する (届く順を決める)。 */
   holdMine: false,
 }));
@@ -44,6 +46,7 @@ vi.mock('@/hooks/useSiweSession', () => ({
     sessionAddress: h.signedIn ? h.sessionAddress : null,
     imageUpload: h.imageUpload,
     imageUploadSignIn: h.imageUploadSignIn,
+    imageUploadOpen: h.imageUploadOpen,
     mismatch: false,
     isLoading: false,
     signIn: vi.fn(),
@@ -167,6 +170,7 @@ beforeEach(() => {
   h.sessionAddress = ADDR;
   h.imageUpload = true;
   h.imageUploadSignIn = true;
+  h.imageUploadOpen = false;
   h.holdMine = false;
   localStorage.clear();
   seedDraft();
@@ -187,6 +191,8 @@ describe('画像の欄を出すか (/api/auth/siwe/me)', () => {
   it.each([
     ['段階 off (imageUpload も imageUploadSignIn も無い)', () => { h.imageUpload = undefined; h.imageUploadSignIn = undefined; }],
     ['サインイン済みでも imageUpload が false', () => { h.imageUpload = false; }],
+    // 段階 admin: サインインの前は運営者かどうか分からない (ヘッダのサインインの導線だけ・画面の 1 行は出さない)。
+    ['段階 admin でサインインしていない (imageUploadSignIn だけ)', () => { h.signedIn = false; h.imageUpload = false; }],
   ])('%s なら今の URL の欄のまま', async (_label, setup) => {
     setup();
     const { container } = renderWithIntl(tree());
@@ -197,9 +203,10 @@ describe('画像の欄を出すか (/api/auth/siwe/me)', () => {
     expect(container.querySelector('input[type="file"]')).toBeNull();
   });
 
-  it('サインインしていなくて imageUploadSignIn なら 1 行の案内と今の URL の欄', async () => {
+  it('段階 all でサインインしていなければ 1 行の案内と今の URL の欄', async () => {
     h.signedIn = false;
     h.imageUpload = false;
+    h.imageUploadOpen = true;
     renderWithIntl(tree());
     expect(await screen.findByText(I.signInToUpload)).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: MO.avatarLabel })).not.toBeInTheDocument();
@@ -265,7 +272,7 @@ describe('公開とアップロード', () => {
     expect(previewSrc(avatarGroup())).toBe(OLD_AVATAR);
   });
 
-  it('送っている間は手動の「読み込む」を押せず、終わると押せる (読み込んだ後に届いた結果は入らない)', async () => {
+  it('送っている間は手動の「読み込む」を押せず、送信をやめると押せる・読み込んだ後に届いた保留の応答は入らない', async () => {
     await renderWithImageFields();
     // 下書きが公開中と違うので「編集（公開中の内容を読み込む）」が出ている。
     const load = screen.getByRole('button', { name: MO.editLoadButton });
@@ -275,10 +282,32 @@ describe('公開とアップロード', () => {
     expect(yes).toBeDisabled();
     fireEvent.click(yes);
     expect(storedDraft().shopName).toBe('Cafe');
-    await answer(0, `${BLOB}/cover.jpg`);
+    // 送信をやめる → 公開中の店を読み込む → 保留していた応答を返す。
+    fireEvent.click(within(coverGroup()).getByRole('button', { name: I.cancel }));
     await waitFor(() => expect(yes).toBeEnabled());
     fireEvent.click(yes);
     await waitFor(() => expect(storedDraft()).toMatchObject({ shopName: '公開中の店', avatar: LIVE_STOREFRONT.avatar, cover: '' }));
+    await answer(0, `${BLOB}/cover.jpg`);
+    expect(storedDraft()).toMatchObject({ shopName: '公開中の店', avatar: LIVE_STOREFRONT.avatar, cover: '' });
+    expect(within(coverGroup()).getByText(I.empty)).toBeInTheDocument();
+    expect(previewSrc(avatarGroup())).toBe(LIVE_STOREFRONT.avatar);
+  });
+
+  it('送っている間は別のタブの商品 (公開するメニュー) も取り込まず、終わったら取り込む', async () => {
+    await renderWithImageFields();
+    const preview = (await screen.findByRole('heading', { name: MO.stepPreviewTitle })).closest('section') as HTMLElement;
+    expect(within(preview).getByText('ブレンド')).toBeInTheDocument();
+    await pick(avatarGroup(), 1);
+    // 別のタブのレジで商品を改名して保存し、このタブに戻った。
+    const presets = JSON.parse(localStorage.getItem(PRESETS_KEY) ?? '{}') as { presets: Array<Record<string, unknown>> };
+    localStorage.setItem(PRESETS_KEY, JSON.stringify({ ...presets, presets: presets.presets.map((p) => ({ ...p, name: 'デカフェ' })) }));
+    act(() => {
+      window.dispatchEvent(new Event('focus'));
+    });
+    expect(within(preview).getByText('ブレンド')).toBeInTheDocument();
+    expect(within(preview).queryByText('デカフェ')).not.toBeInTheDocument();
+    await answer(0, `${BLOB}/avatar.jpg`);
+    await waitFor(() => expect(within(preview).getByText('デカフェ')).toBeInTheDocument());
   });
 
   it('送っている間は公開中の店を自動で読み込まず、届いた画像を残す', async () => {

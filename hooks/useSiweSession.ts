@@ -27,10 +27,16 @@ const AUTH_DEPENDENT_KEYS = [
   ['tip-messages'],
 ] as const;
 
-type MeResponse = { ok: boolean; address: Address | null; imageUpload?: boolean; imageUploadSignIn?: boolean };
+type MeResponse = {
+  ok: boolean;
+  address: Address | null;
+  imageUpload?: boolean;
+  imageUploadSignIn?: boolean;
+  imageUploadOpen?: boolean;
+};
 
-/** /me の cache の値。画像の 2 つは server が true のときだけ送る (欠けていれば false)。 */
-type MeData = { address: Address | null; imageUpload: boolean; imageUploadSignIn: boolean };
+/** /me の cache の値。画像の 3 つは server が true のときだけ送る (欠けていれば false)。 */
+type MeData = { address: Address | null; imageUpload: boolean; imageUploadSignIn: boolean; imageUploadOpen: boolean };
 
 async function fetchMe(): Promise<MeData> {
   const res = await fetch('/api/auth/siwe/me', { cache: 'no-store' });
@@ -40,6 +46,7 @@ async function fetchMe(): Promise<MeData> {
     address: json.address ?? null,
     imageUpload: json.imageUpload === true,
     imageUploadSignIn: json.imageUploadSignIn === true,
+    imageUploadOpen: json.imageUploadOpen === true,
   };
 }
 
@@ -124,6 +131,11 @@ export function useSiweSession() {
     imageUpload: sameAddress && me.isSuccess && me.data.imageUpload,
     /** サインインすると画像の機能を使えるかもしれない (/me の imageUploadSignIn・ヘッダのサインインの導線 = 掟 7)。 */
     imageUploadSignIn: me.isSuccess && me.data.imageUploadSignIn,
+    /**
+     * サインインすれば誰でも画像をアップロードできる段階か (/me の imageUploadOpen・段階 all)。レジの商品・モバイル注文の店の
+     * 「サインインすると画像をアップロードできます」の 1 行に使う (admin の段階では運営者でない人にできないことを言わない)。
+     */
+    imageUploadOpen: me.isSuccess && me.data.imageUploadOpen,
     /**
      * /me を取り直す (画面の API が 401 session_mismatch・403 などで「本人が替わった・権限が無くなった」と分かったとき)。
      * 結果は sessionAddress・isSignedIn・imageUpload に反映される。

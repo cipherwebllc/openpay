@@ -77,7 +77,7 @@ export function StorefrontPublishPanel({
   /** 下書きに直すところがあり公開させないときの理由 (例: 値引きが範囲外)。無ければ従来どおり。 */
   blockedReason?: string;
   /**
-   * 店のアイコン・カバーの画像の欄を出すかを親へ知らせる (/api/auth/siwe/me の imageUpload・imageUploadSignIn から
+   * 店のアイコン・カバーの画像の欄を出すかを親へ知らせる (/api/auth/siwe/me の imageUpload・imageUploadOpen から
    * hooks/useImageUpload の imageUploadScopeOf)。key は本人・段階が替わったら変わる (親は旧世代のアップロードを失効させる)。
    */
   onImageUploadChange?: (access: ImageUploadAccess, key: string) => void;

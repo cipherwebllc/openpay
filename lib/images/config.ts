@@ -86,3 +86,12 @@ export function imageUploadAvailableFor(address: string): boolean {
 export function imageUploadSignInOffered(): boolean {
   return imageUploadMode() !== 'off' && imageUploadConfigured();
 }
+
+/**
+ * サインインすれば誰でも画像をアップロードできる段階か (/api/auth/siwe/me の imageUploadOpen)。段階が all で設定がそろって
+ * いるときだけ true。画面の「サインインすると画像をアップロードできます」の 1 行はこれで出す (admin の段階では運営者でない人に
+ * できないことを言わない・ヘッダのサインインの導線は imageUploadSignInOffered のまま)。
+ */
+export function imageUploadOpenToAll(): boolean {
+  return imageUploadMode() === 'all' && imageUploadConfigured();
+}

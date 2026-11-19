@@ -58,8 +58,9 @@ export type SettingsSyncRules<T> = {
    * 書くときに、このタブが揃えた後で別のタブがそのキーを書き換えていた (土台にした保存値 ≠ base) なら、このタブの変更を最新の
    * 保存値に重ね直す (キーごと・純関数・組 groups のキーには使わない)。local はこのタブの値、base はこのタブが最後に揃えた値、
    * latest は最新の保存値 (base と latest は保存の JSON のままの値なので、形を確かめてから使う)。重ね直せないときは null を
-   * 返す (従来どおりこのタブの値で書く)。重ね直した値は、書けたら画面と保存の基準 (base) の両方に入れる (次の書き込みで
-   * このタブの古い値に戻さない)。
+   * 返す (従来どおりこのタブの値で書く)。重ね直した値は保存に書き、書けたら、sanitize を通しても変わらず importable を満たす
+   * ときだけ画面と保存の基準 (base) の両方に入れる (次の書き込みでこのタブの古い値に戻さない)。満たさない (別のタブの打ちかけの
+   * 値・壊れた値を含む) ときは、画面はこのタブの値のまま、base もこのタブの値にする (保存した値は書き戻さない)。
    * 使うのは、1 つのキーに丸ごと入っている一覧 (レジの商品) の、取り込みを保留している間に届いた変更 (画像のアップロードの
    * 結果) を、別のタブの改名・並べ替え・行の削除を消さずに書くため。
    */
@@ -311,18 +312,32 @@ export function useLocalStorageSettings<T extends object>(
     }
     if (!safeSet(storageKey, next)) return;
     migrateRef.current = false;
+    // 重ね直した値を画面に取り込めるか (保存に重ねることと、画面に出すことを分ける)。重ね直した値には別のタブの保存値がその
+    // まま入っている (打ちかけの空の価格・壊れた値もありうる) ので、別のタブの値の取り込み (mergeRemote) と同じく、sanitize を
+    // 通しても変わらず rules.importable を満たすときだけ画面に出す。
+    const canonicalNext = rebased.size > 0 ? (sanitize(next as Partial<T>) as Stored) : null;
+    const importable = rules.importable as Record<string, ((value: unknown) => boolean) | undefined> | undefined;
+    const screenable = (k: string) =>
+      canonicalNext !== null && sameJson(canonicalNext[k], next[k]) && (importable?.[k]?.(next[k]) ?? true);
     // 書いた単位だけを保存済みにする (それ以外の別のタブの変更は、前面に戻ったときに取り込む)。
     setSynced((cur) => {
       const nextBase: Stored = { ...cur.base };
       for (const k of keys) assign(nextBase, k, next);
       if (rebased.size === 0) return { settings: cur.settings, base: nextBase };
-      // 重ね直したキーは画面にも書いた値を出す (別のタブの改名・並べ替え・行の削除を見せ、次の書き込みで古い一覧に戻さない)。
-      // 書く値を読んだ後にこのタブで変えていたら (読み直しから確定までの間の変更)、その値を残し、そのキーの base も進めない
-      // (次の書き込みが、書いた値をもう一度「別のタブの変更」として見て重ね直す)。
       const settings: Stored = { ...(cur.settings as Stored) };
       for (const [k, value] of rebased) {
-        if (settings[k] === local[k]) settings[k] = value;
-        else assign(nextBase, k, base);
+        if (settings[k] !== local[k]) {
+          // 書く値を読んだ後にこのタブで変えていたら (読み直しから確定までの間の変更)、その値を残し、そのキーの base も進めない
+          // (次の書き込みが、書いた値をもう一度「別のタブの変更」として見て重ね直す)。
+          assign(nextBase, k, base);
+        } else if (screenable(k)) {
+          // 画面にも書いた値を出す (別のタブの改名・並べ替え・行の削除を見せ、次の書き込みで古い一覧に戻さない)。
+          settings[k] = value;
+        } else {
+          // 画面には出せない (sanitize で直る行がある): 画面はこのタブの値のまま、base もこのタブの値にする (次の effect で
+          // 保存した値を書き戻さない)。保存値が sanitize を通るようになったら、前面に戻ったときに今までどおり取り込む。
+          assign(nextBase, k, local);
+        }
       }
       return { settings: settings as T, base: nextBase };
     });
