@@ -160,6 +160,8 @@ const BUDGETS_KB = {
   '/[locale]/license-terms/directory-v1': 241, // 実測 236
   '/[locale]/license-terms/standard-v1': 241, // 実測 236
   '/[locale]/me': 242, // 実測 237
+  // 2026-11-19 新設 (アップロードした画像の一覧と削除・画像のアップロードの PR 3A)。CI の実測 246 kB (head 3b5b8da1) + 5。
+  '/[locale]/me/images': 251, // 実測 246
   '/[locale]/news': 243, // 実測 238 (2026-11-07 手元の本番 flag build: 本文を server で newsEntriesFor に絞って渡し、lib/news.ts を client に入れない。前は 258/259)
   '/[locale]/order/status': 206, // 実測 201
   '/[locale]/orders/hall': 265, // 実測 260

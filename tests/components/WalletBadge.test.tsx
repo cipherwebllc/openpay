@@ -91,6 +91,7 @@ function defaultSiwe() {
     signOutError: null as Error | null,
     signOut: vi.fn().mockResolvedValue(undefined),
     isSigningOut: false,
+    imageUploadSignIn: false,
   };
 }
 function setSiwe(overrides: Partial<SiweState> = {}) {
@@ -339,6 +340,24 @@ describe('WalletBadge: SIWE サインイン', () => {
     expect(
       within(details).getByRole('menuitem', { name: '切断' }),
     ).toBeInTheDocument();
+  });
+
+  it('公開の flag が全 OFF でも、/me の imageUploadSignIn (画像のアップロードの段階が admin / all) ならログイン UI を出す (掟 7)', () => {
+    for (const k of Object.keys(flags) as (keyof typeof flags)[]) flags[k] = false;
+    setConnected();
+    setSiwe({ isSignedIn: false, imageUploadSignIn: true });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(within(details).getByRole('menuitem', { name: 'ログイン (署名)' })).toBeInTheDocument();
+  });
+
+  it('公開の flag が全 OFF で imageUploadSignIn も無ければログイン UI を出さない', () => {
+    for (const k of Object.keys(flags) as (keyof typeof flags)[]) flags[k] = false;
+    setConnected();
+    setSiwe({ isSignedIn: false, imageUploadSignIn: false });
+    renderWithIntl(<WalletBadge />);
+    const details = openDropdown('0x52d4…cA81');
+    expect(within(details).queryByRole('menuitem', { name: 'ログイン (署名)' })).toBeNull();
   });
 
   it('着金プッシュ通知のみ ON → ログイン UI を出す (購読にサインインが要る)', () => {

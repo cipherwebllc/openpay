@@ -2,7 +2,7 @@
 // 選ぶ・外す・URL で指定する・失敗で元の画像を保つ・二重送信の防ぎ・やめた後と unmount の後の古い応答を捨てる・busy を親へ。
 // 操作の番号 (operation) を共有したときは「最後の操作だけが反映される」(値ではなく番号で比べる)。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { useRef, useState } from 'react';
 import { renderWithIntl } from '../_helpers/i18n';
 import ja from '@/messages/ja.json';
@@ -159,6 +159,11 @@ describe('ImageField', () => {
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent(T.errors.imageLimit.replace('{max}', '200'));
     expect(alert).toHaveTextContent(T.keepOriginal);
+    // 上限の文には、アップロードした画像の一覧へのリンク (別のタブ・編集中の値を残す)。
+    const library = within(alert).getByRole('link', { name: T.openLibrary });
+    expect(library).toHaveAttribute('href', '/ja/me/images');
+    expect(library).toHaveAttribute('target', '_blank');
+    expect(library).toHaveAttribute('rel', 'noopener noreferrer');
     expect(screen.getByRole('button', { name: T.choose })).toBeEnabled();
     // 値がほかから変わったら (AI の表紙など) 前の失敗の文は消す。
     fireEvent.click(screen.getByRole('button', { name: 'ほかから替える' }));
@@ -182,6 +187,8 @@ describe('ImageField', () => {
     choose(container);
     await act(async () => pending[0].resolve({ ok: false, error }));
     expect(screen.getByRole('alert')).toHaveTextContent(message);
+    // 一覧へのリンクは上限 (image_limit) のときだけ。
+    expect(within(screen.getByRole('alert')).queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('同じ tick の 2 回目は送らない (二重送信の防ぎ)', () => {

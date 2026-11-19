@@ -2,7 +2,15 @@
 // 画像の置き場の path (lib/images/ownerKey)・先頭 byte の見分け (lib/images/sniff)・server の設定 (lib/images/config)。
 import { createHmac } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { imageBlobPath, imageOwnerKey, imageOwnerPrefix, newImageId } from '@/lib/images/ownerKey';
+import {
+  imageBlobPath,
+  imageBlobPathFor,
+  imageOwnerKey,
+  imageOwnerPrefix,
+  isImageId,
+  newImageId,
+  parseOwnedImagePathname,
+} from '@/lib/images/ownerKey';
 import { sniffImageType } from '@/lib/images/sniff';
 import {
   imageBlobStoreConfigured,
@@ -10,6 +18,7 @@ import {
   imageUploadAllowedFor,
   imageUploadAvailableFor,
   imageUploadMode,
+  imageUploadSignInOffered,
 } from '@/lib/images/config';
 import { IMAGE_PURPOSES, isImagePurpose } from '@/lib/images/purpose';
 import { secondsUntilNextUtcDay } from '@/lib/images/dailyCap';
@@ -71,6 +80,45 @@ describe('imageBlobPath', () => {
     expect(IMAGE_PURPOSES).toEqual(['product', 'avatar', 'cover', 'link', 'preset', 'storefront']);
     expect(isImagePurpose('product')).toBe(true);
     for (const value of ['', 'Product', '../product', 'banner', null, 1]) expect(isImagePurpose(value)).toBe(false);
+  });
+});
+
+describe('一覧・削除の path (imageBlobPathFor・parseOwnedImagePathname)', () => {
+  const key = imageOwnerKey(ADDRESS, SECRET);
+  const otherKey = imageOwnerKey('0x2222222222222222222222222222222222222222', SECRET);
+  const id = newImageId();
+
+  it('拡張子から組んだ path は、形式から組んだ path と同じ', () => {
+    expect(imageBlobPathFor(key, 'avatar', id, 'png')).toBe(imageBlobPath(key, 'avatar', id, 'image/png'));
+    expect(imageBlobPathFor(key, 'product', id, 'jpg')).toBe(imageBlobPath(key, 'product', id, 'image/jpeg'));
+  });
+
+  it('id は newImageId の形 (base64url 22 文字) だけ', () => {
+    expect(isImageId(id)).toBe(true);
+    for (const bad of ['', 'a'.repeat(21), 'a'.repeat(23), `${'a'.repeat(21)}/`, `${'a'.repeat(21)}.`, '../../../../../../..', 42, null]) {
+      expect(isImageId(bad)).toBe(false);
+    }
+  });
+
+  it('本人の prefix と規定の形だけを分け、ほかは null', () => {
+    expect(parseOwnedImagePathname(key, imageBlobPathFor(key, 'cover', id, 'png'))).toEqual({ purpose: 'cover', id, ext: 'png' });
+    for (const purpose of IMAGE_PURPOSES) {
+      expect(parseOwnedImagePathname(key, imageBlobPathFor(key, purpose, id, 'jpg'))?.purpose).toBe(purpose);
+    }
+    for (const pathname of [
+      imageBlobPathFor(otherKey, 'product', id, 'jpg'),
+      `v1/${key}/product/${id}.gif`,
+      `v1/${key}/product/${id}`,
+      `v1/${key}/product/${id}.jpg.png`,
+      `v1/${key}/other/${id}.jpg`,
+      `v1/${key}/product/x/${id}.jpg`,
+      `v1/${key}/${id}.jpg`,
+      `v1/${key}x/product/${id}.jpg`,
+      `v2/${key}/product/${id}.jpg`,
+      `v1/${key}/product/short.jpg`,
+    ]) {
+      expect(parseOwnedImagePathname(key, pathname)).toBeNull();
+    }
   });
 });
 
@@ -140,6 +188,25 @@ describe('server の設定', () => {
     // IP の枠を数えられないと POST は 503 not_configured になるので、欄を出さない。
     vi.stubEnv('IP_HASH_SECRET', '');
     expect(imageUploadAvailableFor(ADDRESS)).toBe(false);
+  });
+
+  it('サインインの導線 (imageUploadSignInOffered) は段階が admin / all で、秘密・Blob・IP の枠の秘密がそろったときだけ', () => {
+    vi.stubEnv('IMAGE_OWNER_KEY_SECRET', SECRET);
+    vi.stubEnv('BLOB_STORE_ID', 'store_test');
+    vi.stubEnv('IP_HASH_SECRET', 'test-ip-hash-secret-0123456789abcdef');
+    vi.stubEnv('ADMIN_WALLETS', '');
+    for (const [mode, offered] of [['admin', true], ['all', true], ['off', false], [undefined, false]] as const) {
+      vi.stubEnv('IMAGE_UPLOAD_MODE', mode);
+      expect(imageUploadSignInOffered()).toBe(offered);
+    }
+    vi.stubEnv('IMAGE_UPLOAD_MODE', 'admin');
+    for (const key of ['IMAGE_OWNER_KEY_SECRET', 'BLOB_STORE_ID', 'IP_HASH_SECRET']) {
+      const saved = process.env[key];
+      vi.stubEnv(key, '');
+      expect(imageUploadSignInOffered()).toBe(false);
+      vi.stubEnv(key, saved);
+    }
+    expect(imageUploadSignInOffered()).toBe(true);
   });
 
   it('Retry-After は次の UTC 日までの秒数', () => {

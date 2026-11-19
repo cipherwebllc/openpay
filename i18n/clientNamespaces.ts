@@ -296,6 +296,15 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'Nav',
     'News',
   ],
+  'me/images': [
+    'ConnectButton',
+    'ImageField',
+    'ImageLibrary',
+    'LocaleSwitcher',
+    'Nav',
+    'News',
+    'SignInGate',
+  ],
   'news': [
     'ConnectButton',
     'LocaleSwitcher',

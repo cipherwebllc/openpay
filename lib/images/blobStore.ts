@@ -1,9 +1,10 @@
 import 'server-only';
 
-import { list, put } from '@vercel/blob';
+import { BlobNotFoundError, del, head, list, put } from '@vercel/blob';
 import type { ImageUploadMimeType } from '@/lib/images/purpose';
 
-// Vercel Blob (public store) の操作は、この 2 つだけ (presigned・@vercel/blob/client・callback は使わない)。
+// Vercel Blob (public store) の操作は list・put と、一覧・削除 (GET /api/images・POST /api/images/delete) の head・del だけ
+// (presigned・@vercel/blob/client・callback は使わない)。
 // 認証は SDK が OIDC (x-vercel-oidc-token / VERCEL_OIDC_TOKEN + BLOB_STORE_ID) で解決する。
 // 失敗は例外のまま呼び元へ返す (route が固定の code にしてログに出す: SDK の例外の文は path を含みうるので外に出さない)。
 
@@ -19,6 +20,10 @@ export const IMAGE_CACHE_MAX_AGE_SEC = 365 * 24 * 60 * 60;
 export const BLOB_LIST_DEADLINE_MS = 5_000;
 export const BLOB_PUT_DEADLINE_MS = 10_000;
 export const IMAGE_UPLOAD_DEADLINE_MS = 15_000;
+// 一覧・削除: head と del は各 5 秒。route の絶対の期限はアップロードと同じ形で 15 秒 (maxDuration 20 秒の 5 秒前)。
+export const BLOB_HEAD_DEADLINE_MS = 5_000;
+export const BLOB_DEL_DEADLINE_MS = 5_000;
+export const IMAGE_LIBRARY_DEADLINE_MS = 15_000;
 
 /** 締切を過ぎた (route は 503 storage_unavailable にする)。 */
 export class BlobDeadlineError extends Error {
@@ -26,6 +31,33 @@ export class BlobDeadlineError extends Error {
     super('blob_deadline');
     this.name = 'BlobDeadlineError';
   }
+}
+
+/**
+ * Blob の応答の形が決めた形でない (route は 503 storage_unavailable にする)。SDK は 200 の応答の中身を確かめずに返すので
+ * (url が無くても成功を返す)、一覧と削除はここで確かめる: 確かめずに進むと、url の無い head で「使っている所」が見つからずに
+ * 消してしまう・読めない日時で 500 になる。
+ */
+export class BlobResponseError extends Error {
+  constructor() {
+    super('blob_response');
+    this.name = 'BlobResponseError';
+  }
+}
+
+/** url が https で、その path が pathname と同じ (`/<pathname>`) か。 */
+function urlIsFor(url: unknown, pathname: string): url is string {
+  if (typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && parsed.pathname === `/${pathname}`;
+  } catch {
+    return false;
+  }
+}
+
+function validDate(value: unknown): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
 }
 
 /**
@@ -100,5 +132,72 @@ export async function putPublicImage(
       abortSignal: signal,
     });
     return result.url;
+  });
+}
+
+/** 一覧の 1 ページ (list の結果のうち route が使う所だけ)。 */
+export type ImageListPage = {
+  blobs: { pathname: string; url: string; size: number; uploadedAt: Date }[];
+  cursor: string | undefined;
+  hasMore: boolean;
+};
+
+/**
+ * prefix の下を 1 ページだけ読む (cursor は前のページの list が返した値をそのまま渡す)。締切は list の上限 (5 秒) と route の
+ * 絶対の期限の早い方。続きの有無・cursor の形の判定は呼び元 (route) がする。行の形 (path・その path の https の url・大きさ・
+ * 読める日時) と続きの有無が決めた形でなければ BlobResponseError (どの本人の行かの照合は route がする)。
+ */
+export async function listImagePage(
+  prefix: string,
+  cursor: string | undefined,
+  limit: number,
+  routeDeadline: AbortSignal,
+): Promise<ImageListPage> {
+  return withBlobDeadline(BLOB_LIST_DEADLINE_MS, routeDeadline, async (signal) => {
+    const page = await list({ prefix, limit, cursor, abortSignal: signal });
+    if (!Array.isArray(page.blobs) || typeof page.hasMore !== 'boolean') throw new BlobResponseError();
+    const blobs = page.blobs.map(({ pathname, url, size, uploadedAt }) => {
+      if (
+        typeof pathname !== 'string' ||
+        !urlIsFor(url, pathname) ||
+        typeof size !== 'number' ||
+        !Number.isFinite(size) ||
+        size < 0 ||
+        !validDate(uploadedAt)
+      ) {
+        throw new BlobResponseError();
+      }
+      return { pathname, url, size, uploadedAt };
+    });
+    return { blobs, cursor: typeof page.cursor === 'string' ? page.cursor : undefined, hasMore: page.hasMore };
+  });
+}
+
+/**
+ * path の画像の公開 URL。無ければ null (SDK の BlobNotFoundError = 送り直さない失敗)。ほかの失敗は例外。応答の url がその path の
+ * https の URL でなければ BlobResponseError (使っている所を照合できないまま消さない)。
+ */
+export async function headImage(pathname: string, routeDeadline: AbortSignal): Promise<{ url: string } | null> {
+  return withBlobDeadline(BLOB_HEAD_DEADLINE_MS, routeDeadline, async (signal) => {
+    let blob: Awaited<ReturnType<typeof head>>;
+    try {
+      blob = await head(pathname, { abortSignal: signal });
+    } catch (error) {
+      if (error instanceof BlobNotFoundError) return null;
+      throw error;
+    }
+    if (!urlIsFor(blob?.url, pathname)) throw new BlobResponseError();
+    return { url: blob.url };
+  });
+}
+
+/** path の画像を消す。無かった (BlobNotFoundError) ときも消えた扱いで返す。ほかの失敗は例外。 */
+export async function deleteImageBlob(pathname: string, routeDeadline: AbortSignal): Promise<void> {
+  await withBlobDeadline(BLOB_DEL_DEADLINE_MS, routeDeadline, async (signal) => {
+    try {
+      await del(pathname, { abortSignal: signal });
+    } catch (error) {
+      if (!(error instanceof BlobNotFoundError)) throw error;
+    }
   });
 }
