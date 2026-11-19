@@ -358,6 +358,36 @@ describe('imageUpload が true のとき', () => {
     expect(screen.queryByText(A.coverApplied)).not.toBeInTheDocument();
   });
 
+  it('imageUpload が false から true に戻った後に「この画像を表紙に使う」を押すと、その画像は表紙に入る (切り替えの番号に捨てられない)', async () => {
+    // jsdom の act は effect を押す前に流すので、useEffect と useLayoutEffect の差 (描画の後に走る effect が新しい送信の
+    // 番号を進める順) はここでは再現しない。このテストは切り替えの後の正しい操作が入ることを固定する。
+    const seller = { imageUpload: true, listingAssistant: true };
+    stubApi(seller);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithIntl(
+      <QueryClientProvider client={client}>
+        <CreatorStoreSellerPanel handle="alice" />
+      </QueryClientProvider>,
+    );
+    await openAssistantWithImage();
+
+    seller.imageUpload = false;
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['creator-store', 'seller'] });
+    });
+    await waitFor(() => expect(screen.queryByRole('button', { name: A.useAsCover })).not.toBeInTheDocument());
+    seller.imageUpload = true;
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['creator-store', 'seller'] });
+    });
+    fireEvent.click(await screen.findByRole('button', { name: A.useAsCover }));
+    await waitFor(() => expect(uploads).toHaveLength(1));
+    await answer(0, `${BLOB}/product/after-toggle.jpg`);
+
+    expect(await screen.findByText(A.coverApplied)).toBeInTheDocument();
+    expect(coverSrc()).toBe(`${BLOB}/product/after-toggle.jpg`);
+  });
+
   it('AI の送信中に表紙を「外す」と、遅れて届いた AI の画像は入らない', async () => {
     stubApi({ imageUpload: true, listingAssistant: true });
     renderPanel();

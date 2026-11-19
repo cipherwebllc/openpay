@@ -7,7 +7,7 @@
 // (ListingAssistantEntry・ListingAssistant) が持つ — 親の key の内側なので、アカウントを切り替えると一緒に消える。
 // ここが持つのは「画像をアップロード中か」と「表紙の操作の番号」だけ (中身を持たない・アップロード中は保存を止める)。
 
-import { Component, Fragment, useCallback, useEffect, useRef, useState, type FormEventHandler, type ReactNode } from 'react';
+import { Component, Fragment, useCallback, useLayoutEffect, useRef, useState, type FormEventHandler, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import dynamic, { type DynamicOptionsLoadingProps } from 'next/dynamic';
 import Link from 'next/link';
@@ -207,9 +207,10 @@ export function ProductEditorSection({
   const coverOperation = useRef(0);
   // imageUpload が切り替わったら (出品者の GET の取り直し) 表紙の操作を 1 つ進め、切り替わる前に始まった AI の表紙の
   // アップロードを入れない。false の枝の URL の欄は今のまま (番号を進めない) なので、そこでの手入力を後から届いた画像が
-  // 上書きしないように、ここで先に無効にする。
+  // 上書きしないように、ここで先に無効にする。layout effect にして描画の前に番号を進める (再び true になって出たボタンを
+  // 押した新しい送信が、後から走る effect に番号を進められて捨てられないように)。
   const imageUploadSeen = useRef(imageUpload);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (imageUploadSeen.current === imageUpload) return;
     imageUploadSeen.current = imageUpload;
     nextImageOperation(coverOperation);
