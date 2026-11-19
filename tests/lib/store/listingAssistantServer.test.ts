@@ -454,6 +454,8 @@ describe('Gemini の応答', () => {
     ['語結合子で区切った www', 'w\u2060ww.evil.example'],
     ['全角の URL', 'ｈｔｔｐｓ：／／ｅｖｉｌ．ｅｘａｍｐｌｅ／ａ'],
     ['大文字の scheme', 'HTTPS://EVIL.EXAMPLE/A'],
+    ['IPv6 のホスト', 'https://[2001:db8::1]/a'],
+    ['IPv6 のホストだけ', 'http://[::1]'],
   ])('6 欄すべてで、文字を正規化してから URL を落とす (%s)', (_label, url) => {
     const withUrl = (text: string) => `${text} ${url} を見てください`;
     const result = draftFromGeminiResponse(
