@@ -3382,6 +3382,34 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 - 本番 (Polygon) で MetaMask から移せた (送り先にちょうどの額・受取口に 2 JPYC・送り先への Transfer の from が forwarder)。
 - **UPBOND Wallet (WalletConnect) では署名がウォレットの中で失敗した** (2 回・ウォレットが JSON-RPC の `Internal error` を返し、画面は「移せませんでした」・サーバーには届かず送金なし)。11/06 の UPBOND の JPYC 支払い (同じ forwarder 宛ての receiveWithAuthorization) は通っていた。**マイナウォレットでも失敗した** (パスキー + Account Abstraction のウォレット)。
 - そのため /guide/wallet#store-wallet (UPBOND の欄) の「ガス代が無いときは…でも移せます」の 1 文とリンクを外した (user 承認・UPBOND からも移せるように読めるため・試した範囲だけを書く)。UPBOND で通ったら戻す。
+## §19 AI 出品アシスタント (運営者だけの試し) の点灯
+
+出品文の案を Google Gemini (`gemini-4-hydrogen`・無料枠) で作る `POST /api/store/seller/listing-assistant`。使えるのは
+`ADMIN_WALLETS` の運営者だけで、お金の動きには触れず、案も保存しない。env の説明は docs/ENV.md。
+
+### 19.1 前提
+- key は**課金なしの project を新しく作り**、そこで作る。課金つきの project の key だと有料枠になり、画面の注意文
+  (無料枠・送った内容と作られた文は Google のサービス改善に使われる) と食い違う。
+- key は Generative Language API だけに使えるよう絞る。key の値をチャット・ログ・PR に貼らない。
+- `ADMIN_WALLETS` に運営者本人の wallet だけが入っている (人を足さない)。`ENABLE_CREATOR_STORE` が ON。
+
+### 19.2 点灯
+1. Vercel の Production に `GEMINI_API_KEY` (Sensitive) と `ENABLE_STORE_LISTING_ASSISTANT=1` を入れて再 deploy する
+   (server の env は deploy し直すまで効かない)。
+2. 試す順: メモだけ → 画像だけ → メモと画像の両方。案の文章の質はここで判断する。
+3. 全体の上限は 1 日 20 回 (UTC 日・KV で数える)。KV の加算に失敗したときは通す (fail-open) ので、上限は保証ではない。
+
+### 19.3 失敗したとき
+- Vercel のログ (Sentry にも出る) の `store.listing_assistant.failed` の `code` と `upstreamStatus` を見る。本文は出ない。
+  - `upstreamStatus: 400` = Google が request の field を拒んだ (構造化出力の `responseJsonSchema`・`thinkingConfig` など)。直す PR を出す。
+  - `upstreamStatus: 403` = key か project の問題 (API の絞り込み・無効な key)。
+  - `code: quota_exceeded` = 無料枠を使い切った (Google の日次の枠は太平洋時間の 0 時に戻る)。
+  - `code: not_configured` = `GEMINI_API_KEY` が無い。
+
+### 19.4 戻し方
+- `ENABLE_STORE_LISTING_ASSISTANT` を空にして再 deploy する (route は 404・出品者の GET の `listingAssistant` は false)。
+  案は保存していないので片づけは無い。key は外さなくても使われない。
+
 ## サブドメイン運用ルール (2026-10-12)
 
 - open-pay.jp のサブドメインには、第三者が中身を書けるホスティング (docs・blog・status・フォーラムなど) を置かない。

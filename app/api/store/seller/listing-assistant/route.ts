@@ -34,14 +34,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const csrf = rejectCrossOriginWrite(req, { json: true });
   if (csrf) return csrf;
 
-  const body = await readJsonBodyCapped(req, LISTING_ASSISTANT_BODY_MAX_BYTES);
-  if (!body.ok) {
-    return storePrivateJson(
-      { ok: false, error: body.reason === 'too_large' ? 'payload_too_large' : 'invalid_json' },
-      body.reason === 'too_large' ? 413 : 400,
-    );
-  }
-
+  // 本文 (最大 1.5 MiB) は認証・運営者・日次の制限を通ってから読む (未認証の要求に読み取りと JSON.parse をさせない・兄弟の route と同じ順)。
   const auth = await requireStoreSeller(req, 'listing-assistant');
   if (!auth.ok) return auth.response;
   // ADMIN_WALLETS が空なら誰も通さない (isAdminWallet は fail-closed)。
@@ -56,6 +49,14 @@ export async function POST(req: Request): Promise<NextResponse> {
       { ok: false, error: 'rate_limited', retryAfterSec },
       429,
       { 'Retry-After': String(retryAfterSec) },
+    );
+  }
+
+  const body = await readJsonBodyCapped(req, LISTING_ASSISTANT_BODY_MAX_BYTES);
+  if (!body.ok) {
+    return storePrivateJson(
+      { ok: false, error: body.reason === 'too_large' ? 'payload_too_large' : 'invalid_json' },
+      body.reason === 'too_large' ? 413 : 400,
     );
   }
 
