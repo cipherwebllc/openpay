@@ -6,6 +6,9 @@
 // あるので、アカウントを切り替えると一緒に消える。フォームは「〜に入れる」を押した欄だけ updateProduct で変え、
 // 生成・再生成・失敗ではフォームを変えない。Google に送る欄は lib/store/listingAssistant の許可リスト
 // (listingAssistantFactsOf) が決める — この部品はフォームから欄を選ばない。
+// 画像のアップロード (出品者の GET の imageUpload) が使えるときだけ「この画像を表紙に使う」を出す。押したときだけ元の file を
+// 商品の大きさに描き直して POST /api/images/upload に送り、表紙 (imageUrl) に入れる (元に戻せる)。解析・案の採用だけでは
+// 画像を公開しない。
 
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useTranslations } from 'next-intl';
@@ -25,6 +28,8 @@ import {
   type ListingAssistantFactKey,
   type ListingAssistantRequest,
 } from '@/lib/store/listingAssistant';
+import { ImageUploadStatus } from '@/components/ImageField';
+import { useImageUpload } from '@/hooks/useImageUpload';
 import { LISTING_IMAGE_MAX_EDGE, prepareListingImage, type ListingImageError, type PreparedListingImage } from './listingAssistantImage';
 import { copyText } from './ProductShareButton';
 import { inputClass, type ProductForm } from './shared';
@@ -249,12 +254,28 @@ const buttonClass =
 type Props = {
   productForm: ProductForm;
   updateProduct: (patch: Partial<ProductForm>) => void;
+  /** 出品者の GET の imageUpload。true のときだけ「この画像を表紙に使う」を出す。 */
+  imageUpload?: boolean;
+  /** 表紙のアップロード中か (親はその間の保存を止める)。 */
+  onImageBusyChange?: (busy: boolean) => void;
 };
 
-export function ListingAssistant({ productForm, updateProduct }: Props) {
+export function ListingAssistant({ productForm, updateProduct, imageUpload = false, onImageBusyChange }: Props) {
   const t = useTranslations('CreatorStoreSeller.assistant');
   const [memo, setMemo] = useState('');
   const [image, setImage] = useState<PreparedListingImage | null>(null);
+  // 表紙に使うときは、AI に送る JPEG (白を敷いた・base64) ではなく、選んだ元の file から商品の大きさに描き直す (透過を保つ)。
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [coverApplied, setCoverApplied] = useState<{ before: string; after: string } | null>(null);
+  const cover = useImageUpload({
+    purpose: 'product',
+    onUploaded: (url) => {
+      // 届いたときの表紙を「元に戻す」の先にする。
+      setCoverApplied({ before: productForm.imageUrl, after: url });
+      updateProduct({ imageUrl: url });
+    },
+    onBusyChange: onImageBusyChange,
+  });
   const [imageError, setImageError] = useState<ListingImageError | null>(null);
   const [imagePreparing, setImagePreparing] = useState(false);
   const imageRequest = useRef(0);
@@ -287,6 +308,8 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
     event.target.value = '';
     if (!file) return;
     const requestId = ++imageRequest.current;
+    // 前の画像の表紙のアップロードはやめる (届いても表紙に入れない)。
+    cover.cancel();
     setImagePreparing(true);
     setImageError(null);
     const result = await prepareListingImage(file);
@@ -295,18 +318,29 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
     setImagePreparing(false);
     if (result.ok) {
       setImage(result.image);
+      setImageFile(file);
     } else {
       setImage(null);
+      setImageFile(null);
       setImageError(result.error);
     }
   };
 
   const removeImage = () => {
     imageRequest.current += 1;
+    cover.cancel();
     setImagePreparing(false);
     setImage(null);
+    setImageFile(null);
     setImageError(null);
   };
+
+  const undoCover = () => {
+    if (!coverApplied) return;
+    updateProduct({ imageUrl: coverApplied.before });
+    setCoverApplied(null);
+  };
+  const showCoverApplied = coverApplied !== null && productForm.imageUrl === coverApplied.after;
 
   const generate = async () => {
     if (inFlight.current || !canSend) return;
@@ -535,6 +569,36 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
                 {t('imageRemove')}
               </button>
             </div>
+          </div>
+        ) : null}
+        {imageUpload && image && imageFile ? (
+          <div className="mt-2 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void cover.upload(imageFile)}
+                disabled={cover.busy}
+                aria-describedby="creator-store-listing-assistant-cover-hint"
+                className={buttonClass}
+              >
+                {t('useAsCover')}
+              </button>
+              {showCoverApplied ? (
+                <>
+                  <span role="status" className="text-xs font-medium text-emerald-700">
+                    {t('coverApplied')}
+                  </span>
+                  <button type="button" onClick={undoCover} className={buttonClass}>
+                    <Undo2 className="h-4 w-4" aria-hidden />
+                    {t('undoCover')}
+                  </button>
+                </>
+              ) : null}
+            </div>
+            <p id="creator-store-listing-assistant-cover-hint" className="text-xs leading-relaxed text-slate-500">
+              {t('useAsCoverHint')}
+            </p>
+            <ImageUploadStatus busy={cover.busy} error={cover.error} onCancel={cover.cancel} />
           </div>
         ) : null}
       </div>

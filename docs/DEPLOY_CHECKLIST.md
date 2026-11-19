@@ -3410,6 +3410,52 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 - `ENABLE_STORE_LISTING_ASSISTANT` を空にして再 deploy する (route は 404・出品者の GET の `listingAssistant` は false)。
   案は保存していないので片づけは無い。key は外さなくても使われない。
 
+## §20 画像のアップロード (運営者だけの試し)
+
+`POST /api/images/upload` が画像 (JPEG / PNG・1 MiB まで) を受けて Vercel Blob の **public** store に置き、その URL を返す。
+PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品アシスタントの「この画像を表紙に使う」。保存の形は今と同じ URL の文字列で、
+お金の動き (relay・settle・fee・order) と購入の snapshot には触れない。env の説明は docs/ENV.md。
+
+### 20.1 前提
+- Vercel の Storage で Blob の store を **public** で作る (OpenPay 専用)。Preview でも試すなら store を分ける。
+- store を project に **OIDC** でつなぐ (つなぐ Environment を選ぶ)。`BLOB_STORE_ID` が入る。`BLOB_READ_WRITE_TOKEN` は入れない
+  (入っていたら消す: OIDC が取れないときに SDK がその長く生きる token を使う)。
+- `IMAGE_OWNER_KEY_SECRET` (Sensitive・32 byte 以上) を作って入れ、控えを安全な所に残す。**回さない** (回すと同じウォレットの画像が
+  別の path になり、枚数の数え方と PR 3 の一覧・削除が前の画像に届かなくなる)。値をチャット・ログ・PR に貼らない。
+- `ADMIN_WALLETS` に運営者本人の wallet だけが入っている。KV (Upstash) が動いている (全体の 1 日の枠を数える。数えられないと
+  アップロードは止まる = fail-closed。URL の欄は使えるので保存と決済には波及しない)。
+- Vercel の Spend Management で通知の金額を決めて設定する (点灯の条件)。project 全体を止める設定はしない (決済まで止まる)。
+
+### 20.2 点灯 (admin)
+1. Production に `IMAGE_UPLOAD_MODE=admin` を入れて再 deploy する (server の env は deploy し直すまで効かない)。
+2. 運営者の wallet で出品フォームに「画像を選ぶ」が出て、ほかの wallet では今の URL の欄のままなことを見る
+   (出品者の GET の `imageUpload`)。
+3. 試す順: 表紙 → 追加画像 (4 枚まで・外す・「URL で指定する ›」) → AI 出品アシスタントの「この画像を表紙に使う」(押す前は
+   アップロードしない)。それぞれ保存し、Store の一覧・商品ページ・OG に出ることを見る。
+4. 写真は JPEG、透過の PNG (ロゴ) は透けたままの PNG になることを見る。
+
+### 20.3 見張る
+- Vercel の Usage の Blob: 保存の量・Advanced Operations (1 回のアップロードで put 1 + list 1)・Data Transfer。
+- Upstash: 1 回のアップロードで 9 コマンド前後 (セッションの読み取り・IP の分・ウォレットと IP の日・全体の日の INCR と EXPIRE NX)。
+- ログ (Sentry にも出る) の `images.upload.failed` の `code`: `list_failed` (Blob の list)・`global_count_unavailable` (KV)・
+  `put_failed` (Blob の put)。アドレス・path・URL は出ない。
+- 上限: 1 ウォレット 200 枚 (Blob の list で数える)・1 日 (UTC) にウォレット 30 回・IP 60 回・全体 200 回。
+
+### 20.4 戻し方
+- `IMAGE_UPLOAD_MODE` を空 (または `off`) にして再 deploy する (route は 404・出品者の GET の `imageUpload` は false で、フォームは
+  今の URL の欄に戻る)。置いた画像と、それを使っている商品の欄はそのまま残る (消さない)。
+
+### 20.5 通報のとき
+- 画像の URL の path (`v1/<ownerKey>/…`) を Vercel の Storage の Blob の画面で探して消す。表示する側は読めない画像を隠すが、
+  商品の欄には URL が残るので、その商品の表紙・追加画像の欄も外す (既存の takedown の手順と合わせる)。
+- ライセンス NFT の metadata (`/api/license/metadata/[id]`) は商品の `imageUrl` を返し続けるので、欄を外すまで消した画像の URL を返す。
+- ブラウザなどのキャッシュには残りうる (置くときの cacheControlMaxAge は 1 年)。
+
+### 20.6 `all` にする前
+- アップロードした画像の一覧と削除 (PR 3) がそろってから (上限 200 枚に届いた人が自分で消せないため)。
+- 規約・プライバシーポリシー・画像 URL のガイド・llms.txt の「画像を預からない」の直し (公開文言・運営者の承認) の後。
+- 外した・替えた画像は、本人が消すまで公開の URL で残る (自動では消さない・運営者の裁定 2026-11-19)。
+
 ## サブドメイン運用ルール (2026-10-12)
 
 - open-pay.jp のサブドメインには、第三者が中身を書けるホスティング (docs・blog・status・フォーラムなど) を置かない。

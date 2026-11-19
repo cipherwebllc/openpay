@@ -114,6 +114,9 @@ const CASES: Case[] = [
     load: () => import('@/app/api/freee/sync/route') },
   { file: 'handle/route.ts', method: 'POST', json: true,
     load: () => import('@/app/api/handle/route') },
+  // 画像のアップロード (server-only の段階は下の beforeAll で admin)。本文は画像の byte 列 (JSON でない)。
+  { file: 'images/upload/route.ts', method: 'POST', json: false,
+    load: () => import('@/app/api/images/upload/route') },
   { file: 'handle/[handle]/route.ts', method: 'DELETE', json: false, params: { handle: 'shop' },
     load: () => import('@/app/api/handle/[handle]/route') },
   { file: 'order/calls/route.ts', method: 'POST', json: true,
@@ -176,6 +179,7 @@ const JSON_TYPE = { 'content-type': 'application/json' };
 beforeAll(() => {
   vi.stubEnv('ENABLE_AGENT_PURCHASES', '1');
   vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', '1');
+  vi.stubEnv('IMAGE_UPLOAD_MODE', 'admin');
 });
 afterAll(() => {
   vi.unstubAllEnvs();

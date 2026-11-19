@@ -322,7 +322,7 @@ describe('出品者の GET: listingAssistant', () => {
   it('フラグ ON かつ運営者なら true', async () => {
     const response = await getSeller(new Request('https://open-pay.jp/api/store/seller'));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, seller: null, listingAssistant: true });
+    expect(await response.json()).toEqual({ ok: true, seller: null, listingAssistant: true, imageUpload: false });
   });
 
   it.each([
@@ -332,6 +332,6 @@ describe('出品者の GET: listingAssistant', () => {
   ])('%s なら false', async (_label, setup) => {
     setup();
     const response = await getSeller(new Request('https://open-pay.jp/api/store/seller'));
-    expect(await response.json()).toEqual({ ok: true, seller: null, listingAssistant: false });
+    expect(await response.json()).toEqual({ ok: true, seller: null, listingAssistant: false, imageUpload: false });
   });
 });

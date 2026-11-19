@@ -60,6 +60,15 @@ async function consumeBodyCapped(
   return { ok: true, bytes };
 }
 
+// readBodyCapped と同じ読み方で、上限超え (too_large) と読めない body (unreadable・body が無い) を分けて返す
+// (画像のアップロードは 413 と 400 を分ける)。
+export function readBytesBodyCapped(
+  source: BodySource,
+  cap: number,
+): Promise<BodyReadResult> {
+  return consumeBodyCapped(source, cap);
+}
+
 // body を逐次読みし、Content-Length の欠落・詐称時も累積 cap でメモリ確保を止める。
 export async function readBodyCapped(
   source: BodySource,

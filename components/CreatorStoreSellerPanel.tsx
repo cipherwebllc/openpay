@@ -510,6 +510,7 @@ function SignedInSellerPanel({
         saveProduct={saveProduct}
         loadProduct={loadProduct}
         listingAssistant={sellerQuery.data?.listingAssistant === true}
+        imageUpload={sellerQuery.data?.imageUpload === true}
         formSession={formSession}
         onSubmit={(event) => {
           event.preventDefault();

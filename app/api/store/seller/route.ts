@@ -3,6 +3,7 @@ import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
 import { isAdminWallet } from '@/lib/adminAuth';
 import { listingAssistantEnabled } from '@/lib/store/listingAssistantConfig';
+import { imageUploadAvailableFor } from '@/lib/images/config';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import {
   getSellerDisclosure,
@@ -40,7 +41,10 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
   // 画面が AI 出品アシスタントの入口を出すか (フラグ ON かつ運営者)。POST の route も同じ順で自分で判定する。
   const listingAssistant = listingAssistantEnabled() && isAdminWallet(auth.address);
-  return storePrivateJson({ ok: true, seller, listingAssistant });
+  // 画面が画像の欄 (アップロード) を出すか (段階 admin なら運営者だけ・all なら全員・秘密か Blob の設定が無ければ false)。
+  // false のとき画面は今の URL の欄のまま。POST /api/images/upload も同じ順で自分で判定する。
+  const imageUpload = imageUploadAvailableFor(auth.address);
+  return storePrivateJson({ ok: true, seller, listingAssistant, imageUpload });
 }
 
 export async function PUT(req: Request): Promise<NextResponse> {

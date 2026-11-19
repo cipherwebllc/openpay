@@ -1046,6 +1046,25 @@ describe('商品詳細メタ: レビュー指摘の固定', () => {
     expect(b).toEqual(a);
     expect(Object.keys(b).sort()).toEqual(Object.keys(a).sort());
   });
+
+  it('アップロードした画像 (Vercel Blob の URL) に替えても・外しても、購入 snapshot は同じ (画像は表示専用)', async () => {
+    const { parseHostedInput, hostedPurchaseMetadata } = await mod();
+    const blob = 'https://teststore.public.blob.vercel-storage.com/v1/AAAAAAAAAAAAAAAAAAAAAA/product';
+    const variants = [
+      {},
+      { imageUrl: 'https://example.com/a.png', galleryUrls: ['https://example.com/b.png'] },
+      { imageUrl: `${blob}/BBBBBBBBBBBBBBBBBBBBBB.jpg`, galleryUrls: [1, 2, 3, 4].map((n) => `${blob}/${'C'.repeat(21)}${n}.png`) },
+    ];
+    const snapshots = variants.map((over) => {
+      const parsed = parseHostedInput(baseInput(over));
+      if (!parsed.ok) throw new Error('setup');
+      expect(parsed.product.imageUrl).toBe((over as { imageUrl?: string }).imageUrl);
+      return hostedPurchaseMetadata({ ...parsed.product, id: 'p1', createdAt: 1 });
+    });
+    expect(snapshots[1]).toEqual(snapshots[0]);
+    expect(snapshots[2]).toEqual(snapshots[0]);
+    expect(JSON.stringify(snapshots[2])).not.toContain('blob.vercel-storage.com');
+  });
 });
 
 describe('商品詳細メタの保存と寛容読込', () => {

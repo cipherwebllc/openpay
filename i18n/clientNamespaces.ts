@@ -99,6 +99,7 @@ export const ROUTE_CLIENT_NAMESPACES = {
     'HandleProfile',
     'HandleProfileBuilder',
     'History',
+    'ImageField',
     'InfoTooltip',
     'LocaleSwitcher',
     'MenuOptions',
