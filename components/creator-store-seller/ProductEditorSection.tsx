@@ -6,9 +6,9 @@
 // ここには state を持たせない。AI 出品アシスタントの開閉と、その画像・メモ・案は、この部品の子
 // (ListingAssistantEntry・ListingAssistant) が持つ — 親の key の内側なので、アカウントを切り替えると一緒に消える。
 
-import { useState, type FormEventHandler } from 'react';
+import { Component, useMemo, useState, type FormEventHandler, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
-import dynamic from 'next/dynamic';
+import dynamic, { type DynamicOptionsLoadingProps } from 'next/dynamic';
 import Link from 'next/link';
 import { Sparkles } from 'lucide-react';
 import { env } from '@/lib/env';
@@ -19,16 +19,39 @@ import { CreatorStoreLicenseFields } from '@/components/CreatorStoreLicenseField
 import { errorCode, errorDetailKey, errorMessageKey } from './request';
 import { inputClass, type EditingProductState, type MutationView, type ProductForm } from './shared';
 
-function ListingAssistantLoading() {
+function ListingAssistantLoading({ error }: DynamicOptionsLoadingProps) {
   const t = useTranslations('CreatorStoreSeller.assistant');
+  // 読み込みの失敗を loading に渡す実装 (pages 向けの next/dynamic) でも、下の境界で受け止める。
+  if (error) throw error;
   return <p role="status" className="text-sm text-slate-500">{t('loading')}</p>;
 }
 
 // 押したときだけ読み込む (押す前は chunk を読まない)。ブラウザの画像の描き直しと出品者の認証の後だけ使うので SSR しない。
-const ListingAssistant = dynamic(
-  () => import('./ListingAssistant').then((module) => module.ListingAssistant),
-  { ssr: false, loading: ListingAssistantLoading },
-);
+// app router の next/dynamic は React.lazy なので、読み込みに失敗すると失敗を覚えたままになる。もう一度読むときは新しく作る
+// (webpack は失敗した chunk を次の import() で読み直す)。
+const createListingAssistant = () =>
+  dynamic(() => import('./ListingAssistant').then((module) => module.ListingAssistant), {
+    ssr: false,
+    loading: ListingAssistantLoading,
+  });
+const InitialListingAssistant = createListingAssistant();
+
+/**
+ * アシスタントの読み込み (通信断の ChunkLoadError など) や描画の例外を、この中だけで受け止める境界。
+ * 受け止めないと例外が親へ伝わり、未保存の出品フォーム (本文を含む) ごと画面が消える — その波及を断つための防御。
+ * 例外そのものは React が console に出す (ここでは案内を出すだけ)。
+ */
+class ListingAssistantBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
 
 const LISTING_ASSISTANT_PANEL_ID = 'creator-store-listing-assistant';
 
@@ -43,6 +66,34 @@ function ListingAssistantEntry({
   const t = useTranslations('CreatorStoreSeller.assistant');
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // 読み込みに失敗したら、もう一度読む・閉じるたびに増やす (境界と本体の読み込みを新しくする)。
+  const [attempt, setAttempt] = useState(0);
+  const ListingAssistant = useMemo(() => (attempt === 0 ? InitialListingAssistant : createListingAssistant()), [attempt]);
+  const fallback = (
+    <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+      <p>{t('loadFailed')}</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setAttempt((current) => current + 1)}
+          className="inline-flex min-h-11 items-center rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+        >
+          {t('loadRetry')}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setLoaded(false);
+            setAttempt((current) => current + 1);
+          }}
+          className="inline-flex min-h-11 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400"
+        >
+          {t('loadClose')}
+        </button>
+      </div>
+    </div>
+  );
   return (
     <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 sm:p-4">
       <button
@@ -61,7 +112,9 @@ function ListingAssistantEntry({
       <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('openHint')}</p>
       {loaded ? (
         <div id={LISTING_ASSISTANT_PANEL_ID} hidden={!open} className="mt-4">
-          <ListingAssistant productForm={productForm} updateProduct={updateProduct} />
+          <ListingAssistantBoundary key={attempt} fallback={fallback}>
+            <ListingAssistant productForm={productForm} updateProduct={updateProduct} />
+          </ListingAssistantBoundary>
         </div>
       ) : null}
     </div>
@@ -95,12 +148,17 @@ type Props = {
   loadProduct: Pick<MutationView<unknown>, 'isError' | 'error' | 'submittedAt'>;
   /** 出品者の GET の listingAssistant (server のフラグ ON かつ運営者)。true のときだけ AI 出品アシスタントの入口を出す。 */
   listingAssistant?: boolean;
+  /**
+   * フォームを別の商品・新規に入れ替えるたびに変わる値。アシスタントの key にして、前の商品の案・画像・メモ・「元に戻す」の
+   * 履歴を捨てる (A に入れた案の「元に戻す」が、同じ値を持つ B で効かないように)。
+   */
+  formSession?: number;
 };
 
 export function ProductEditorSection({
   productForm, editingId, editingProductState, isLicense, licenseReadOnly, deliveryFormat,
   handle, locale, sellerComplete, canChangeUsdc, atLimit, licenseValidationError,
-  productSaved, updateProduct, cancelEdit, onSubmit, saveProduct, loadProduct, listingAssistant = false,
+  productSaved, updateProduct, cancelEdit, onSubmit, saveProduct, loadProduct, listingAssistant = false, formSession = 0,
 }: Props) {
   const t = useTranslations('CreatorStoreSeller');
   const tCatalog = useTranslations('StoreCatalog');
@@ -117,7 +175,9 @@ export function ProductEditorSection({
         {editingId ? t('editProductHeading') : t('newProductHeading')}
       </h3>
       {/* フォームの外に置く (案の欄で Enter を押しても商品の保存を送らない)。 */}
-      {listingAssistant ? <ListingAssistantEntry productForm={productForm} updateProduct={updateProduct} /> : null}
+      {listingAssistant ? (
+        <ListingAssistantEntry key={formSession} productForm={productForm} updateProduct={updateProduct} />
+      ) : null}
 
       <form
         className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2"

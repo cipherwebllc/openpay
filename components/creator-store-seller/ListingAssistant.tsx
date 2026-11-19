@@ -186,6 +186,15 @@ const lineOf = (value: string) => value.replace(/[\r\n]+/g, ' ').trim();
 // タグはフォームと同じく 、と , で区切る (案の欄は textarea なので改行も区切りにする)。
 const splitTags = (value: string) => value.split(/[,、\r\n]/).map((tag) => tag.trim()).filter(Boolean);
 
+// 「案を直したか」の比べに使う形。入れる値 (lineOf・タグは parseHostedTags で整えた並び) よりさらに寄せる: NFKC・見えない文字
+// (保存の sanitizeLine が落とす制御・書式に加え Default_Ignorable)・空白の並びを 1 つに。見本に空白や見えない文字を足しただけ・
+// タグの区切りや重なりを変えただけでは、保存される値は見本と変わらないので「直した」にしない (見本のまま入れない)。
+const INVISIBLE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Default_Ignorable_Code_Point}]/gu;
+const comparableLine = (value: string) =>
+  value.normalize('NFKC').replace(INVISIBLE_RE, '').replace(/\s+/gu, ' ').trim();
+const comparableTags = (value: string) =>
+  [...new Set(splitTags(value).map(comparableLine).filter(Boolean))].join(',');
+
 function lineIssue(value: string, max: number): FitIssue | null {
   const line = lineOf(value);
   if (!line) return { kind: 'empty' };
@@ -253,7 +262,10 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
 
   const facts = listingAssistantFactsOf(productForm);
   const sentKeys = LISTING_ASSISTANT_FACT_KEYS.filter((key) => facts[key].trim() !== '');
-  const canSend = (memo.trim() !== '' || image !== null) && !imagePreparing;
+  // メモは server と同じく code point で数える (UTF-16 の maxLength だと絵文字は 250 字で止まる)。
+  const memoLength = [...memo].length;
+  const memoOver = memoLength > LISTING_ASSISTANT_MEMO_MAX;
+  const canSend = (memo.trim() !== '' || image !== null) && !imagePreparing && !memoOver;
 
   const onImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -316,8 +328,9 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
   const issueOf = (current: ListingAssistantDraft, field: TextField): FitIssue | null => {
     const value = valueOf(current, field);
     const issue = field === 'tags' ? tagsIssue(value) : lineIssue(value, FIELD_MAX[field]);
-    // 欄で直した文 (案と違う文) は画面で数える。
-    if (value !== draftValueOf(current, field)) return issue;
+    // 欄で直した文 (使う形にしても案と違う文) は画面で数える。
+    const comparable = field === 'tags' ? comparableTags : comparableLine;
+    if (comparable(value) !== comparable(draftValueOf(current, field))) return issue;
     // 案のままの欄 (直して元に戻した欄も) は server の判定 (保存と同じ sanitizeLine・parseHostedTags) に従う。
     if (current[field].fits) return null;
     if (issue) return issue;
@@ -346,6 +359,8 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
     const tags = field === 'tags' ? parseHostedTags(splitTags(raw)) : null;
     const after = tags ? (tags.ok ? tags.tags ?? [] : []).join(', ') : lineOf(raw);
     const before = productForm[field];
+    // もう入っている値を入れ直すだけなら何もしない (「元に戻す」の前の値を案そのもので上書きしない)。
+    if (before === after) return;
     updateProduct(patchOf(field, after));
     setApplied((entries) => ({ ...entries, [field]: { before, after } }));
   };
@@ -516,7 +531,8 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
         <textarea
           id="creator-store-listing-assistant-memo"
           rows={3}
-          maxLength={LISTING_ASSISTANT_MEMO_MAX}
+          // 入力の上限は UTF-16 で数えるので、500 code point が必ず入る 2 倍にする (超えた分は下の文で止める)。
+          maxLength={LISTING_ASSISTANT_MEMO_MAX * 2}
           value={memo}
           onChange={(event) => setMemo(event.target.value)}
           aria-describedby="creator-store-listing-assistant-memo-hint creator-store-listing-assistant-memo-remaining"
@@ -525,9 +541,15 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
         <p id="creator-store-listing-assistant-memo-hint" className="mt-1 text-xs text-slate-500">
           {t('memoHint')}
         </p>
-        <p id="creator-store-listing-assistant-memo-remaining" className="mt-1 text-xs text-slate-500">
-          {t('memoRemaining', { count: LISTING_ASSISTANT_MEMO_MAX - memo.length })}
-        </p>
+        {memoOver ? (
+          <p id="creator-store-listing-assistant-memo-remaining" className="mt-1 text-xs text-red-700">
+            {t('memoOver', { max: LISTING_ASSISTANT_MEMO_MAX, count: memoLength })}
+          </p>
+        ) : (
+          <p id="creator-store-listing-assistant-memo-remaining" className="mt-1 text-xs text-slate-500">
+            {t('memoRemaining', { count: LISTING_ASSISTANT_MEMO_MAX - memoLength })}
+          </p>
+        )}
       </div>
 
       <div className="rounded-lg bg-white p-3 text-xs leading-relaxed text-slate-600 ring-1 ring-slate-200">
@@ -553,7 +575,7 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
           <p role="status" className="text-sm text-slate-600">
             {t('generating')}
           </p>
-        ) : !canSend && !imagePreparing ? (
+        ) : !canSend && !imagePreparing && !memoOver ? (
           <p className="text-xs text-slate-500">{t('needInput')}</p>
         ) : null}
       </div>

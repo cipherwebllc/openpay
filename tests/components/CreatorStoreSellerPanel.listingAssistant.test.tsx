@@ -204,3 +204,64 @@ describe('出品フォームの AI 出品アシスタントの入口', () => {
     expect(screen.getByLabelText('商品名')).toHaveValue('木目調のスタンドライト');
   });
 });
+
+describe('編集の対象を替えたら、案と「元に戻す」の履歴を捨てる', () => {
+  const ID_A = `h_${'a'.repeat(32)}`;
+  const ID_B = `h_${'b'.repeat(32)}`;
+  // B の説明は、A に入れる案の説明と同じ (A の「元に戻す」の履歴が B で効いてしまう形)。
+  const productA = { ...markedProduct(), id: ID_A, title: '商品 A', desc: 'A の前の説明' };
+  const productB = { ...markedProduct(), id: ID_B, title: '商品 B', desc: COO_WORLD_DRAFT.desc };
+
+  function stubTwoProducts() {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/store/seller') return jsonResponse({ ok: true, seller: null, listingAssistant: true });
+      if (url === '/api/store/products') return jsonResponse({ ok: true, products: [productA, productB], max: 24 });
+      if (url === `/api/store/products/${ID_A}`) return jsonResponse({ ok: true, product: productA, content: { kind: 'text', value: 'A の本文' } });
+      if (url === `/api/store/products/${ID_B}`) return jsonResponse({ ok: true, product: productB, content: { kind: 'text', value: 'B の本文' } });
+      if (url === '/api/store/seller/listing-assistant') return jsonResponse(draftBody());
+      return jsonResponse({ ok: false, error: 'unexpected' }, 500);
+    }));
+  }
+
+  async function applyDescToA() {
+    const [editA] = await screen.findAllByRole('button', { name: '編集' });
+    fireEvent.click(editA);
+    await waitFor(() => expect(screen.getByLabelText('商品名')).toHaveValue('商品 A'));
+    fireEvent.click(screen.getByRole('button', { name: A.open }));
+    fireEvent.change(await screen.findByRole('textbox', { name: 'メモ (500 字まで)' }), { target: { value: 'メモ' } });
+    fireEvent.click(screen.getByRole('button', { name: A.generate }));
+    await screen.findByRole('heading', { name: A.resultHeading });
+    fireEvent.click(screen.getByRole('button', { name: A.applyDesc }));
+    expect(screen.getByLabelText('説明 (任意)')).toHaveValue(COO_WORLD_DRAFT.desc);
+    expect(screen.getByRole('button', { name: A.undoDesc })).toBeInTheDocument();
+  }
+
+  it('商品 A に案を入れてから商品 B の編集に替えると、B に A の「元に戻す」を出さない', async () => {
+    stubTwoProducts();
+    renderPanel();
+    await applyDescToA();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '編集' })[1]);
+    await waitFor(() => expect(screen.getByLabelText('商品名')).toHaveValue('商品 B'));
+    expect(screen.getByLabelText('説明 (任意)')).toHaveValue(COO_WORLD_DRAFT.desc);
+    expect(screen.queryByRole('button', { name: A.undoDesc })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: A.resultHeading })).not.toBeInTheDocument();
+    // 開き直しても前の商品の案とメモは残っていない。
+    const open = screen.getByRole('button', { name: A.open });
+    if (open.getAttribute('aria-expanded') !== 'true') fireEvent.click(open);
+    expect(await screen.findByRole('button', { name: A.generate })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'メモ (500 字まで)' })).toHaveValue('');
+    expect(screen.queryByRole('button', { name: A.undoDesc })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('説明 (任意)')).toHaveValue(COO_WORLD_DRAFT.desc);
+  });
+
+  it('編集をやめて新規のフォームに戻したときも捨てる', async () => {
+    stubTwoProducts();
+    renderPanel();
+    await applyDescToA();
+    fireEvent.click(screen.getByRole('button', { name: '編集をやめる' }));
+    await screen.findByRole('heading', { name: '新しい商品' });
+    expect(screen.queryByRole('heading', { name: A.resultHeading })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: A.undoDesc })).not.toBeInTheDocument();
+  });
+});

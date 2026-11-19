@@ -150,9 +150,24 @@ describe('ListingAssistant: 送る前', () => {
 
   it('メモは 500 字まで (残りの字数を出す)', () => {
     renderAssistant();
-    expect(memoBox()).toHaveAttribute('maxLength', '500');
     fireEvent.change(memoBox(), { target: { value: 'あいう' } });
     expect(screen.getByText('残り 497 字')).toBeInTheDocument();
+  });
+
+  it('メモの字数は server と同じく code point で数える (絵文字 500 字は送れる・501 字は止める)', async () => {
+    renderAssistant();
+    fireEvent.change(memoBox(), { target: { value: '🛋'.repeat(500) } });
+    expect(screen.getByText('残り 0 字')).toBeInTheDocument();
+    expect(generateButton()).toBeEnabled();
+    fireEvent.change(memoBox(), { target: { value: '🛋'.repeat(501) } });
+    expect(screen.getByText('メモは 500 字までです (いま 501 字)。短くすると案を作れます。')).toBeInTheDocument();
+    expect(generateButton()).toBeDisabled();
+    fireEvent.click(generateButton());
+    expect(fetchMock()).not.toHaveBeenCalled();
+    fireEvent.change(memoBox(), { target: { value: '🛋'.repeat(500) } });
+    fireEvent.click(generateButton());
+    await screen.findByRole('heading', { name: A.resultHeading });
+    expect(sentBodies()[0].memo).toBe('🛋'.repeat(500));
   });
 });
 
@@ -267,6 +282,16 @@ describe('ListingAssistant: 案の反映', () => {
     });
   });
 
+  it('同じ案を 2 回入れても「元に戻す」の前の値は案で上書きしない', async () => {
+    renderAssistant();
+    await generateWithMemo();
+    fireEvent.click(screen.getByRole('button', { name: A.applyTitle }));
+    fireEvent.click(screen.getByRole('button', { name: A.applyTitle }));
+    expect(updates).toEqual([{ title: COO_WORLD_DRAFT.title }]);
+    fireEvent.click(screen.getByRole('button', { name: A.undoTitle }));
+    expect(latestForm.title).toBe('木目調のスタンドライト');
+  });
+
   it('入れた後は「元に戻す」で前の値に戻せる・手で直した後は戻すボタンを出さない', async () => {
     renderAssistant();
     await generateWithMemo();
@@ -364,6 +389,41 @@ describe('ListingAssistant: 案の反映', () => {
       expect(screen.getByRole('button', { name })).toBeDisabled();
     }
     expect(within(screen.getByRole('region', { name: A.checksHeading })).getAllByRole('listitem')).toHaveLength(5);
+  });
+
+  it('見本に空白・改行・見えない文字・区切りの違い・重なりを足しただけでは「直した」にしない (使う形で比べる)', async () => {
+    const sample = `${'あ'.repeat(59)}い`;
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse(draftOf({
+      title: { value: sample, fits: false },
+      x: { value: 'う'.repeat(120), fits: false },
+      tags: { value: ['a', 'b', 'c', 'd', 'e'], fits: false },
+    }))));
+    renderAssistant();
+    await generateWithMemo();
+    const titleBox = screen.getByRole('textbox', { name: A.fieldTitle });
+    const applyTitle = screen.getByRole('button', { name: A.applyTitle });
+    for (const value of [`${sample} `, ` ${sample}`, `${sample}\n`, `${sample}\u200b`, `${sample.slice(0, 30)}\u200b${sample.slice(30)}`, `${sample.slice(0, 30)}\n${sample.slice(30)}`]) {
+      fireEvent.change(titleBox, { target: { value } });
+      expect(applyTitle, JSON.stringify(value)).toBeDisabled();
+      fireEvent.click(applyTitle);
+    }
+    const xBox = screen.getByRole('textbox', { name: A.fieldX });
+    for (const value of [`${'う'.repeat(120)} `, `${'う'.repeat(120)}\n`]) {
+      fireEvent.change(xBox, { target: { value } });
+      expect(screen.queryByRole('link', { name: A.openX }), JSON.stringify(value)).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: A.openX })).toBeDisabled();
+    }
+    const tagsBox = screen.getByRole('textbox', { name: A.fieldTags });
+    const applyTags = screen.getByRole('button', { name: A.applyTags });
+    for (const value of ['a,b,c,d,e', 'a、b、c、d、e', 'a, b, c, d, e, a', ' a , b , c , d , e ', 'a\nb\nc\nd\ne']) {
+      fireEvent.change(tagsBox, { target: { value } });
+      expect(applyTags, JSON.stringify(value)).toBeDisabled();
+      fireEvent.click(applyTags);
+    }
+    expect(updates).toEqual([]);
+    // 中身を変えれば入れられる。
+    fireEvent.change(tagsBox, { target: { value: 'a, b, c, d' } });
+    expect(applyTags).toBeEnabled();
   });
 
   it('上限を超えた値のまま fits:false が来ても入れない (長さの理由を出す)', async () => {
