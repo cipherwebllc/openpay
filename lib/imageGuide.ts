@@ -27,12 +27,12 @@ export type ImageGuideContent = {
 const JA: ImageGuideContent = {
   metaTitle: '画像 URL の用意のしかた — OpenPayで画像を設定する | OpenPay',
   metaDescription:
-    'OpenPay の画像の欄は、「画像を選ぶ」でアップロードするか、公開されている画像の URL (https://〜) を貼って設定します。URL で設定する場合の、Imgur などへのアップロードから URL の確認方法、つまずきやすいポイントまでを 1 ページで案内します。',
+    'OpenPay の画像の欄は、サインインして「画像を選ぶ」でアップロードするか、公開されている画像の URL (https://〜) を貼って設定します。URL で設定する場合の、Imgur などへのアップロードから URL の確認方法、つまずきやすいポイントまでを 1 ページで案内します。',
   backHome: '← OpenPay トップへ',
 
   heroTitle: 'URL で画像を設定する方法',
   heroLead: [
-    '画像は、各画像の欄の「画像を選ぶ」からアップロードできます。このページは、URL を貼って設定する場合 (自分のサイトの画像を使いたいとき・欄の「URL で指定する」) の案内です。',
+    'サインインすると、各画像の欄の「画像を選ぶ」(ストアの追加画像は「画像を追加」) から画像をアップロードできます。このページは、URL を貼って設定する場合 (サインインしないとき・自分のサイトの画像を使いたいとき・欄の「URL で指定する」) の案内です。',
   ],
 
   sections: [
@@ -100,11 +100,11 @@ const JA: ImageGuideContent = {
     },
     {
       title: 'OpenPay にアップロードした画像について',
-      body: ['各画像の欄の「画像を選ぶ」でアップロードした画像は、次のように扱います。'],
+      body: ['サインインして画像の欄からアップロードした画像は、次のように扱います。'],
       bullets: [
-        '長辺を縮め、撮影場所などの情報を消してから OpenPay の保存先に保存し、URL を知っている人なら誰でも見られる状態で公開します',
+        '送る前に端末の中で描き直し (大きい画像は縮めます)、撮影場所などの情報を消してから OpenPay の保存先に保存し、URL を知っている人なら誰でも見られる状態で公開します',
         '1 つのウォレットで 200 枚まで置けます',
-        '欄から外したり替えたりした画像は、自動では消えません。マイページの「アップロードした画像」から消せます (商品・プロフィール・店舗で使っている画像は消せません)',
+        '欄から外したり替えたりした画像は、自動では消えません。マイページの「アップロードした画像」から消せます。商品・プロフィール・店舗で使っている画像は消せませんが、レジの商品・下書き・配った注文リンクや QR だけで使っている画像は消せてしまい、そこでの表示が切れます',
         '消した画像も、ブラウザなどのキャッシュにしばらく残ることがあります',
         '自分が使う権利を持っている画像だけをアップロードしてください。権利を侵害する画像などは、当社が削除することがあります',
       ],
@@ -117,12 +117,12 @@ const JA: ImageGuideContent = {
 const EN: ImageGuideContent = {
   metaTitle: 'How to prepare an image URL | OpenPay',
   metaDescription:
-    'Set an image in OpenPay by uploading it with "Choose image" or by pasting a public image URL (https://…). This page walks through the URL route: uploading to a service like Imgur, copying the right URL, and the common pitfalls.',
+    'Set an image in OpenPay by signing in and uploading it with "Choose image", or by pasting a public image URL (https://…). This page walks through the URL route: uploading to a service like Imgur, copying the right URL, and the common pitfalls.',
   backHome: '← Back to OpenPay',
 
   heroTitle: 'Setting an image by URL',
   heroLead: [
-    'You can upload an image with "Choose image" in each image field. This page covers setting an image by pasting its URL instead (for example, to use an image from your own site, via "Use a URL" in the field).',
+    'After signing in, you can upload an image with "Choose image" in each image field ("Add image" for extra store images). This page covers setting an image by pasting its URL instead (when you are not signed in, to use an image from your own site, or via "Use a URL" in the field).',
   ],
 
   sections: [
@@ -187,11 +187,11 @@ const EN: ImageGuideContent = {
     },
     {
       title: 'About images uploaded to OpenPay',
-      body: ['Images you upload with "Choose image" in an image field are handled as follows.'],
+      body: ['Images you upload from an image field after signing in are handled as follows.'],
       bullets: [
-        'They are resized, stripped of information such as the shooting location, saved to OpenPay\'s storage and published so that anyone who knows the URL can view them',
+        'They are redrawn on your device before sending (large images are resized), stripped of information such as the shooting location, saved to OpenPay\'s storage and published so that anyone who knows the URL can view them',
         'Each wallet can keep up to 200 images',
-        'Images you remove or replace in a field are not deleted automatically. You can delete them from "Uploaded images" on My Page (images used in products, profiles or shops cannot be deleted)',
+        'Images you remove or replace in a field are not deleted automatically. You can delete them from "Uploaded images" on My Page. Images used in products, profiles or shops cannot be deleted, but images used only in register items, drafts or order links and QR codes you have handed out can be deleted, and they will stop showing there',
         'Deleted images may remain in browser and other caches for a while',
         'Only upload images you have the right to use. The Company may delete images that infringe rights',
       ],

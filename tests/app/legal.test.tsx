@@ -101,11 +101,19 @@ describe('Legal pages', () => {
       }
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText(messages.Terms.article14.title)).toBeInTheDocument();
+      expect(screen.getByText((_, element) => element?.tagName === 'P' && element.textContent === article)).toBeInTheDocument();
       const privacy = messages.Privacy;
-      expect(privacy.section1.body).toContain('(12)');
-      expect(privacy.section2.body).toContain('(14)');
+      const ja14 = locale === 'ja';
+      expect(privacy.section1.body).toContain(ja14 ? '(12) 画像のアップロード機能' : '(12) When the image upload feature is used');
+      expect(privacy.section1.body).toContain(ja14 ? '端末内で描き直し' : "redrawn on the user's device");
+      expect(privacy.section1.body).toContain(ja14 ? '同じウォレットからアップロードされたことを知り得ます' : 'uploaded from the same wallet');
+      expect(privacy.section2.body).toContain(ja14 ? '(14) アップロードされた画像は' : '(14) Uploaded images are published');
+      expect(privacy.section2.body).toContain(ja14 ? 'URL を知る誰でも閲覧できる' : 'anyone who knows the URL');
+      // (10) の非公開は商品本文だけ (掲載情報は一覧と商品ページで公開・画像は (14))。
+      expect(privacy.section2.body).toContain(ja14 ? '商品の題名・説明・価格・画像などの掲載情報は、ストアの一覧と商品ページで公開します' : 'is published in the Store list and on product pages');
       expect(privacy.section3.body).toContain('Vercel Blob');
       expect(privacy.sectionExternal.body).toContain('Vercel Blob');
+      expect(privacy.sectionExternal.body).toContain(ja14 ? '画像の URL を含む閲覧の情報' : 'including the image URL');
       expect(privacy.section4.body).toContain(locale === 'ja' ? '「アップロードした画像」から削除するまで' : 'until the user deletes them from “Uploaded images”');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
