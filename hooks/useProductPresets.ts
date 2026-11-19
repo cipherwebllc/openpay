@@ -16,7 +16,7 @@ import { isTaxCategory, type TaxCategory } from '@/lib/tax';
 import { validOptionGroups, type OptionGroup } from '@/lib/menuOptions';
 import { sanitizeTokenSymbol } from '@/hooks/useQrSettings';
 import { type TokenSymbol } from '@/lib/tokens';
-import { useLocalStorageSettings } from './useLocalStorageSettings';
+import { rebaseRowField, useLocalStorageSettings, type SettingsSyncRules } from './useLocalStorageSettings';
 
 export type ProductPreset = {
   id: string;
@@ -165,11 +165,24 @@ const DEFAULT_STORE: ProductPresetStore = {
   receipt: { day: '', n: 0 },
 };
 
-export function useProductPresets() {
+// 別のタブとの同期の決まり (hooks/useLocalStorageSettings)。商品は 1 つのキー (presets) に一覧が丸ごと入っているので、別のタブが
+// 商品を書き換えた後に、このタブの画像の変更 (取り込みを保留している間に届いたアップロードの結果) だけを最新の一覧の同じ id の
+// 行に重ねる (別のタブの改名・並べ替え・行の削除・追加を残す・同じ行の画像を別のタブも替えていたら保存済みの方を残す)。
+const SYNC_RULES: SettingsSyncRules<ProductPresetStore> = {
+  rebase: { presets: rebaseRowField<ProductPreset>('image') },
+};
+
+/**
+ * holdImport: 別のタブの商品の取り込みを保留する (レジの商品の画像をアップロードしている間・hooks/useLocalStorageSettings)。
+ * 送っている間に別のタブの一覧を取り込むと、届いた画像の入れ先 (行) が見えないまま入れ替わるため、終わってから 1 度取り込む。
+ */
+export function useProductPresets({ holdImport = false }: { holdImport?: boolean } = {}) {
   const { settings, setSettings, hydrated } = useLocalStorageSettings<ProductPresetStore>(
     STORAGE_KEY,
     DEFAULT_STORE,
     sanitizeStore,
+    SYNC_RULES,
+    holdImport,
   );
 
   const presets = settings.presets;

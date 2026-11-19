@@ -2,7 +2,7 @@
 // createImageBitmap・getContext・toBlob を差し替えて、長辺・形式の選び方 (写真は JPEG・透過は PNG)・1 MiB の扱いを確かめる。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { prepareUploadImage, UPLOAD_JPEG_QUALITIES, UPLOAD_PNG_ATTEMPTS } from '@/lib/images/prepare';
-import { IMAGE_MAX_EDGE, IMAGE_UPLOAD_MAX_BYTES } from '@/lib/images/purpose';
+import { IMAGE_MAX_EDGE, IMAGE_UPLOAD_MAX_BYTES, STOREFRONT_COVER_MAX_EDGE } from '@/lib/images/purpose';
 
 const MiB = 1024 * 1024;
 
@@ -89,6 +89,20 @@ describe('prepareUploadImage', () => {
     stubBitmap(100, 80);
     const small = await prepareUploadImage(file('image/jpeg'), purpose);
     expect(small.ok && small.image).toMatchObject({ width: 100, height: 80 });
+  });
+
+  it('長辺を渡すと用途の長辺の代わりにそれで縮める (モバイル注文の店のカバー: 用途 storefront・1280)', async () => {
+    stubBitmap(3000, 1500);
+    const cover = await prepareUploadImage(file('image/jpeg'), 'storefront', STOREFRONT_COVER_MAX_EDGE);
+    expect(STOREFRONT_COVER_MAX_EDGE).toBe(1280);
+    expect(cover.ok && cover.image).toMatchObject({ width: 1280, height: 640 });
+    // 渡さなければ用途の長辺 (店のアイコン 512)。
+    const icon = await prepareUploadImage(file('image/jpeg'), 'storefront');
+    expect(icon.ok && icon.image).toMatchObject({ width: 512, height: 256 });
+    // 小さい画像は拡大しない。
+    stubBitmap(600, 300);
+    const small = await prepareUploadImage(file('image/jpeg'), 'storefront', STOREFRONT_COVER_MAX_EDGE);
+    expect(small.ok && small.image).toMatchObject({ width: 600, height: 300 });
   });
 
   it('透けない PNG・WebP は JPEG にする (描いた画素で確かめる)', async () => {

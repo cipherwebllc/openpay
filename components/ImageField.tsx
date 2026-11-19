@@ -149,6 +149,8 @@ type Props = {
   operation?: ImageOperationCounter;
   /** URL の欄の上限 (保存の上限と同じ値)。 */
   urlMaxLength: number;
+  /** 前処理の長辺 (渡さなければ用途の長辺)。同じ用途で大きさだけ違う欄 (モバイル注文の店のアイコン 512・カバー 1280) が渡す。 */
+  maxEdge?: number;
   /** 欄の下の案内 (任意)。 */
   hint?: ReactNode;
   /** URL の欄を開いたときだけ出す案内 (任意)。 */
@@ -167,6 +169,7 @@ export function ImageField({
   onBusyChange,
   operation,
   urlMaxLength,
+  maxEdge,
   hint,
   urlHint,
   previewClassName = 'h-24 w-32 rounded-lg',
@@ -179,6 +182,7 @@ export function ImageField({
     onUploaded: onChange,
     onBusyChange,
     operation,
+    maxEdge,
   });
   // 外す・URL の手入力: この欄の送信をやめ、番号を進めてから値を変える (ほかの部品が送っている画像も、届いても入らない)。
   const changeByHand = (next: string) => {

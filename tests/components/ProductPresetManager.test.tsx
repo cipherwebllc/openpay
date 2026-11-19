@@ -21,6 +21,12 @@ vi.mock('@/lib/env', async (importOriginal) => {
   };
 });
 
+// 商品の画像の欄を出すかは /api/auth/siwe/me の imageUpload (useSiweSession)。この file は段階 off (画像の欄は
+// ProductPresetManager.imageUpload.test.tsx)。
+vi.mock('@/hooks/useSiweSession', () => ({
+  useSiweSession: () => ({ isSignedIn: false, sessionAddress: null, imageUpload: false, imageUploadSignIn: false }),
+}));
+
 import { ProductPresetManager } from '@/components/ProductPresetManager';
 import type { ProductPreset } from '@/hooks/useProductPresets';
 

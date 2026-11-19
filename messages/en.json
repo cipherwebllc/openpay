@@ -1710,7 +1710,8 @@
       "network": "Couldn't connect. Please try again where the signal is better.",
       "unknown": "The upload failed."
     },
-    "openLibrary": "Open your uploaded images (new tab)"
+    "openLibrary": "Open your uploaded images (new tab)",
+    "signInToUpload": "Sign in to upload images."
   },
   "ImageLibrary": {
     "metaTitle": "Uploaded images — OpenPay",
@@ -2962,6 +2963,7 @@
     "soldOutToggle": "Sold out",
     "optionsTitle": "Options (size/toppings)",
     "imageLabel": "Image URL (optional)",
+    "imageUploadLabel": "Product image (optional)",
     "imagePlaceholder": "https://",
     "imageHint": "Paste an https:// URL of an image uploaded to a host (e.g. imgur.com).",
     "imageGuideLink": "How to prepare an image URL",
@@ -3085,9 +3087,13 @@
     "taglinePlaceholder": "e.g. Freshly roasted, just for you",
     "avatarLabel": "Shop icon image (optional)",
     "avatarHint": "Paste an https:// URL of an image uploaded to a host (e.g. imgur.com). Shown as a circle at the top of the order page.",
+    "avatarUrlLabel": "Shop icon image URL",
+    "avatarImageHint": "Shown as a circle at the top of the order page.",
     "imageGuideLink": "How to prepare an image URL",
     "coverLabel": "Cover image (optional)",
     "coverHint": "An https:// URL of a wide image, used as the order-page header background.",
+    "coverUrlLabel": "Cover image URL",
+    "coverImageHint": "Used as the order-page header background.",
     "addressLabel": "Address (optional)",
     "addressHint": "Shown on the public page with a map link.",
     "addressPlaceholder": "e.g. 1-2-3 Shibuya, Tokyo",
@@ -3139,6 +3145,7 @@
     "barReasonNoHandle": "Get an @handle to publish",
     "barReasonNoMenu": "Add an item in Register to publish",
     "barReasonDiscount": "Fix the discount or choose None",
+    "barReasonImageBusy": "Publish once the upload is done",
     "barReceiverWillChange": "The receiver will change",
     "acceptingApplyNote": "Tap “Update” to apply this to your shop page.",
     "autoLoaded": "Loaded your published shop onto this device.",

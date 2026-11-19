@@ -7,6 +7,16 @@
 // レイアウトは他タブと同じ 2 カラム。下書きは useMobileOrderDraft。flag OFF で何も描画しない。
 //
 // ⚠️ 手数料率 (店頭/モバイル) はここでは扱わない/表示しない — 課金の実行と開示は P0/P2 ゲート後。
+//
+// 店のアイコン・カバーの画像 (アップロード): 出すかは /api/auth/siwe/me の imageUpload (セッションを読む StorefrontPublishPanel が
+// 描画の確定で知らせる)。true で下書きを読み込んだ後だけ、URL の欄を画像の欄 (components/ImageField・用途 storefront・前処理の
+// 長辺はアイコン 512・カバー 1280) にする。サインインしていなくて imageUploadSignIn が true なら「サインインすると画像を
+// アップロードできます」の 1 行と今の URL の欄。それ以外は今の画面のまま。保存の形は今と同じ (下書きの https URL の文字列)・
+// 公開は今と同じ POST /api/handle。
+// - 欄ごとに操作の番号 (送り始め・URL の手入力 (今の URL の欄でも)・外す・公開中の店の読み込みで進める・本人・段階が替わったら
+//   layout effect で全部進める)。
+// - 1 欄でも送っている間は、公開のボタン (帯の 2 つ)・公開中の店の自動 / 手動の読み込みを止め、別のタブの下書きを取り込まない
+//   (最後の 1 欄が終わるまで)。
 
 import { useCallback, useMemo, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
@@ -29,6 +39,7 @@ import { getAddress, isAddress, type Address } from 'viem';
 import { env } from '@/lib/env';
 import { AddressInput } from '@/components/AddressInput';
 import { ExternalImage } from '@/components/ExternalImage';
+import { ImageField } from '@/components/ImageField';
 import { ReorderableRow } from '@/components/ReorderableRow';
 import { OptionalGroup } from '@/components/OptionalGroup';
 import { SectionCard } from '@/components/SectionCard';
@@ -52,6 +63,14 @@ import { useQrSettings } from '@/hooks/useQrSettings';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { isLikelyName } from '@/lib/nameDetection';
 import { useDragReorderList } from '@/hooks/useDragReorderList';
+import {
+  IMAGE_UPLOAD_OFF,
+  useImageBusyKeys,
+  useImageFieldOperations,
+  type ImageUploadAccess,
+  type ImageUploadScope,
+} from '@/hooks/useImageUpload';
+import { IMAGE_MAX_EDGE, STOREFRONT_COVER_MAX_EDGE } from '@/lib/images/purpose';
 import { isJpycChainSlug, type ChainSlug } from '@/lib/chains';
 import { ChainLogo } from '@/components/AssetLogo';
 import { ChainChooser } from '@/components/ChainChooser';
@@ -65,6 +84,7 @@ import {
   ADDRESS_MAX,
   HOURS_MAX,
   PHONE_MAX,
+  URL_FIELD_MAX,
   type StorefrontParts,
   type MobileOrderConfig,
 } from '@/lib/mobileOrder';
@@ -103,9 +123,23 @@ export function MobileOrderBuilder({
   onGetHandle?: () => void;
 } = {}) {
   const t = useTranslations('MobileOrder');
+  const tImage = useTranslations('ImageField');
   const locale = useLocale();
-  const { settings: draft, setSettings, hydrated, setReceiver } = useMobileOrderDraft();
+  // 店のアイコン・カバーをアップロード中の欄。1 つでもあれば公開と読み込みを止め、別のタブの下書きを取り込まない。
+  const imageBusy = useImageBusyKeys();
+  const { settings: draft, setSettings, hydrated, setReceiver } = useMobileOrderDraft(imageBusy.busy);
   const { presets, replaceAll, hydrated: presetsHydrated } = useProductPresets();
+  // 画像の欄を出すか (StorefrontPublishPanel が /me の imageUpload から知らせる)。下書きを読み込むまでは出さない (読み込みで
+  // 下書きが入れ替わるため)。
+  const [imageUploadScope, setImageUploadScope] = useState<ImageUploadScope>(IMAGE_UPLOAD_OFF);
+  const onImageUploadChange = useCallback((access: ImageUploadAccess, key: string) => {
+    setImageUploadScope((current) => (current.key === key ? current : { access, key }));
+  }, []);
+  const imageScope = hydrated ? imageUploadScope : IMAGE_UPLOAD_OFF;
+  const imageFields = imageScope.access === 'upload';
+  const { operation: imageOperation, advance: advanceImage, advanceAll: advanceAllImages } =
+    useImageFieldOperations(imageScope.key);
+  const imageBusyKey = (field: 'avatar' | 'cover') => `storefront:${imageScope.key}:${field}`;
   // 決済QR タブの受取先 (レジと同じく「引き継ぐ」ショートカット用)。
   const { settings: qrSettings } = useQrSettings();
   const qrReceiver = qrSettings.receiver.trim();
@@ -210,10 +244,12 @@ export function MobileOrderBuilder({
   // ⚠️ 既存の下書き/カタログを破壊的に上書きするため、呼び出し側 (StorefrontPublishPanel) が確認を取る。
   const loadFromStorefront = useCallback(
     (parts: StorefrontParts, receiver: string) => {
+      // 下書きを丸ごと入れ替える前に、店の画像の欄の番号を進める (読み込む前に始まった送信の結果を、読み込んだ下書きに入れない)。
+      advanceAllImages();
       setSettings(() => storefrontPartsToDraft(parts, receiver));
       replaceAll(menuToPresets(parts.menu));
     },
-    [setSettings, replaceAll],
+    [setSettings, replaceAll, advanceAllImages],
   );
 
   // 受取チェーンの複数選択トグル。最低 1 件は維持 (空選択は不可)。選択肢は MOBILE_ORDER_CHAINS (JPYC のチェーン) だけ。
@@ -289,6 +325,8 @@ export function MobileOrderBuilder({
                 onToggleAccepting={() => update({ acceptingOrders: !draft.acceptingOrders })}
                 barSlots={[barSlot, desktopBarSlot]}
                 {...(discountBlocksPublish ? { blockedReason: t('barReasonDiscount') } : {})}
+                onImageUploadChange={onImageUploadChange}
+                imageUploadBusy={imageBusy.busy}
               />
             </div>
           )}
@@ -419,6 +457,66 @@ export function MobileOrderBuilder({
                   />
                 </Field>
               <OptionalGroup icon={ImageIcon} title={t('groupImages')} filled={filledImages} filledLabel={filledLabel}>
+                  {imageFields ? (
+                  <>
+                  {/* 画像の欄 (アップロード)。本人・段階が替わったら作り直す (前に始まった送信をやめる)。 */}
+                  <ImageField
+                    key={`${imageScope.key}:avatar`}
+                    id="mobile-order-avatar"
+                    label={t('avatarLabel')}
+                    urlLabel={t('avatarUrlLabel')}
+                    value={draft.avatar}
+                    onChange={(avatar) => update({ avatar })}
+                    purpose="storefront"
+                    maxEdge={IMAGE_MAX_EDGE.storefront}
+                    onBusyChange={(busy) => imageBusy.setBusy(imageBusyKey('avatar'), busy)}
+                    operation={imageOperation('avatar')}
+                    urlMaxLength={URL_FIELD_MAX}
+                    hint={
+                      <p className="text-xs leading-relaxed text-slate-500">
+                        {t('avatarImageHint')} {tImage('hint', { max: IMAGE_MAX_EDGE.storefront })}
+                      </p>
+                    }
+                    urlHint={<p className="mt-1 text-xs text-slate-500">{t('avatarHint')}</p>}
+                    previewClassName="h-16 w-16 rounded-full"
+                  />
+                  <ImageField
+                    key={`${imageScope.key}:cover`}
+                    id="mobile-order-cover"
+                    label={t('coverLabel')}
+                    urlLabel={t('coverUrlLabel')}
+                    value={draft.cover}
+                    onChange={(cover) => update({ cover })}
+                    purpose="storefront"
+                    maxEdge={STOREFRONT_COVER_MAX_EDGE}
+                    onBusyChange={(busy) => imageBusy.setBusy(imageBusyKey('cover'), busy)}
+                    operation={imageOperation('cover')}
+                    urlMaxLength={URL_FIELD_MAX}
+                    hint={
+                      <p className="text-xs leading-relaxed text-slate-500">
+                        {t('coverImageHint')} {tImage('hint', { max: STOREFRONT_COVER_MAX_EDGE })}
+                      </p>
+                    }
+                    urlHint={
+                      <p className="mt-1 text-xs text-slate-500">
+                        {t('coverHint')}{' '}
+                        <Link
+                          href={`/${locale}/guide/image-url`}
+                          prefetch={false}
+                          className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                        >
+                          {t('imageGuideLink')}
+                        </Link>
+                      </p>
+                    }
+                    previewClassName="h-16 w-48 rounded-lg"
+                  />
+                  </>
+                  ) : (
+                  <>
+                  {imageScope.access === 'signIn' ? (
+                    <p className="text-xs text-slate-600">{tImage('signInToUpload')}</p>
+                  ) : null}
                   {/* 店舗アイコン (https URL・@handle のアバターと同型)。左に円形プレビュー。 */}
                   <Field label={t('avatarLabel')} hint={t('avatarHint')}>
                     <div className="flex items-center gap-3">
@@ -442,7 +540,11 @@ export function MobileOrderBuilder({
                         type="url"
                         value={draft.avatar}
                         placeholder="https://"
-                        onChange={(e) => update({ avatar: e.target.value })}
+                        onChange={(e) => {
+                          // 手で書いた URL が最後の操作 (画像の欄から切り替わる前に始まった送信の結果で上書きしない)。
+                          advanceImage('avatar');
+                          update({ avatar: e.target.value });
+                        }}
                         className={inputClass}
                       />
                     </div>
@@ -483,11 +585,16 @@ export function MobileOrderBuilder({
                         type="url"
                         value={draft.cover}
                         placeholder="https://"
-                        onChange={(e) => update({ cover: e.target.value })}
+                        onChange={(e) => {
+                          advanceImage('cover');
+                          update({ cover: e.target.value });
+                        }}
                         className={inputClass}
                       />
                     </div>
                   </Field>
+                  </>
+                  )}
               </OptionalGroup>
               <OptionalGroup icon={MapPin} title={t('groupShopInfo')} filled={filledShopInfo} filledLabel={filledLabel}>
                   {/* 店舗情報 (任意)。入力された項目だけ公開ページに表示される。 */}

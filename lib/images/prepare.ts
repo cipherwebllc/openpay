@@ -86,13 +86,21 @@ function shrinkFactor(bytes: number): number {
   return Math.min(0.9, Math.max(0.5, Math.sqrt(IMAGE_UPLOAD_MAX_BYTES / bytes) * 0.9));
 }
 
-export async function prepareUploadImage(file: Blob, purpose: ImagePurpose): Promise<PrepareUploadImageResult> {
+/**
+ * maxEdge を渡すと、用途の長辺 (IMAGE_MAX_EDGE) の代わりにその長辺に縮める (同じ用途で大きさだけ違う欄: モバイル注文の店の
+ * アイコン 512 とカバー 1280。どちらも用途は storefront)。
+ */
+export async function prepareUploadImage(
+  file: Blob,
+  purpose: ImagePurpose,
+  maxEdge: number = IMAGE_MAX_EDGE[purpose],
+): Promise<PrepareUploadImageResult> {
   const decoded = await decodeImage(file);
   if (!decoded.ok) return decoded;
   const { bitmap } = decoded;
   try {
     if (!bitmap.width || !bitmap.height) return { ok: false, error: 'decode_failed' };
-    let { width, height } = scaledSize(bitmap.width, bitmap.height, IMAGE_MAX_EDGE[purpose]);
+    let { width, height } = scaledSize(bitmap.width, bitmap.height, maxEdge);
     const canvas = drawToCanvas(bitmap, width, height);
     if (!canvas) return { ok: false, error: 'unsupported' };
 

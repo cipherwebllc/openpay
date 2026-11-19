@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ChangeEvent } from 'react';
 import { flushSync } from 'react-dom';
 import type { ImagePurpose } from '@/lib/images/purpose';
 import { uploadImageFile, type ImageUploadFailure } from '@/lib/images/uploadClient';
@@ -40,7 +40,95 @@ export type UseImageUploadOptions = {
    * 入れ先をほかの部品も書き換えるなら必ず渡す (足すだけで取り合いのない追加画像は渡さない)。
    */
   operation?: ImageOperationCounter;
+  /** 前処理の長辺 (渡さなければ用途の長辺 IMAGE_MAX_EDGE)。同じ用途で大きさだけ違う欄 (店のアイコンとカバー) が渡す。 */
+  maxEdge?: number;
 };
+
+/**
+ * アップロード中の欄の集まり (key は呼び元が決める・1 つでもあれば busy)。親が持ち、各欄の onBusyChange から同期に更新する
+ * (送り始めのイベントの中で知らせる = その描画の確定で、親の保存・公開のボタンも止まっている)。
+ * key には欄を作り直すたびに変わる値 (切り替えの世代など) を入れる: 作り直す前の欄の後片づけ (unmount の false) が、作り直した
+ * 欄の送信中の印を消さないように。
+ */
+export function useImageBusyKeys() {
+  const [keys, setKeys] = useState<ReadonlySet<string>>(() => new Set());
+  const setBusy = useCallback((key: string, busy: boolean) => {
+    setKeys((current) => {
+      if (current.has(key) === busy) return current;
+      const next = new Set(current);
+      if (busy) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
+  return { busy: keys.size > 0, keys, setBusy };
+}
+
+/**
+ * 欄ごとの操作の番号 (key → ImageOperationCounter・中身は持たない) と、その失効。
+ * - scope (画像の欄を出すか・本人) が替わったら、描画の前 (layout effect) に全部の欄の番号を進める: 切り替わる前に始まった
+ *   アップロードの結果を入れない。layout にするのは、切り替えの後に出た欄で始めた新しい送信が、後から走る effect に番号を
+ *   進められて捨てられないように (components/creator-store-seller/ProductEditorSection の表紙と同じ型)。
+ * - この hook を持つ部品が外れる (シートを閉じる) ときも、同じく描画の確定の中で全部の番号を進める (欄の unmount の後片づけ =
+ *   effect より前に届いた結果を入れない)。
+ */
+export function useImageFieldOperations(scope: string) {
+  const operations = useRef(new Map<string, ImageOperationCounter>());
+  const operation = useCallback((key: string): ImageOperationCounter => {
+    let counter = operations.current.get(key);
+    if (!counter) {
+      counter = { current: 0 };
+      operations.current.set(key, counter);
+    }
+    return counter;
+  }, []);
+  /** その欄の操作 (手入力・外す・行の削除・追加の後の片づけ) の前に、同期的に呼ぶ。 */
+  const advance = useCallback((key: string) => nextImageOperation(operation(key)), [operation]);
+  /** 全部の欄を書き換える操作 (公開中の店の読み込み) の前に、同期的に呼ぶ。 */
+  const advanceAll = useCallback(() => {
+    for (const counter of operations.current.values()) nextImageOperation(counter);
+  }, []);
+  const scopeSeen = useRef(scope);
+  useLayoutEffect(() => {
+    if (scopeSeen.current === scope) return;
+    scopeSeen.current = scope;
+    advanceAll();
+  }, [scope, advanceAll]);
+  useLayoutEffect(() => () => advanceAll(), [advanceAll]);
+  return { operation, advance, advanceAll };
+}
+
+/** 画像の欄を出すか (/api/auth/siwe/me の imageUpload・imageUploadSignIn から)。 */
+export type ImageUploadAccess = 'upload' | 'signIn' | 'off';
+
+export type ImageUploadScope = {
+  access: ImageUploadAccess;
+  /** 画像の欄を出すか・本人 (セッションのアドレス) が替わったら変わる値 (useImageFieldOperations の scope・欄の key)。 */
+  key: string;
+};
+
+export const IMAGE_UPLOAD_OFF: ImageUploadScope = { access: 'off', key: 'off' };
+
+/**
+ * useSiweSession の値から、画像の欄を出すかを決める (純関数)。
+ * - upload: サインイン済み (セッションが接続中の wallet と一致) で /me の imageUpload が true (useSiweSession は今の取得が成功
+ *   しているときだけ true にする)。
+ * - signIn: サインインしていなくて /me の imageUploadSignIn が true (「サインインすると画像をアップロードできます」の 1 行と今の
+ *   URL の欄)。
+ * - off: それ以外 (段階 off・設定が無い・/me の取得の失敗・読み込み中) は今の画面のまま。
+ */
+export function imageUploadScopeOf(session: {
+  isSignedIn: boolean;
+  sessionAddress: string | null;
+  imageUpload?: boolean;
+  imageUploadSignIn?: boolean;
+}): ImageUploadScope {
+  if (session.isSignedIn && session.imageUpload === true && session.sessionAddress) {
+    return { access: 'upload', key: `upload:${session.sessionAddress.toLowerCase()}` };
+  }
+  if (!session.isSignedIn && session.imageUploadSignIn === true) return { access: 'signIn', key: 'signIn' };
+  return IMAGE_UPLOAD_OFF;
+}
 
 export type ImageUploadState = {
   busy: boolean;
@@ -52,7 +140,13 @@ export type ImageUploadState = {
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
 };
 
-export function useImageUpload({ purpose, onUploaded, onBusyChange, operation }: UseImageUploadOptions): ImageUploadState {
+export function useImageUpload({
+  purpose,
+  onUploaded,
+  onBusyChange,
+  operation,
+  maxEdge,
+}: UseImageUploadOptions): ImageUploadState {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ImageUploadFailure | null>(null);
   // 送るたび・取り消すたびに増やす。応答が届いたとき値が変わっていれば、その応答は古い (捨てる)。
@@ -102,7 +196,10 @@ export function useImageUpload({ purpose, onUploaded, onBusyChange, operation }:
       setError(null);
       // 親 (保存・公開のボタン) へは同じイベントの中で知らせる (この描画の確定で、ボタンも止まっている)。
       callbacks.current.onBusyChange?.(true);
-      const result = await uploadImageFile(file, purpose, abort.signal);
+      const result =
+        maxEdge === undefined
+          ? await uploadImageFile(file, purpose, abort.signal)
+          : await uploadImageFile(file, purpose, abort.signal, maxEdge);
       if (id !== request.current) return;
       inFlight.current = false;
       controller.current = null;
@@ -119,7 +216,7 @@ export function useImageUpload({ purpose, onUploaded, onBusyChange, operation }:
         callbacks.current.onUploaded(result.url);
       });
     },
-    [purpose, operation],
+    [purpose, operation, maxEdge],
   );
 
   const onFileChange = useCallback(
