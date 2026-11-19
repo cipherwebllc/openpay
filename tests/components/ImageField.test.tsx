@@ -1,8 +1,9 @@
 // 共通の画像の欄 (components/ImageField.tsx)。アップロード (lib/images/uploadClient) は mock して、応答の時を test が決める。
 // 選ぶ・外す・URL で指定する・失敗で元の画像を保つ・二重送信の防ぎ・やめた後と unmount の後の古い応答を捨てる・busy を親へ。
+// 操作の番号 (operation) を共有したときは「最後の操作だけが反映される」(値ではなく番号で比べる)。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen } from '@testing-library/react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { renderWithIntl } from '../_helpers/i18n';
 import ja from '@/messages/ja.json';
 import en from '@/messages/en.json';
@@ -30,6 +31,8 @@ function Harness({
   onChangeSpy?: (value: string) => void;
 }) {
   const [value, setValue] = useState(initial);
+  // 同じ値を書き換える「ほかの部品」(AI の表紙・元に戻す) と共有する操作の番号。
+  const operation = useRef(0);
   return (
     <>
       <ImageField
@@ -43,11 +46,27 @@ function Harness({
         }}
         purpose="product"
         onBusyChange={onBusyChange}
+        operation={operation}
         urlMaxLength={512}
       />
       <span data-testid="value">{value}</span>
-      <button type="button" onClick={() => setValue('https://images.example/from-elsewhere.png')}>
+      <button
+        type="button"
+        onClick={() => {
+          operation.current += 1;
+          setValue('https://images.example/from-elsewhere.png');
+        }}
+      >
         ほかから替える
+      </button>
+      {/* ほかの部品の操作で、値は同じまま (元の値に戻した・同じ画像をもう一度入れた)。 */}
+      <button
+        type="button"
+        onClick={() => {
+          operation.current += 1;
+        }}
+      >
+        ほかの操作 (値は同じ)
       </button>
     </>
   );
@@ -196,6 +215,54 @@ describe('ImageField', () => {
     fireEvent.change(screen.getByLabelText('画像 URL (任意)'), { target: { value: 'https://images.example/typed.png' } });
     await act(async () => pending[0].resolve({ ok: true, url: NEW }));
     expect(value()).toBe('https://images.example/typed.png');
+  });
+
+  it('送っている間に URL を書き換えて元の値に戻しても、届いた画像で上書きしない (手入力が最後の操作)', async () => {
+    const onBusyChange = vi.fn();
+    const { container } = renderWithIntl(<Harness onBusyChange={onBusyChange} />);
+    choose(container);
+    fireEvent.click(screen.getByRole('button', { name: T.useUrl }));
+    const input = screen.getByLabelText('画像 URL (任意)');
+    fireEvent.change(input, { target: { value: 'https://images.example/typed.png' } });
+    fireEvent.change(input, { target: { value: OLD } });
+    expect(pending[0].signal.aborted).toBe(true);
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    await act(async () => pending[0].resolve({ ok: true, url: NEW }));
+    expect(value()).toBe(OLD);
+  });
+
+  it('送っている間にほかの部品が操作したら、値が同じままでも、届いた画像で上書きしない (値ではなく番号で比べる)', async () => {
+    const onBusyChange = vi.fn();
+    const onChangeSpy = vi.fn();
+    const { container } = renderWithIntl(<Harness onBusyChange={onBusyChange} onChangeSpy={onChangeSpy} />);
+    choose(container);
+    fireEvent.click(screen.getByRole('button', { name: 'ほかの操作 (値は同じ)' }));
+    await act(async () => pending[0].resolve({ ok: true, url: NEW }));
+    expect(onChangeSpy).not.toHaveBeenCalled();
+    expect(value()).toBe(OLD);
+    // 送信は終わっている (busy を外し、もう一度選べる)。次に選んだ画像は最後の操作なので入る。
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    choose(container, 'again.jpg');
+    await act(async () => pending[1].resolve({ ok: true, url: NEW }));
+    expect(value()).toBe(NEW);
+  });
+
+  it('送っている間にほかの部品が操作したら、後から届いた失敗の文も出さない (もう最後の操作ではない)', async () => {
+    const { container } = renderWithIntl(<Harness />);
+    choose(container);
+    fireEvent.click(screen.getByRole('button', { name: 'ほかの操作 (値は同じ)' }));
+    await act(async () => pending[0].resolve({ ok: false, error: 'storage_unavailable' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: T.choose })).toBeEnabled();
+  });
+
+  it('ほかの部品の操作の後に選んだ画像は入る (番号は送り始めに取る)', async () => {
+    const { container } = renderWithIntl(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'ほかの操作 (値は同じ)' }));
+    choose(container);
+    await act(async () => pending[0].resolve({ ok: true, url: NEW }));
+    expect(value()).toBe(NEW);
   });
 
   it('送っている間に値がほかから変わったら (AI の表紙・元に戻す)、届いた画像で上書きしない', async () => {

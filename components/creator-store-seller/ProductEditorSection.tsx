@@ -5,9 +5,9 @@
 // この境界の外 (より長寿命の component や共有 cache) に置くとアカウント切替後に旧本文が残り得るため、
 // ここには state を持たせない。AI 出品アシスタントの開閉と、その画像・メモ・案は、この部品の子
 // (ListingAssistantEntry・ListingAssistant) が持つ — 親の key の内側なので、アカウントを切り替えると一緒に消える。
-// ここが持つのは「画像をアップロード中か」だけ (中身を持たない・アップロード中は保存を止める)。
+// ここが持つのは「画像をアップロード中か」と「表紙の操作の番号」だけ (中身を持たない・アップロード中は保存を止める)。
 
-import { Component, Fragment, useCallback, useState, type FormEventHandler, type ReactNode } from 'react';
+import { Component, Fragment, useCallback, useRef, useState, type FormEventHandler, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import dynamic, { type DynamicOptionsLoadingProps } from 'next/dynamic';
 import Link from 'next/link';
@@ -18,6 +18,7 @@ import { MAX_USAGE_NOTE_LEN, type UsagePermission } from '@/lib/store/usageTerms
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { CreatorStoreLicenseFields } from '@/components/CreatorStoreLicenseFields';
 import { ImageField } from '@/components/ImageField';
+import type { ImageOperationCounter } from '@/hooks/useImageUpload';
 import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
 import { ProductGalleryField } from './ProductGalleryField';
 import { errorCode, errorDetailKey, errorMessageKey } from './request';
@@ -64,11 +65,13 @@ function ListingAssistantEntry({
   updateProduct,
   imageUpload,
   onImageBusyChange,
+  coverOperation,
 }: {
   productForm: ProductForm;
   updateProduct: (patch: Partial<ProductForm>) => void;
   imageUpload: boolean;
   onImageBusyChange: (busy: boolean) => void;
+  coverOperation: ImageOperationCounter;
 }) {
   const t = useTranslations('CreatorStoreSeller.assistant');
   const [open, setOpen] = useState(false);
@@ -130,6 +133,7 @@ function ListingAssistantEntry({
               updateProduct={updateProduct}
               imageUpload={imageUpload}
               onImageBusyChange={onImageBusyChange}
+              coverOperation={coverOperation}
             />
           </ListingAssistantBoundary>
         </div>
@@ -198,6 +202,9 @@ export function ProductEditorSection({
     });
   }, []);
   const imageBusy = busyImages.size > 0;
+  // 表紙 (imageUrl) を書き換える操作の番号。表紙の欄 (選ぶ・外す・URL の手入力) と AI 出品アシスタント (この画像を表紙に
+  // 使う・元に戻す) が共有し、最後の操作だけが表紙に反映される (hooks/useImageUpload)。追加画像は足すだけなので使わない。
+  const coverOperation = useRef(0);
   const submitUnlessImageBusy: FormEventHandler<HTMLFormElement> = (event) => {
     // Enter での送信も止める (保存のボタンは無効にしてあるが、送信の経路はボタンだけではない)。
     if (imageBusy) {
@@ -226,6 +233,7 @@ export function ProductEditorSection({
           updateProduct={updateProduct}
           imageUpload={imageUpload}
           onImageBusyChange={(busy) => setImageBusy('assistant', busy)}
+          coverOperation={coverOperation}
         />
       ) : null}
 
@@ -517,6 +525,7 @@ export function ProductEditorSection({
                     onChange={(imageUrl) => updateProduct({ imageUrl })}
                     purpose="product"
                     onBusyChange={(busy) => setImageBusy('cover', busy)}
+                    operation={coverOperation}
                     urlMaxLength={512}
                     hint={<p className="text-xs leading-relaxed text-slate-500">{tImage('hint', { max: IMAGE_MAX_EDGE.product })}</p>}
                     urlHint={

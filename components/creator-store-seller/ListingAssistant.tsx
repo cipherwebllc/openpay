@@ -29,7 +29,7 @@ import {
   type ListingAssistantRequest,
 } from '@/lib/store/listingAssistant';
 import { ImageUploadStatus } from '@/components/ImageField';
-import { useImageUpload } from '@/hooks/useImageUpload';
+import { nextImageOperation, useImageUpload, type ImageOperationCounter } from '@/hooks/useImageUpload';
 import { LISTING_IMAGE_MAX_EDGE, prepareListingImage, type ListingImageError, type PreparedListingImage } from './listingAssistantImage';
 import { copyText } from './ProductShareButton';
 import { inputClass, type ProductForm } from './shared';
@@ -258,9 +258,16 @@ type Props = {
   imageUpload?: boolean;
   /** 表紙のアップロード中か (親はその間の保存を止める)。 */
   onImageBusyChange?: (busy: boolean) => void;
+  /**
+   * 表紙の操作の番号 (表紙の欄と共有・hooks/useImageUpload)。「この画像を表紙に使う」と「元に戻す」が番号を進め、
+   * 最後の操作だけが表紙に反映される。imageUpload が true なら親が必ず渡す。
+   */
+  coverOperation?: ImageOperationCounter;
 };
 
-export function ListingAssistant({ productForm, updateProduct, imageUpload = false, onImageBusyChange }: Props) {
+export function ListingAssistant({
+  productForm, updateProduct, imageUpload = false, onImageBusyChange, coverOperation,
+}: Props) {
   const t = useTranslations('CreatorStoreSeller.assistant');
   const [memo, setMemo] = useState('');
   const [image, setImage] = useState<PreparedListingImage | null>(null);
@@ -270,13 +277,13 @@ export function ListingAssistant({ productForm, updateProduct, imageUpload = fal
   const cover = useImageUpload({
     purpose: 'product',
     onUploaded: (url) => {
-      // 届いたときの表紙 (= 押したときの表紙・下の guardValue) を「元に戻す」の先にする。
+      // 届いたときの表紙 (押してから表紙の操作が無かった = 押したときの表紙) を「元に戻す」の先にする。
       setCoverApplied({ before: productForm.imageUrl, after: url });
       updateProduct({ imageUrl: url });
     },
     onBusyChange: onImageBusyChange,
-    // 送っている間に表紙が変わったら (手入力・外す・表紙の欄のアップロード)、その操作を残し、届いた画像を入れない。
-    guardValue: productForm.imageUrl,
+    // 送っている間に表紙の操作 (手入力・外す・表紙の欄のアップロード・元に戻す) があったら、その操作を残し、届いた画像を入れない。
+    operation: coverOperation,
   });
   const [imageError, setImageError] = useState<ListingImageError | null>(null);
   const [imagePreparing, setImagePreparing] = useState(false);
@@ -339,6 +346,8 @@ export function ListingAssistant({ productForm, updateProduct, imageUpload = fal
 
   const undoCover = () => {
     if (!coverApplied) return;
+    // 元に戻すのも表紙の操作: 番号を進める (送っている途中の画像が届いても、戻した表紙を上書きしない)。
+    if (coverOperation) nextImageOperation(coverOperation);
     updateProduct({ imageUrl: coverApplied.before });
     setCoverApplied(null);
   };

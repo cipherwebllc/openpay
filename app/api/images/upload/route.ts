@@ -1,12 +1,18 @@
 import { NextResponse } from 'next/server';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { readBytesBodyCapped } from '@/lib/httpBodyCap';
-import { BlobDeadlineError, countImagesUnder, putPublicImage } from '@/lib/images/blobStore';
+import {
+  BlobDeadlineError,
+  IMAGE_UPLOAD_DEADLINE_MS,
+  countImagesUnder,
+  putPublicImage,
+} from '@/lib/images/blobStore';
 import {
   imageBlobStoreConfigured,
   imageOwnerSecret,
   imageUploadAllowedFor,
   imageUploadMode,
+  type ImageUploadMode,
 } from '@/lib/images/config';
 import { countGlobalImageUpload, secondsUntilNextUtcDay } from '@/lib/images/dailyCap';
 import { imageBlobPath, imageOwnerKey, imageOwnerPrefix, newImageId } from '@/lib/images/ownerKey';
@@ -34,8 +40,8 @@ import { checkIpRateLimit, checkReadRateLimit } from '@/lib/relay/relayGuards';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// 本文 1 MiB の読み取り・Blob の list (cursor を追う全体で 5 秒の締切)・put (10 秒の締切) の分。締切で固定の 503 を返せるよう、
-// 締切の合計より長くする (lib/images/blobStore)。
+// 関数の上限。これを過ぎると Vercel が関数を止め、固定の code を返せない。その前に必ず返すよう、route は要求を受けてから
+// IMAGE_UPLOAD_DEADLINE_MS (15 秒・lib/images/blobStore) の絶対の期限を持つ (下の POST)。
 export const maxDuration = 20;
 
 const DAY_SEC = 86_400;
@@ -75,6 +81,32 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 2) 別 origin からの書き込み (cookie で認証する) を止める。本文は JSON ではないので Content-Type は 7) で見る。
   const csrf = rejectCrossOriginWrite(req, { json: false });
   if (csrf) return csrf;
+
+  // 絶対の期限: ここ (1・2 は待たないので要求を受けた時と同じ) から IMAGE_UPLOAD_DEADLINE_MS で、どの段 (KV・セッション・
+  // 本文・Blob) で待っていても 503 storage_unavailable を返す。各段の上限 (KV 5 秒・list 5 秒・put 10 秒) は段ごとに
+  // 数えるので、足すと関数の上限を超えうる。合計を 1 本の timer で締める。
+  // - 期限で deadline を abort する。list と put はこの signal でも締まり (各上限と残り時間の短い方)、SDK の送り直しも止まる。
+  // - 期限の後も upload() の続きは動きうる (待っていた KV が後から返る等)。応答はもう返してあるので、続きは次の段を
+  //   始めない (Blob に置かない・全体の枠を使わない: upload の中の deadline.aborted の確認)。
+  const deadline = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<NextResponse>((resolve) => {
+    timer = setTimeout(() => {
+      logger.warn('images.upload.failed', { code: 'route_deadline' });
+      // 先に応答を決めてから止める (止めた段の 503 と同じ応答だが、どちらが返るかを順に任せない)。
+      resolve(fail('storage_unavailable', 503));
+      deadline.abort();
+    }, IMAGE_UPLOAD_DEADLINE_MS);
+  });
+  try {
+    return await Promise.race([upload(req, mode, deadline.signal), expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 3) から先 (待つ段)。deadline は POST の絶対の期限。 */
+async function upload(req: Request, mode: ImageUploadMode, deadline: AbortSignal): Promise<NextResponse> {
   // 3) 認証前の IP の制限 (分ごと)。IP の bucket が作れない (IP_HASH_SECRET が無い・短い・接続元が分からない) と、
   // checkIpRateLimit は数えずに通し、下の IP の 1 日の枠も効かない。ウォレットを作り直せば Blob に書ける量が増えるので、
   // この route では止める (ほかの route の「hash が無ければ飛ばす」とは違う)。止めても URL の欄は使える (掟 13)。
@@ -123,10 +155,13 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (sniffImageType(body.bytes) !== contentType) return fail('invalid_image', 415);
 
   // 12) そのウォレットが置いている枚数 (上限に届くか最後のページまで cursor を追う)。数えられなければ止める (上限を確かめずに置かない)。
+  // 締切は list の上限 (5 秒) と絶対の期限までの残りの短い方。ここまでの段 (KV・本文) を待つ間に期限を過ぎていたら、
+  // list を始めない (POST がもう 503 を返し、route_deadline をログに出している。list の締切としてログに出さない)。
+  if (deadline.aborted) return fail('storage_unavailable', 503);
   const ownerKey = imageOwnerKey(session.address, secret);
   let owned: number;
   try {
-    owned = await countImagesUnder(imageOwnerPrefix(ownerKey), IMAGE_OWNER_MAX_IMAGES);
+    owned = await countImagesUnder(imageOwnerPrefix(ownerKey), IMAGE_OWNER_MAX_IMAGES, deadline);
   } catch (error) {
     logger.warn('images.upload.failed', { code: error instanceof BlobDeadlineError ? 'list_deadline' : 'list_failed' });
     return fail('storage_unavailable', 503);
@@ -134,7 +169,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (owned >= IMAGE_OWNER_MAX_IMAGES) return fail('image_limit', 409);
 
   // 13) 全体の 1 日の回数は最後に数える (ここまでで断った要求に全体の枠を使わせない)。KV が無い・失敗したら止める
-  // (fail-closed・lib/images/dailyCap)。
+  // (fail-closed・lib/images/dailyCap)。絶対の期限を過ぎた要求はここに届かない (12 の list が期限で止まる)。
   const global = await countGlobalImageUpload();
   if (global === 'unavailable') {
     logger.warn('images.upload.failed', { code: 'global_count_unavailable' });
@@ -142,10 +177,17 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
   if (global === 'limited') return rateLimited(secondsUntilNextUtcDay());
 
-  // 14) 置く。
+  // 14) 置く。締切は put の上限 (10 秒) と絶対の期限までの残りの短い方。13 の KV を待つ間に期限を過ぎていたら置かない
+  // (12 と同じ)。
+  if (deadline.aborted) return fail('storage_unavailable', 503);
   let url: string;
   try {
-    url = await putPublicImage(imageBlobPath(ownerKey, purpose, newImageId(), contentType), body.bytes, contentType);
+    url = await putPublicImage(
+      imageBlobPath(ownerKey, purpose, newImageId(), contentType),
+      body.bytes,
+      contentType,
+      deadline,
+    );
   } catch (error) {
     // 締切は 503 (Blob が遅い・混んでいる)。ほかの失敗は 502。どちらも SDK の文は出さない。
     if (error instanceof BlobDeadlineError) {

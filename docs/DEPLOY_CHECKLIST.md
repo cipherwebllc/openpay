@@ -3439,11 +3439,14 @@ PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品ア
 4. 写真は JPEG、透過の PNG (ロゴ) は透けたままの PNG になることを見る。
 
 ### 20.3 見張る
-- Vercel の Usage の Blob: 保存の量・Advanced Operations (1 回のアップロードで put 1 + list 1)・Data Transfer。
+- Vercel の Usage の Blob: 保存の量・Advanced Operations (成功したアップロード 1 回で put 1 回・list は読んだページの数。
+  ふつうは 1 ページ。list は置けなかった要求 = 上限 200 枚・全体の枠・締切でも数える)・Data Transfer。
 - Upstash: 1 回のアップロードで 9 コマンド前後 (セッションの読み取り・IP の分・ウォレットと IP の日・全体の日の INCR と EXPIRE NX)。
 - ログ (Sentry にも出る) の `images.upload.failed` の `code`: `list_failed`・`list_deadline` (Blob の list・cursor を追う全体で
-  5 秒の締切)・`global_count_unavailable` (KV)・`put_failed`・`put_deadline` (Blob の put・10 秒の締切)。エラーの応答とログに
-  アドレス・ownerKey・path・URL は出ない。成功の応答の `url` だけは公開の Blob の URL そのもの (path を含む・設計どおりの例外)。
+  5 秒の締切)・`global_count_unavailable` (KV)・`put_failed`・`put_deadline` (Blob の put・10 秒の締切)・`route_deadline`
+  (要求を受けてから 15 秒の絶対の期限。関数の上限 20 秒より前に、どの段で待っていても 503 `storage_unavailable` を返す。
+  list か put の最中なら `list_deadline` / `put_deadline` も続けて出る。`route_deadline` だけなら KV か本文で待っていた)。
+  エラーの応答とログにアドレス・ownerKey・path・URL は出ない。成功の応答の `url` だけは公開の Blob の URL そのもの (path を含む・設計どおりの例外)。
   request の `x-vercel-oidc-token` は Sentry の event と transaction から落とす (lib/telemetryRedaction)。
 - 上限: 1 ウォレット 200 枚 (Blob の list で数える)・1 日 (UTC) にウォレット 30 回・IP 60 回・全体 200 回。
 

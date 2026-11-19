@@ -2,6 +2,8 @@
 // CreatorStoreSellerPanel.boundaries.test.tsx が見る)。true のときは表紙を画像の欄、追加画像をサムネと「画像を追加」にし、
 // 保存の形 (imageUrl の文字列・galleryUrls の配列) と保存の API は変えない。AI 出品アシスタントの「この画像を表紙に使う」は
 // 押したときだけアップロードする。画像の下ごしらえ (canvas) は差し替え、POST /api/images/upload は fetch の mock で受ける。
+// 表紙は「最後の操作だけが反映される」: 表紙の欄のアップロード・AI の「この画像を表紙に使う」・URL の手入力・外す・元に戻すが
+// 1 つの操作の番号を共有する (応答の届く順・値が元に戻ったかどうかで結果が変わらない)。
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -290,6 +292,9 @@ describe('imageUpload が true のとき', () => {
     return { input, useAsCover: await screen.findByRole('button', { name: A.useAsCover }) };
   }
 
+  const COVER = 'https://images.example/cover.png';
+  const coverSrc = () => coverGroup().querySelector('img')?.getAttribute('src') ?? null;
+
   it('AI の表紙の応答が遅れて届いても、その間に手で入れた表紙の URL を上書きしない', async () => {
     stubApi({ imageUpload: true, listingAssistant: true });
     renderPanel();
@@ -306,7 +311,47 @@ describe('imageUpload が true のとき', () => {
     expect(screen.getByRole('button', { name: S.saveProduct })).toBeEnabled();
   });
 
-  it('表紙の欄のアップロードの応答が遅れて届いても、その間に AI で入れた表紙を上書きしない', async () => {
+  it('AI の送信中に URL を手で変えて元の値に戻しても、遅れて届いた AI の画像は入らない (値が同じでも手入力が最後の操作)', async () => {
+    stubApi({ imageUpload: true, listingAssistant: true });
+    renderPanel();
+    const { useAsCover } = await openAssistantWithImage();
+    fireEvent.click(useAsCover);
+    await waitFor(() => expect(uploads).toHaveLength(1));
+
+    fireEvent.click(within(coverGroup()).getByRole('button', { name: I.useUrl }));
+    const urlInput = screen.getByLabelText(S.imageUrlLabel);
+    expect(urlInput).toHaveValue(COVER);
+    fireEvent.change(urlInput, { target: { value: 'https://images.example/typed.png' } });
+    fireEvent.change(urlInput, { target: { value: COVER } });
+    await answer(0, `${BLOB}/product/late-ai.jpg`);
+
+    expect(urlInput).toHaveValue(COVER);
+    expect(coverSrc()).toBe(COVER);
+    expect(screen.queryByText(A.coverApplied)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: S.saveProduct })).toBeEnabled();
+  });
+
+  it('AI の送信中に表紙を「外す」と、遅れて届いた AI の画像は入らない', async () => {
+    stubApi({ imageUpload: true, listingAssistant: true });
+    renderPanel();
+    const { useAsCover } = await openAssistantWithImage();
+    fireEvent.click(useAsCover);
+    await waitFor(() => expect(uploads).toHaveLength(1));
+
+    fireEvent.click(within(coverGroup()).getByRole('button', { name: I.remove }));
+    expect(coverSrc()).toBeNull();
+    await answer(0, `${BLOB}/product/late-ai.jpg`);
+
+    expect(coverSrc()).toBeNull();
+    expect(screen.queryByText(A.coverApplied)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: S.saveProduct })).toBeEnabled();
+  });
+
+  // 表紙の欄で画像 A を送り始め、その後に AI で画像 B を表紙に選ぶ (B が最後の操作)。応答の届く順によらず B が入る。
+  it.each([
+    ['A が先に届く', [0, 1]],
+    ['B が先に届く', [1, 0]],
+  ] as const)('表紙の欄で A を送り始めた後に AI で B を選ぶと、B が表紙に入る (%s)', async (_label, order) => {
     stubApi({ imageUpload: true, listingAssistant: true });
     renderPanel();
     const { useAsCover } = await openAssistantWithImage();
@@ -314,10 +359,53 @@ describe('imageUpload が true のとき', () => {
     await waitFor(() => expect(uploads).toHaveLength(1));
     fireEvent.click(useAsCover);
     await waitFor(() => expect(uploads).toHaveLength(2));
-    await answer(1, `${BLOB}/product/ai.jpg`);
-    expect(coverGroup().querySelector('img')).toHaveAttribute('src', `${BLOB}/product/ai.jpg`);
-    await answer(0, `${BLOB}/product/late-field.jpg`);
-    expect(coverGroup().querySelector('img')).toHaveAttribute('src', `${BLOB}/product/ai.jpg`);
+    const urls = [`${BLOB}/product/a-field.jpg`, `${BLOB}/product/b-ai.jpg`];
+
+    await answer(order[0], urls[order[0]]);
+    // 1 つ届いただけでは保存できない (もう 1 つを送っている)。A が先に届いても A は入らない。
+    expect(screen.getByRole('button', { name: S.saveProduct })).toBeDisabled();
+    expect(coverSrc()).toBe(order[0] === 1 ? urls[1] : COVER);
+    await answer(order[1], urls[order[1]]);
+
+    expect(coverSrc()).toBe(urls[1]);
+    expect(screen.getByText(A.coverApplied)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: S.saveProduct })).toBeEnabled();
+    // 「元に戻す」は B を入れる前の表紙に戻す (A ではない)。
+    fireEvent.click(screen.getByRole('button', { name: A.undoCover }));
+    expect(coverSrc()).toBe(COVER);
+  });
+
+  it('AI で B を送り始めた後に表紙の欄で A を選ぶと、A が表紙に入る (B が後から届いても入らない)', async () => {
+    stubApi({ imageUpload: true, listingAssistant: true });
+    renderPanel();
+    const { useAsCover } = await openAssistantWithImage();
+    fireEvent.click(useAsCover);
+    await waitFor(() => expect(uploads).toHaveLength(1));
+    pick(fileInputIn(coverGroup()), 'field.jpg');
+    await waitFor(() => expect(uploads).toHaveLength(2));
+
+    await answer(1, `${BLOB}/product/a-field.jpg`);
+    expect(coverSrc()).toBe(`${BLOB}/product/a-field.jpg`);
+    await answer(0, `${BLOB}/product/b-ai.jpg`);
+    expect(coverSrc()).toBe(`${BLOB}/product/a-field.jpg`);
+    expect(screen.queryByText(A.coverApplied)).not.toBeInTheDocument();
+  });
+
+  it('AI の表紙を「元に戻す」と、その前から表紙の欄で送っていた画像は届いても入らない (元に戻すが最後の操作)', async () => {
+    stubApi({ imageUpload: true, listingAssistant: true });
+    renderPanel();
+    const { useAsCover } = await openAssistantWithImage();
+    fireEvent.click(useAsCover);
+    await waitFor(() => expect(uploads).toHaveLength(1));
+    await answer(0, `${BLOB}/product/b-ai.jpg`);
+    expect(coverSrc()).toBe(`${BLOB}/product/b-ai.jpg`);
+
+    pick(fileInputIn(coverGroup()), 'field.jpg');
+    await waitFor(() => expect(uploads).toHaveLength(2));
+    fireEvent.click(screen.getByRole('button', { name: A.undoCover }));
+    expect(coverSrc()).toBe(COVER);
+    await answer(1, `${BLOB}/product/a-field.jpg`);
+    expect(coverSrc()).toBe(COVER);
     expect(screen.getByRole('button', { name: S.saveProduct })).toBeEnabled();
   });
 

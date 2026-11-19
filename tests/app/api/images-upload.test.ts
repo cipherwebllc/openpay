@@ -3,6 +3,7 @@
 // 検査の順 (段階 → 同じ origin → IP の分ごと → セッション → 運営者 → 秘密と Blob → 用途と形式 → ウォレットと IP の 1 日 → 本文
 // (1 MiB) → 先頭 byte → 保有の枚数 → 全体の 1 日 (最後・KV 障害で止める) → put)・本文は認証と枠を通るまで読まないこと
 // (req.bodyUsed)・put の引数・ログにアドレス・path・URL を出さないことを固定する。Blob は mock (実 API は使わない)。
+// 絶対の期限: 要求を受けてから IMAGE_UPLOAD_DEADLINE_MS (関数の上限 maxDuration より前) で、どの段で待っていても 503。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextResponse } from 'next/server';
 
@@ -46,10 +47,15 @@ vi.mock('@/lib/x402/hostedStore', async (importOriginal) => ({
   getSellerDisclosure,
 }));
 
-import { POST } from '@/app/api/images/upload/route';
+import { POST, maxDuration } from '@/app/api/images/upload/route';
 import { GET as getSeller } from '@/app/api/store/seller/route';
 import { imageOwnerKey } from '@/lib/images/ownerKey';
-import { BLOB_LIST_DEADLINE_MS, BLOB_PUT_DEADLINE_MS, IMAGE_CACHE_MAX_AGE_SEC } from '@/lib/images/blobStore';
+import {
+  BLOB_LIST_DEADLINE_MS,
+  BLOB_PUT_DEADLINE_MS,
+  IMAGE_CACHE_MAX_AGE_SEC,
+  IMAGE_UPLOAD_DEADLINE_MS,
+} from '@/lib/images/blobStore';
 import { imageUploadGlobalDailyKey } from '@/lib/images/dailyCap';
 
 /** 先頭が JPEG / PNG の印の byte 列 (中身は詰め物)。 */
@@ -94,6 +100,20 @@ function expectStoppedBeforeBody(req: Request) {
   expect(blob.list).not.toHaveBeenCalled();
   expect(blob.put).not.toHaveBeenCalled();
   expect(kv.kvIncr).not.toHaveBeenCalled();
+}
+
+/** 偽の timer で ms 後に value を返す (遅い KV・遅い Blob)。 */
+function later<T>(ms: number, value: T): Promise<T> {
+  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
+}
+
+/** 応答を待たずに始める (応答がまだ無いことを、時を進めながら確かめるため)。 */
+function start(req: Request = post()): { response?: Response } {
+  const request: { response?: Response } = {};
+  void POST(req).then((response) => {
+    request.response = response;
+  });
+  return request;
 }
 
 beforeEach(() => {
@@ -397,6 +417,37 @@ describe('images upload: 保有の枚数と全体の枠', () => {
     expect(blob.put).not.toHaveBeenCalled();
   });
 
+  it('list の締切はページごとではなく合計: 1 ページ目が 4 秒で返り 2 ページ目が応答しなければ、list を始めて 5 秒で 503', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const signals: AbortSignal[] = [];
+    blob.list
+      .mockImplementationOnce((options: { abortSignal: AbortSignal }) => {
+        signals.push(options.abortSignal);
+        return later(4_000, { blobs: blobs(10), hasMore: true, cursor: 'c1' });
+      })
+      .mockImplementationOnce((options: { abortSignal: AbortSignal }) => {
+        signals.push(options.abortSignal);
+        return new Promise(() => {});
+      });
+    const request = start();
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(blob.list).toHaveBeenCalledTimes(2);
+    expect(blob.list.mock.calls[1][0]).toMatchObject({ prefix: ownerPrefix(), cursor: 'c1' });
+    // 2 ページ目を呼んでから 5 秒ではない (締切を数え直さない)。
+    await vi.advanceTimersByTimeAsync(BLOB_LIST_DEADLINE_MS - 4_000 - 1);
+    expect(request.response).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request.response?.status).toBe(503);
+    expect(await request.response?.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    // 2 つのページは同じ signal (1 つの締切) を受け、締切で AbortError で止まる。
+    expect(signals[1]).toBe(signals[0]);
+    expect(signals[1].aborted).toBe(true);
+    expect((signals[1].reason as DOMException).name).toBe('AbortError');
+    expect(logger.warn.mock.calls).toEqual([['images.upload.failed', { code: 'list_deadline' }]]);
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(kv.kvIncr).not.toHaveBeenCalled();
+  });
+
   it('list が失敗したら 503 storage_unavailable (置かない・全体の枠を使わない)', async () => {
     blob.list.mockRejectedValue(new Error(`Vercel Blob: failed for ${ownerPrefix()}`));
     const response = await POST(post());
@@ -531,6 +582,142 @@ describe('images upload: 置く', () => {
     for (const secretish of [OWNER, OWNER.toLowerCase(), imageOwnerKey(OWNER, SECRET), 'v1/', BLOB_URL_BASE, 'sdk-marker']) {
       expect(logged).not.toContain(secretish);
     }
+  });
+});
+
+describe('images upload: 絶対の期限 (関数の上限より前に必ず固定の code で返す)', () => {
+  const never = () => new Promise<never>(() => {});
+  const failures = () => logger.warn.mock.calls.map(([, detail]) => (detail as { code: string }).code);
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+
+  it('期限は関数の上限 (maxDuration) の 5 秒以上前で、list と put の上限はその内側', () => {
+    expect(maxDuration * 1000 - IMAGE_UPLOAD_DEADLINE_MS).toBeGreaterThanOrEqual(5_000);
+    expect(BLOB_LIST_DEADLINE_MS).toBeLessThan(IMAGE_UPLOAD_DEADLINE_MS);
+    expect(BLOB_PUT_DEADLINE_MS).toBeLessThan(IMAGE_UPLOAD_DEADLINE_MS);
+  });
+
+  it('前段 (KV 4 秒 × 2・list 3 秒) がどれも上限の内側で 11 秒を使った後に put が応答しなければ、開始から 15 秒で 503 (put の 10 秒を待たない)', async () => {
+    checkReadRateLimit.mockImplementationOnce(() => later(4_000, true)).mockImplementationOnce(() => later(4_000, true));
+    blob.list.mockImplementation(() => later(3_000, { blobs: [], hasMore: false }));
+    let signal: AbortSignal | undefined;
+    blob.put.mockImplementation((_pathname: string, _body: unknown, options: { abortSignal: AbortSignal }) => {
+      signal = options.abortSignal;
+      return never();
+    });
+    const request = start();
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(blob.put).toHaveBeenCalledTimes(1);
+    expect(signal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(IMAGE_UPLOAD_DEADLINE_MS - 11_000 - 1);
+    expect(request.response).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request.response?.status).toBe(503);
+    expect(await request.response?.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(request.response?.headers.get('cache-control')).toBe('private, no-store');
+    // put は期限で AbortError で止まる (SDK の送り直しを続けさせない)。
+    expect(signal?.aborted).toBe(true);
+    expect((signal?.reason as DOMException).name).toBe('AbortError');
+    expect(failures()).toEqual(['route_deadline', 'put_deadline']);
+    // 残る timer は無い (put の 10 秒の timer も片づく)。
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('前段で 12 秒を使った後に list が応答しなければ、開始から 15 秒で 503 (list の 5 秒を待たない・全体の枠を使わない)', async () => {
+    checkReadRateLimit.mockImplementationOnce(() => later(12_000, true));
+    let signal: AbortSignal | undefined;
+    blob.list.mockImplementation((options: { abortSignal: AbortSignal }) => {
+      signal = options.abortSignal;
+      return never();
+    });
+    const request = start();
+    await vi.advanceTimersByTimeAsync(IMAGE_UPLOAD_DEADLINE_MS - 1);
+    expect(blob.list).toHaveBeenCalledTimes(1);
+    expect(request.response).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request.response?.status).toBe(503);
+    expect(await request.response?.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect((signal?.reason as DOMException).name).toBe('AbortError');
+    expect(failures()).toEqual(['route_deadline', 'list_deadline']);
+    expect(kv.kvIncr).not.toHaveBeenCalled();
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    ['IP の分ごとの制限 (KV)', () => { checkIpRateLimit.mockImplementation(never); }],
+    ['セッション (KV)', () => { requireSession.mockImplementation(never); }],
+    ['ウォレットの 1 日の枠 (KV)', () => { checkReadRateLimit.mockImplementationOnce(never); }],
+    ['IP の 1 日の枠 (KV)', () => { checkReadRateLimit.mockImplementationOnce(async () => true).mockImplementationOnce(never); }],
+    ['全体の 1 日の枠 (KV)', () => { kv.kvIncr.mockImplementation(never); }],
+  ])('%s が応答しなくても、開始から 15 秒で 503 storage_unavailable (Blob に置かない)', async (_label, setup) => {
+    setup();
+    const request = start();
+    await vi.advanceTimersByTimeAsync(IMAGE_UPLOAD_DEADLINE_MS - 1);
+    expect(request.response).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request.response?.status).toBe(503);
+    expect(await request.response?.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(failures()).toEqual(['route_deadline']);
+    expect(blob.put).not.toHaveBeenCalled();
+  });
+
+  it('本文が届ききらなくても、開始から 15 秒で 503 storage_unavailable', async () => {
+    const req = new Request('https://open-pay.jp/api/images/upload?purpose=product', {
+      method: 'POST',
+      headers: { 'content-type': 'image/jpeg', 'sec-fetch-site': 'same-origin' },
+      // 先頭だけ届いて、続きも終わりも来ない本文。
+      body: new ReadableStream<Uint8Array>({ start: (controller) => controller.enqueue(jpegBytes(16)) }),
+      duplex: 'half',
+    } as RequestInit);
+    const request = start(req);
+    await vi.advanceTimersByTimeAsync(IMAGE_UPLOAD_DEADLINE_MS - 1);
+    expect(request.response).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(request.response?.status).toBe(503);
+    expect(await request.response?.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(failures()).toEqual(['route_deadline']);
+    expect(blob.list).not.toHaveBeenCalled();
+  });
+
+  it('期限の後に前段 (セッション) が返っても、続きは Blob に触れず、全体の枠も使わず、ログも足さない', async () => {
+    requireSession.mockImplementation(() => later(IMAGE_UPLOAD_DEADLINE_MS + 1_000, { ok: true, address: OWNER }));
+    const request = start();
+    await vi.advanceTimersByTimeAsync(IMAGE_UPLOAD_DEADLINE_MS);
+    expect(request.response?.status).toBe(503);
+    await vi.advanceTimersByTimeAsync(60_000);
+    // 続きは本文まで進んで止まる (list を始めない)。
+    expect(checkReadRateLimit).toHaveBeenCalledTimes(2);
+    expect(blob.list).not.toHaveBeenCalled();
+    expect(kv.kvIncr).not.toHaveBeenCalled();
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(failures()).toEqual(['route_deadline']);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('期限の後に全体の枠 (KV) が返っても、put を始めない', async () => {
+    kv.kvIncr.mockImplementation(() => later(IMAGE_UPLOAD_DEADLINE_MS + 1_000, { ok: true, value: 1 }));
+    const request = start();
+    await vi.advanceTimersByTimeAsync(IMAGE_UPLOAD_DEADLINE_MS);
+    expect(request.response?.status).toBe(503);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(kv.kvIncr).toHaveBeenCalledTimes(1);
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(failures()).toEqual(['route_deadline']);
+  });
+
+  it('期限の内側で終われば 200 で、期限の timer を残さない', async () => {
+    checkReadRateLimit.mockImplementationOnce(() => later(4_000, true));
+    blob.list.mockImplementation(() => later(4_000, { blobs: [], hasMore: false }));
+    blob.put.mockImplementation((pathname: string) => later(6_000, { url: `${BLOB_URL_BASE}/${pathname}` }));
+    const request = start();
+    await vi.advanceTimersByTimeAsync(14_000);
+    expect(request.response?.status).toBe(200);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });
 
