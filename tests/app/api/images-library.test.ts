@@ -650,6 +650,18 @@ describe('images library: 削除 (POST /api/images/delete)', () => {
     expect(blob.del).not.toHaveBeenCalled();
   });
 
+  it('保存されたアバターの URL の前後に空白 (全角を含む) があっても、表示する側と同じく trim して使用中と見つけ、消さない', async () => {
+    addBlob(pathFor(1, 'avatar'));
+    kvData.set(`wallet:handles:${OWNER.toLowerCase()}`, ['me']);
+    kvData.set('handle:me', handleRecord(OWNER, { profile: { avatar: ` ${urlFor(pathFor(1, 'avatar'))}　` } }));
+    const listed = await listImages(get());
+    expect(listed.status).toBe(200);
+    expect((await listed.json()).images[0].usedIn).toEqual([{ kind: 'profile', handle: 'me', field: 'avatar' }]);
+    const response = await deleteImage(del(target(1, 'avatar')));
+    expect(response.status).toBe(409);
+    expect(blob.del).not.toHaveBeenCalled();
+  });
+
   it('使っている所が読めなければ 503 で消さない', async () => {
     addBlob(pathFor(1));
     kv.kvLrange.mockResolvedValueOnce({ ok: false, reason: 'timeout' });

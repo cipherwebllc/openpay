@@ -41,10 +41,14 @@ export type ImageUsageResult =
   /** storage = KV が読めない・unreadable = 本人の index にある記録を parser が読めない。どちらも呼び元は 503。 */
   | { ok: false; reason: 'storage' | 'unreadable' };
 
-/** 記録の URL から pathname だけを取り出す (query と fragment も照合から外す)。 */
+/**
+ * 記録の URL から pathname だけを取り出す (query と fragment も照合から外す)。表示する側 (lib/handle/record の parser 等) と
+ * 同じく前後の空白 (全角の空白を含む) を trim してから読む: trim しないと末尾の空白が pathname に %E3%80%80 として残り、
+ * 表示されている画像を「使用なし」と見て消せてしまう。
+ */
 function imageUrlPathname(raw: string): string | null {
   try {
-    return new URL(raw).pathname;
+    return new URL(raw.trim()).pathname;
   } catch {
     return null;
   }
