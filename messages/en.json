@@ -1380,7 +1380,7 @@
       "regenerate": "Create again",
       "generating": "Creating a draft… (this can take about 20 seconds)",
       "resultHeading": "AI draft",
-      "resultHint": "You can edit each field before using it. Drafts are not saved, and fields you fill in are not public until you save the product.",
+      "resultHint": "You can edit each field before using it. Drafts are not saved, and fields you fill in are not public until you save the product. Saving the product clears the draft (so does canceling the edit or editing another product), so copy the English blurb and X post before you save.",
       "fieldTitle": "Suggested title",
       "fieldDesc": "Suggested description",
       "fieldTags": "Suggested tags (comma-separated)",

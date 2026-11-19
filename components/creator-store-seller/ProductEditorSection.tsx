@@ -6,7 +6,7 @@
 // ここには state を持たせない。AI 出品アシスタントの開閉と、その画像・メモ・案は、この部品の子
 // (ListingAssistantEntry・ListingAssistant) が持つ — 親の key の内側なので、アカウントを切り替えると一緒に消える。
 
-import { Component, useMemo, useState, type FormEventHandler, type ReactNode } from 'react';
+import { Component, useState, type FormEventHandler, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import dynamic, { type DynamicOptionsLoadingProps } from 'next/dynamic';
 import Link from 'next/link';
@@ -27,14 +27,13 @@ function ListingAssistantLoading({ error }: DynamicOptionsLoadingProps) {
 }
 
 // 押したときだけ読み込む (押す前は chunk を読まない)。ブラウザの画像の描き直しと出品者の認証の後だけ使うので SSR しない。
-// app router の next/dynamic は React.lazy なので、読み込みに失敗すると失敗を覚えたままになる。もう一度読むときは新しく作る
-// (webpack は失敗した chunk を次の import() で読み直す)。
+// app router の next/dynamic は React.lazy なので、読み込みに失敗すると失敗を覚えたままになる。入口ごと (商品を替えるたびに
+// 作り直される) と、もう一度読むたびに新しく作る (webpack は失敗した chunk を次の import() で読み直し、読めた chunk は使い回す)。
 const createListingAssistant = () =>
   dynamic(() => import('./ListingAssistant').then((module) => module.ListingAssistant), {
     ssr: false,
     loading: ListingAssistantLoading,
   });
-const InitialListingAssistant = createListingAssistant();
 
 /**
  * アシスタントの読み込み (通信断の ChunkLoadError など) や描画の例外を、この中だけで受け止める境界。
@@ -66,16 +65,21 @@ function ListingAssistantEntry({
   const t = useTranslations('CreatorStoreSeller.assistant');
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  // 読み込みに失敗したら、もう一度読む・閉じるたびに増やす (境界と本体の読み込みを新しくする)。
+  // 読み込みに失敗したら、もう一度読む・閉じるたびに増やす (境界の key と本体の読み込みを新しくする)。
   const [attempt, setAttempt] = useState(0);
-  const ListingAssistant = useMemo(() => (attempt === 0 ? InitialListingAssistant : createListingAssistant()), [attempt]);
+  // useMemo は捨てられることがある (捨てられると本体が作り直されて案が消える) ので、読み込みの部品は state に持つ。
+  const [ListingAssistant, setListingAssistant] = useState(createListingAssistant);
+  const reload = () => {
+    setAttempt((current) => current + 1);
+    setListingAssistant(() => createListingAssistant());
+  };
   const fallback = (
     <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
       <p>{t('loadFailed')}</p>
       <div className="mt-2 flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => setAttempt((current) => current + 1)}
+          onClick={reload}
           className="inline-flex min-h-11 items-center rounded-lg border border-red-300 bg-white px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
         >
           {t('loadRetry')}
@@ -85,7 +89,7 @@ function ListingAssistantEntry({
           onClick={() => {
             setOpen(false);
             setLoaded(false);
-            setAttempt((current) => current + 1);
+            reload();
           }}
           className="inline-flex min-h-11 items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-slate-400"
         >

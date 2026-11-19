@@ -186,14 +186,24 @@ const lineOf = (value: string) => value.replace(/[\r\n]+/g, ' ').trim();
 // タグはフォームと同じく 、と , で区切る (案の欄は textarea なので改行も区切りにする)。
 const splitTags = (value: string) => value.split(/[,、\r\n]/).map((tag) => tag.trim()).filter(Boolean);
 
-// 「案を直したか」の比べに使う形。入れる値 (lineOf・タグは parseHostedTags で整えた並び) よりさらに寄せる: NFKC・見えない文字
-// (保存の sanitizeLine が落とす制御・書式に加え Default_Ignorable)・空白の並びを 1 つに。見本に空白や見えない文字を足しただけ・
-// タグの区切りや重なりを変えただけでは、保存される値は見本と変わらないので「直した」にしない (見本のまま入れない)。
+/**
+ * 欄の値を、実際に使う形にする (フォームに入れる値・X の本文)。1 行の欄は lineOf、タグは保存と同じ parseHostedTags で
+ * 重なりを除いた並び (検証を通らなければ null = 使えない)。入れる値と「直したか」の比べの両方がこの 1 つの関数を通る。
+ */
+function usableOf(field: TextField, value: string): string | null {
+  if (field !== 'tags') return lineOf(value);
+  const parsed = parseHostedTags(splitTags(value));
+  return parsed.ok ? (parsed.tags ?? []).join(', ') : null;
+}
+
+// 「案を直したか」の比べ: 使う形 (usableOf) にしてから、さらに寄せる: NFKC・見えない文字 (保存の sanitizeLine が落とす制御・
+// 書式に加え Default_Ignorable) を除く・空白の並びを 1 つに。見本に空白・改行・見えない文字を足しただけ・タグの区切りや重なりを
+// 変えただけでは、保存される値は見本と変わらないので「直した」にしない (見本のまま入れない)。
 const INVISIBLE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Default_Ignorable_Code_Point}]/gu;
 const comparableLine = (value: string) =>
   value.normalize('NFKC').replace(INVISIBLE_RE, '').replace(/\s+/gu, ' ').trim();
-const comparableTags = (value: string) =>
-  [...new Set(splitTags(value).map(comparableLine).filter(Boolean))].join(',');
+const comparableOf = (field: TextField, usable: string) =>
+  field === 'tags' ? [...new Set(splitTags(usable).map(comparableLine).filter(Boolean))].join(',') : comparableLine(usable);
 
 function lineIssue(value: string, max: number): FitIssue | null {
   const line = lineOf(value);
@@ -327,13 +337,15 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
 
   const issueOf = (current: ListingAssistantDraft, field: TextField): FitIssue | null => {
     const value = valueOf(current, field);
+    // いまの欄の値の検証 (空・長すぎ・タグの数と長さ) を先に見る。直した値の誤りは、案との比べより優先する。
     const issue = field === 'tags' ? tagsIssue(value) : lineIssue(value, FIELD_MAX[field]);
-    // 欄で直した文 (使う形にしても案と違う文) は画面で数える。
-    const comparable = field === 'tags' ? comparableTags : comparableLine;
-    if (comparable(value) !== comparable(draftValueOf(current, field))) return issue;
+    if (issue) return issue;
+    // 検証を通った値を使う形にして案と比べる。違えば欄で直した文なので使える。
+    const usable = usableOf(field, value);
+    const draftValue = draftValueOf(current, field);
+    if (usable !== null && comparableOf(field, usable) !== comparableOf(field, usableOf(field, draftValue) ?? draftValue)) return null;
     // 案のままの欄 (直して元に戻した欄も) は server の判定 (保存と同じ sanitizeLine・parseHostedTags) に従う。
     if (current[field].fits) return null;
-    if (issue) return issue;
     return field === 'tags' ? { kind: 'tagsClipped' } : { kind: 'clipped', max: FIELD_MAX[field] };
   };
 
@@ -354,10 +366,9 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
 
   const apply = (current: ListingAssistantDraft, field: ApplyField) => {
     if (issueOf(current, field)) return;
-    const raw = valueOf(current, field);
-    // タグは保存と同じ parseHostedTags で重なりを除いてから入れる (issueOf が通したので ok)。
-    const tags = field === 'tags' ? parseHostedTags(splitTags(raw)) : null;
-    const after = tags ? (tags.ok ? tags.tags ?? [] : []).join(', ') : lineOf(raw);
+    // 比べに使ったのと同じ usableOf で入れる値を作る。使えない値 (検証を通らないタグ) なら何もしない (既存の欄を空にしない)。
+    const after = usableOf(field, valueOf(current, field));
+    if (after === null) return;
     const before = productForm[field];
     // もう入っている値を入れ直すだけなら何もしない (「元に戻す」の前の値を案そのもので上書きしない)。
     if (before === after) return;
@@ -423,7 +434,7 @@ export function ListingAssistant({ productForm, updateProduct }: Props) {
                   </button>
                 ) : (
                   <a
-                    href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(lineOf(value))}`}
+                    href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(usableOf('x', value) ?? '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className={buttonClass}

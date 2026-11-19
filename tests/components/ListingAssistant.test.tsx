@@ -391,6 +391,49 @@ describe('ListingAssistant: 案の反映', () => {
     expect(within(screen.getByRole('region', { name: A.checksHeading })).getAllByRole('listitem')).toHaveLength(5);
   });
 
+  it('見本の空白を改行に置き換えても「直した」にしない (比べる値も入れる値と同じ lineOf で整える)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse(draftOf({
+      title: { value: '青い ランプ', fits: false },
+      x: { value: '青い ランプを出品しました', fits: false },
+    }))));
+    renderAssistant();
+    await generateWithMemo();
+    const applyTitle = screen.getByRole('button', { name: A.applyTitle });
+    for (const value of ['青い\nランプ', '青い\r\nランプ', ' 青い\nランプ\n']) {
+      fireEvent.change(screen.getByRole('textbox', { name: A.fieldTitle }), { target: { value } });
+      expect(applyTitle, JSON.stringify(value)).toBeDisabled();
+      fireEvent.click(applyTitle);
+    }
+    fireEvent.change(screen.getByRole('textbox', { name: A.fieldX }), { target: { value: '青い\nランプを出品しました' } });
+    expect(screen.queryByRole('link', { name: A.openX })).not.toBeInTheDocument();
+    expect(updates).toEqual([]);
+    // 本当に直した文は入れられる。
+    fireEvent.change(screen.getByRole('textbox', { name: A.fieldTitle }), { target: { value: '青いランプ' } });
+    expect(applyTitle).toBeEnabled();
+  });
+
+  it('fits:true のタグに同じタグを足して 6 個にすると、検証のエラーを出して入れない (既存のタグを空にしない)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse(draftOf({ tags: { value: ['a', 'b', 'c', 'd', 'e'], fits: true } }))));
+    renderAssistant();
+    await generateWithMemo();
+    const applyTags = screen.getByRole('button', { name: A.applyTags });
+    expect(applyTags).toBeEnabled();
+    fireEvent.change(screen.getByRole('textbox', { name: A.fieldTags }), { target: { value: 'a, b, c, d, e, a' } });
+    expect(applyTags).toBeDisabled();
+    expect(screen.getByText('タグは 5 個まで・1 つ 24 字までです。欄で直すと入れられます。')).toBeInTheDocument();
+    fireEvent.click(applyTags);
+    expect(updates).toEqual([]);
+    expect(latestForm.tags).toBe('Coo World, 照明、3D');
+  });
+
+  it('案の説明に、保存すると案が消えるので英語の紹介と X の投稿文は保存の前にコピーするよう書く', async () => {
+    renderAssistant();
+    await generateWithMemo();
+    expect(screen.getByText(A.resultHint)).toHaveTextContent('商品を保存すると案は消えます');
+    expect(A.resultHint).toContain('英語の紹介と X の投稿文は保存の前にコピーしてください。');
+    expect(en.CreatorStoreSeller.assistant.resultHint).toContain('copy the English blurb and X post before you save');
+  });
+
   it('見本に空白・改行・見えない文字・区切りの違い・重なりを足しただけでは「直した」にしない (使う形で比べる)', async () => {
     const sample = `${'あ'.repeat(59)}い`;
     vi.stubGlobal('fetch', vi.fn(async () => okResponse(draftOf({

@@ -46,13 +46,20 @@ vi.mock('@/hooks/useSiweSession', () => ({
 import { CreatorStoreSellerPanel } from '@/components/CreatorStoreSellerPanel';
 
 const A = ja.CreatorStoreSeller.assistant;
+const PRODUCT = {
+  id: `h_${'d'.repeat(32)}`, payTo: ADDRESS, title: '既存の商品', priceJpyc: '500', contentKind: 'text', label: 'download',
+  saleActive: false, contentAvailable: true,
+};
 
 beforeEach(() => {
   chunk.fail = true;
   chunk.attempts = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url === '/api/store/seller') return jsonResponse({ ok: true, seller: null, listingAssistant: true });
-    if (url === '/api/store/products') return jsonResponse({ ok: true, products: [], max: 24 });
+    if (url === '/api/store/products') return jsonResponse({ ok: true, products: [PRODUCT], max: 24 });
+    if (url === `/api/store/products/${PRODUCT.id}`) {
+      return jsonResponse({ ok: true, product: PRODUCT, content: { kind: 'text', value: '既存の本文' } });
+    }
     return jsonResponse({ ok: false, error: 'unexpected' }, 500);
   }));
   // React は境界で受け止めた例外も console.error に出す (この test では想定どおりの出力)。
@@ -111,8 +118,8 @@ describe('AI 出品アシスタントの本体の読み込みに失敗したと�
     const open = screen.getByRole('button', { name: A.open });
     fireEvent.click(open);
     await screen.findByRole('alert');
-    // 前の test で失敗した初回の読み込みは React.lazy が失敗を覚えている (この test では loader を呼ばずに失敗する)。
-    const attemptsBefore = chunk.attempts;
+    // 読み込みの部品は入口ごとに作るので、前の test の失敗を使い回さず、この test でも 1 回読みに行く。
+    expect(chunk.attempts).toBe(1);
     fireEvent.click(screen.getByRole('button', { name: A.loadClose }));
     expect(open).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText(A.loadFailed)).not.toBeInTheDocument();
@@ -121,7 +128,24 @@ describe('AI 出品アシスタントの本体の読み込みに失敗したと�
     chunk.fail = false;
     fireEvent.click(open);
     expect(await screen.findByRole('button', { name: A.generate })).toBeInTheDocument();
-    await waitFor(() => expect(chunk.attempts).toBe(attemptsBefore + 1));
+    await waitFor(() => expect(chunk.attempts).toBe(2));
     expect(screen.getByLabelText('商品名')).toHaveValue('手で書いた商品名');
+  });
+
+  it('一度失敗して読み直せた後に別の商品の編集へ移っても、失敗した読み込みを使い回さない', async () => {
+    renderPanel();
+    await screen.findByRole('heading', { name: '新しい商品' });
+    fireEvent.click(screen.getByRole('button', { name: A.open }));
+    await screen.findByRole('alert');
+    chunk.fail = false;
+    fireEvent.click(screen.getByRole('button', { name: A.loadRetry }));
+    expect(await screen.findByRole('button', { name: A.generate })).toBeInTheDocument();
+
+    // 編集の対象を替えると入口が作り直される (前の商品の案を捨てる)。そこで開いても失敗の案内を出さない。
+    fireEvent.click(screen.getByRole('button', { name: '編集' }));
+    await waitFor(() => expect(screen.getByLabelText('商品名')).toHaveValue('既存の商品'));
+    fireEvent.click(screen.getByRole('button', { name: A.open }));
+    expect(await screen.findByRole('button', { name: A.generate })).toBeInTheDocument();
+    expect(screen.queryByText(A.loadFailed)).not.toBeInTheDocument();
   });
 });
