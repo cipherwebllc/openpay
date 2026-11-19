@@ -457,6 +457,7 @@ describe('Gemini の応答', () => {
     ['大文字の scheme', 'HTTPS://EVIL.EXAMPLE/A'],
     ['IPv6 のホスト', 'https://[2001:db8::1]/a'],
     ['IPv6 のホストだけ', 'http://[::1]'],
+    ['NFKC で分かれる文字 (¨) で始まるユーザー名 (正規化した写しでは一致しない)', 'https://\u00a8user@evil.example/a'],
   ])('6 欄すべてで、文字を正規化してから URL を落とす (%s)', (_label, url) => {
     const withUrl = (text: string) => `${text} ${url} を見てください`;
     const result = draftFromGeminiResponse(

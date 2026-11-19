@@ -358,10 +358,16 @@ const URL_RE = new RegExp(`(?:https?:\\/\\/(?:\\[[^\\]\\s]*\\]${URL_TAIL}*|${URL
  * - URL がある: 正規化した写しから URL を除いた文を返す (除いた跡は空白なので新しい URL は組み上がらない)。
  */
 function normalizeOutputText(raw: string): string {
-  const normalized = raw.replace(/[\r\n]+/g, ' ').normalize('NFKC').replace(INVISIBLE_RE, '');
-  // search は global の正規表現でも lastIndex を使わず先頭から探す。
-  if (normalized.search(URL_RE) === -1) return sanitizeLine(raw, Number.MAX_SAFE_INTEGER) ?? '';
-  return sanitizeLine(normalized.replace(URL_RE, ' ').replace(/ {2,}/g, ' '), Number.MAX_SAFE_INTEGER) ?? '';
+  const original = sanitizeLine(raw, Number.MAX_SAFE_INTEGER) ?? '';
+  // 1 段目: 返すかもしれない元の文 (sanitizeLine の後) の URL を落とす。2 段目: その写しを正規化 (NFKC・見えない文字を除く)
+  // して、正規化で現れる URL も落とす。片方の形だけで探すと、もう片方の形の URL が残る (例: NFKC で ¨ が空白と結合文字に
+  // 分かれ、正規化した写しでは https:// の直後が空白になって一致しないのに、元の文では有効な URL のまま: Codex のレビュー)。
+  const pass1 = original.replace(URL_RE, ' ');
+  const normalized = pass1.replace(/[\r\n]+/g, ' ').normalize('NFKC').replace(INVISIBLE_RE, '');
+  const pass2 = normalized.replace(URL_RE, ' ');
+  // どちらの形にも URL が無いときだけ、元の文のまま返す (全角の記号・絵文字を保つ)。
+  if (pass1 === original && pass2 === normalized) return original;
+  return sanitizeLine(pass2.replace(/ {2,}/g, ' '), Number.MAX_SAFE_INTEGER) ?? '';
 }
 
 /** 上限の中に切った見本 (UTF-16 の長さ = sanitizeLine と同じ数え方・サロゲートの組は割らない)。 */
