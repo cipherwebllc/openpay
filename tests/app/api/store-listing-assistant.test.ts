@@ -1,6 +1,7 @@
 // @vitest-environment node
 // POST /api/store/seller/listing-assistant (AI 出品アシスタント) と、出品者の GET の listingAssistant。
-// 認可の順 (フラグ → 同じ origin → JSON → 出品者認証 → 運営者 → 日次の制限 → 入力 → Gemini)・商品を KV から読まないこと・
+// 認可の順 (フラグ → 同じ origin → 出品者認証 → 運営者 → 日次の制限 → 本文 (JSON) → 入力 → Gemini)・本文は認可を通るまで
+// 読まないこと (req.bodyUsed)・商品を KV から読まないこと・
 // 有料の本文・納品 URL・開示の欄の目印が Google 宛ての本文に 1 つも出ないことを固定する。実 API は使わない (fetch を mock)。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NextResponse } from 'next/server';
@@ -117,19 +118,23 @@ describe('listing assistant route: 入口の検査', () => {
     ['Store のフラグ OFF', () => { state.storeEnabled = false; }],
     ['アシスタントのフラグ OFF', () => { vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', ''); }],
     ['アシスタントのフラグが 0', () => { vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', '0'); }],
-  ])('%s は 404 で、認証・回数・Google に届かない', async (_label, setup) => {
+  ])('%s は 404 で、本文・認証・回数・Google に届かない', async (_label, setup) => {
     setup();
-    const response = await POST(post(cooBody()));
+    const req = post(cooBody());
+    const response = await POST(req);
     expect(response.status).toBe(404);
+    expect(req.bodyUsed).toBe(false);
     expect(await response.json()).toEqual({ ok: false, error: 'not_found' });
     expect(requireSession).not.toHaveBeenCalled();
     expect(checkReadRateLimit).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('別 origin は 403・JSON でない Content-Type は 415 (認証の前)', async () => {
-    const crossSite = await POST(post(cooBody(), { 'sec-fetch-site': 'cross-site' }));
+  it('別 origin は 403・JSON でない Content-Type は 415 (認証の前・本文を読まない)', async () => {
+    const crossSiteReq = post(cooBody(), { 'sec-fetch-site': 'cross-site' });
+    const crossSite = await POST(crossSiteReq);
     expect(crossSite.status).toBe(403);
+    expect(crossSiteReq.bodyUsed).toBe(false);
     expect(await crossSite.json()).toEqual({ ok: false, error: 'cross_site_request' });
     const sameSite = await POST(post(cooBody(), { 'sec-fetch-site': 'same-site' }));
     expect(sameSite.status).toBe(403);
@@ -140,23 +145,29 @@ describe('listing assistant route: 入口の検査', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('本文は全体 1.5 MiB まで (超えたら 413)・JSON でなければ 400 (どちらも認証の前)', async () => {
-    const tooLarge = await POST(post({ memo: 'a', facts: {}, pad: 'x'.repeat(1.5 * 1024 * 1024) }));
+  it('本文は全体 1.5 MiB まで (超えたら 413)・JSON でなければ 400 (どちらも認証・運営者・日次の制限の後)', async () => {
+    const tooLargeReq = post({ memo: 'a', facts: {}, pad: 'x'.repeat(1.5 * 1024 * 1024) });
+    const tooLarge = await POST(tooLargeReq);
     expect(tooLarge.status).toBe(413);
     expect(await tooLarge.json()).toEqual({ ok: false, error: 'payload_too_large' });
+    expect(tooLargeReq.bodyUsed).toBe(true);
     const notJson = await POST(post('{"memo":'));
     expect(notJson.status).toBe(400);
     expect(await notJson.json()).toEqual({ ok: false, error: 'invalid_json' });
-    expect(requireSession).not.toHaveBeenCalled();
+    expect(requireSession).toHaveBeenCalledTimes(2);
+    expect(checkReadRateLimit).toHaveBeenCalledWith(DAILY_KEY, 20, 86_400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('未認証は 401', async () => {
+  it('未認証は 401 (本文を読まない)', async () => {
     requireSession.mockResolvedValue({
       ok: false,
       response: NextResponse.json({ ok: false, error: 'unauthenticated' }, { status: 401 }),
     });
-    const response = await POST(post(cooBody()));
+    const req = post({ memo: 'a', facts: {}, pad: 'x'.repeat(1.5 * 1024 * 1024) });
+    const response = await POST(req);
     expect(response.status).toBe(401);
+    expect(req.bodyUsed).toBe(false);
     expect(await response.json()).toEqual({ ok: false, error: 'unauthenticated' });
     expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(fetchMock).not.toHaveBeenCalled();
@@ -172,10 +183,12 @@ describe('listing assistant route: 入口の検査', () => {
     ['運営者でない', () => { vi.stubEnv('ADMIN_WALLETS', OTHER); }],
     ['ADMIN_WALLETS が空', () => { vi.stubEnv('ADMIN_WALLETS', ''); }],
     ['ADMIN_WALLETS が未設定', () => { vi.stubEnv('ADMIN_WALLETS', undefined); }],
-  ])('%s は 403 で、日次の回数を使わず Google に届かない', async (_label, setup) => {
+  ])('%s は 403 で、本文を読まず日次の回数を使わず Google に届かない', async (_label, setup) => {
     setup();
-    const response = await POST(post(cooBody()));
+    const req = post(cooBody());
+    const response = await POST(req);
     expect(response.status).toBe(403);
+    expect(req.bodyUsed).toBe(false);
     expect(await response.json()).toEqual({ ok: false, error: 'forbidden' });
     expect(checkReadRateLimit).not.toHaveBeenCalledWith(DAILY_KEY, expect.anything(), expect.anything());
     expect(fetchMock).not.toHaveBeenCalled();
@@ -185,8 +198,11 @@ describe('listing assistant route: 入口の検査', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date(Date.UTC(2026, 10, 19, 23, 0, 0)));
     state.dailyAllowed = false;
-    const response = await POST(post(cooBody()));
+    const req = post('{"memo":');
+    const response = await POST(req);
     expect(response.status).toBe(429);
+    // 日次の制限は本文より前 (壊れた JSON でも 429・本文を読まない)。
+    expect(req.bodyUsed).toBe(false);
     expect(await response.json()).toEqual({ ok: false, error: 'rate_limited', retryAfterSec: 3600 });
     expect(response.headers.get('retry-after')).toBe('3600');
     expect(checkReadRateLimit).toHaveBeenCalledWith(DAILY_KEY, 20, 86_400);

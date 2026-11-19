@@ -54,7 +54,7 @@ export const LISTING_ASSISTANT_DAILY_MAX = 20;
 export const LISTING_ASSISTANT_DAILY_KEY = 'store-listing-assistant:global';
 /**
  * 思考の token も maxOutputTokens に入る (公式 docs: 上限に達すると MAX_TOKENS で JSON が切れる)。gemini-4-hydrogen は思考を
- * 切れない (minimal は拒否) ので thinkingLevel は low にし、案の JSON (多くて 2 千 token 程度) と low の思考が収まる幅を取る。
+ * 切れない (minimal は拒否) ので thinkingLevel は LOW にし、案の JSON (多くて 2 千 token 程度) と LOW の思考が収まる幅を取る。
  */
 const MAX_OUTPUT_TOKENS = 8192;
 const GEMINI_RESPONSE_MAX_BYTES = 1024 * 1024;
@@ -295,7 +295,8 @@ export function geminiRequestBody(input: ListingAssistantInput): Record<string, 
       responseMimeType: 'application/json',
       responseJsonSchema: DRAFT_SCHEMA,
       maxOutputTokens: MAX_OUTPUT_TOKENS,
-      thinkingConfig: { thinkingLevel: 'low' },
+      // REST の reference (GenerationConfig.thinkingConfig.thinkingLevel) の enum の名前 (THINKING_LEVEL_UNSPECIFIED・MINIMAL・LOW・…)。
+      thinkingConfig: { thinkingLevel: 'LOW' },
     },
   };
 }
@@ -339,28 +340,28 @@ const BLOCKED_FINISH_REASONS: ReadonlySet<string> = new Set([
   'IMAGE_RECITATION',
 ]);
 
-// 制御・書式・サロゲート (保存の UNSAFE_UNICODE_RE と同じ) に加え、見えない文字 (Default_Ignorable: ゼロ幅・ハングルの
-// 埋め字 U+3164・異体字セレクタなど) も除く。見えない文字で区切った URL を、除いた後に URL として残さないため。
+// URL を探す写しから除く文字: 制御・書式・サロゲート (保存の UNSAFE_UNICODE_RE と同じ) に加え、見えない文字 (Default_Ignorable:
+// ゼロ幅・ハングルの埋め字 U+3164・異体字セレクタなど)。見えない文字で区切った URL を、URL として見つけるため。
 const INVISIBLE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Default_Ignorable_Code_Point}]/gu;
 // scheme (http / https) か www. で始まり、空白・引用符・括弧・日本語の句読点の手前まで (日本語のドメイン・パスも含む)。
+// 限界: scheme も www. も無い形 (bit.ly/abc・evil.example/a) と、ほかの scheme (ftp:// など) は落とさない。広げると
+// ファイル名 (lamp.glb)・形式 (v1.2) を巻き込むため。URL を書かないことは system の指示で求め、ここは守られなかったときの網。
 // URL の続きに使わない文字 (空白・引用符・括弧・日本語の句読点)。
 const URL_TAIL = `[^\\s"'<>()[\\]{},、。「」『』【】〈〉《》]`;
 // scheme の直後の IPv6 のホスト ([2001:db8::1]) は括弧を含むので、別の枝で丸ごと落とす (Codex のレビュー)。
 const URL_RE = new RegExp(`(?:https?:\\/\\/(?:\\[[^\\]\\s]*\\]${URL_TAIL}*|${URL_TAIL}+)|www\\.${URL_TAIL}+)`, 'giu');
 
 /**
- * 出力の 1 つの文字列を整える (6 欄すべて同じ): 改行を空白に → NFKC (全角の ｈｔｔｐｓ：／／ などを ASCII に) → 制御文字と
- * 見えない文字を除く → URL を除く (指示でも禁じるが、守られなかったときの網・除いた跡は空白なので新しい URL は組み上がらない)
- * → 保存と同じ sanitizeLine。文字の正規化を URL の判定より先にする (後にすると判定をすり抜ける)。
+ * 出力の 1 つの文字列を整える (6 欄すべて同じ)。URL は正規化した写し (改行を空白に → NFKC で全角の ｈｔｔｐｓ：／／ などを ASCII に
+ * → 制御文字と見えない文字を除く) で探す (元の文のままだと全角・見えない文字で判定をすり抜ける)。
+ * - URL が無い: 元の文に保存と同じ sanitizeLine だけを当てて返す (全角の記号「！（）～…」や絵文字の異体字セレクタを変えない)。
+ * - URL がある: 正規化した写しから URL を除いた文を返す (除いた跡は空白なので新しい URL は組み上がらない)。
  */
 function normalizeOutputText(raw: string): string {
-  const text = raw
-    .replace(/[\r\n]+/g, ' ')
-    .normalize('NFKC')
-    .replace(INVISIBLE_RE, '')
-    .replace(URL_RE, ' ')
-    .replace(/ {2,}/g, ' ');
-  return sanitizeLine(text, Number.MAX_SAFE_INTEGER) ?? '';
+  const normalized = raw.replace(/[\r\n]+/g, ' ').normalize('NFKC').replace(INVISIBLE_RE, '');
+  // search は global の正規表現でも lastIndex を使わず先頭から探す。
+  if (normalized.search(URL_RE) === -1) return sanitizeLine(raw, Number.MAX_SAFE_INTEGER) ?? '';
+  return sanitizeLine(normalized.replace(URL_RE, ' ').replace(/ {2,}/g, ' '), Number.MAX_SAFE_INTEGER) ?? '';
 }
 
 /** 上限の中に切った見本 (UTF-16 の長さ = sanitizeLine と同じ数え方・サロゲートの組は割らない)。 */

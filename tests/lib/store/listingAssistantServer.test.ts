@@ -263,7 +263,8 @@ describe('Gemini への request', () => {
     const config = body.generationConfig as Record<string, unknown>;
     expect(Object.keys(config).sort()).toEqual(['maxOutputTokens', 'responseJsonSchema', 'responseMimeType', 'thinkingConfig']);
     expect(config.responseMimeType).toBe('application/json');
-    expect(config.thinkingConfig).toEqual({ thinkingLevel: 'low' });
+    // REST の reference の enum の名前 (THINKING_LEVEL_UNSPECIFIED・MINIMAL・LOW・MEDIUM・HIGH・XHIGH) で送る。
+    expect(config.thinkingConfig).toEqual({ thinkingLevel: 'LOW' });
     expect(config.maxOutputTokens).toBe(8192);
     expect(config.responseJsonSchema).toMatchObject({
       type: 'object',
@@ -477,13 +478,39 @@ describe('Gemini の応答', () => {
     expect(result.draft.tags.value).toContain('照明');
   });
 
-  it('全角の英数字は NFKC で半角になり、見えない文字は除かれる (URL でない文字は残す)', () => {
+  it('URL が無ければ元の文に保存と同じ sanitizeLine だけを当てる (全角の記号・絵文字の異体字セレクタを変えない)', () => {
+    const text = '新作です！（GLB形式）～…❤️ ＧＬＢ・👍🏽';
     const result = draftFromGeminiResponse(
-      geminiBody({ ...COO_WORLD_DRAFT, desc: 'ＧＬＢ形式の\u200bライト\u3164です', tags: ['ＧＬＢ'] }),
+      geminiBody({
+        title: text,
+        desc: `${text}\u200b`,
+        tags: ['ＧＬＢ', '❤️'],
+        en: 'Ｎｅｗ！ “lamp” …',
+        x: `${text}\n2 行目`,
+        checks: [`${text}の形式を確かめる`],
+      }),
+    );
+    expect(result).toEqual({
+      ok: true,
+      draft: {
+        title: { value: text, fits: true },
+        // ゼロ幅の空白 (書式文字) は保存と同じく除く。
+        desc: { value: text, fits: true },
+        tags: { value: ['ＧＬＢ', '❤️'], fits: true },
+        en: { value: 'Ｎｅｗ！ “lamp” …', fits: true },
+        x: { value: `${text} 2 行目`, fits: true },
+        checks: { value: [`${text}の形式を確かめる`], fits: true },
+      },
+    });
+  });
+
+  it('URL があった欄だけ、正規化した文から URL を除いて返す (ほかの欄は元の文のまま)', () => {
+    const result = draftFromGeminiResponse(
+      geminiBody({ ...COO_WORLD_DRAFT, title: '新作！（GLB）', desc: '新作！ ｈｔｔｐｓ：／／ｅｖｉｌ．ｅｘａｍｐｌｅ （GLB）' }),
     );
     expect(result).toMatchObject({
       ok: true,
-      draft: { desc: { value: 'GLB形式のライトです', fits: true }, tags: { value: ['GLB'], fits: true } },
+      draft: { title: { value: '新作！（GLB）', fits: true }, desc: { value: '新作! (GLB)', fits: true } },
     });
   });
 
