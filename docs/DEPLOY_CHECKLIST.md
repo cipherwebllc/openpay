@@ -3467,10 +3467,13 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
   エラーの応答とログにアドレス・ownerKey・path・URL は出ない。成功の応答の `url` だけは公開の Blob の URL そのもの (path を含む・設計どおりの例外)。
   request の `x-vercel-oidc-token` は Sentry の event と transaction から落とす (lib/telemetryRedaction)。
 - 上限: 1 ウォレット 200 枚 (Blob の list で数える)・1 日 (UTC) にウォレット 30 回・IP 60 回・全体 200 回。
-- 一覧のログ `images.list.failed` の `code`: `list_failed`・`list_deadline` (list 5 秒)・`list_cursor_invalid` (続きがあるのに
-  cursor が無い・前と同じ・形が違う)・`usage_unavailable` (使っている所の KV)・`route_deadline` (15 秒)。削除のログ
-  `images.delete.failed` の `code`: `head_failed`・`head_deadline`・`usage_unavailable`・`delete_failed`・`delete_deadline`・
-  `route_deadline`。どれも 503 `storage_unavailable` で、使っている所が読めないときは消さない。
+- 一覧のログ `images.list.failed` の `code`: `list_failed`・`list_deadline` (list 5 秒)・`list_invalid` (Blob の応答の形が違う:
+  url と path が合わない・読めない日時)・`list_cursor_invalid` (続きがあるのに cursor が無い・前と同じ・形が違う)・
+  `usage_unavailable` (使っている所の KV)・`usage_unreadable` (本人の handle か商品の記録があるのに読めない)・`route_deadline`
+  (15 秒・timer か単調時計の経過時間のどちらかで)。削除のログ `images.delete.failed` の `code`: `head_failed`・`head_deadline`・
+  `head_invalid` (head の url がその path の URL でない)・`usage_unavailable`・`usage_unreadable`・`delete_failed`・
+  `delete_deadline`・`route_deadline`。どれも 503 `storage_unavailable` で、使っている所を確かめられないときは消さない。
+  `usage_unreadable` は記録を直すまで、その wallet の一覧と削除が 503 のまま (壊れた記録の画像を「使っていない」と言わない)。
 - `list_failed` が毎回出るとき (アップロードが 1 回も通らない): route は SDK の例外の文を捨てるので、ログからは原因が分からない。
   次を順に見る: Production の env に `BLOB_STORE_ID` があるか・store が Production の Environment につながっているか・project の
   OIDC (Secure backend access) が有効か・store が public で作られているか。`not_configured` なら `IMAGE_OWNER_KEY_SECRET`・

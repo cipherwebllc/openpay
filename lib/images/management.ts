@@ -41,8 +41,14 @@ export type ImageLibraryContext = {
   ownerKey: string;
   /** 本人の prefix (`v1/<ownerKey>/`・末尾の / まで)。 */
   prefix: string;
-  /** 絶対の期限 (abort されたら次の段を始めない)。 */
+  /** 絶対の期限の signal (Blob の list / head / del に渡す。期限の timer が abort する)。 */
   deadline: AbortSignal;
+  /**
+   * 次の段 (使っている所の読み取り・head・del) を始める直前に呼ぶ。期限を過ぎていれば 503 の応答を返す (始めない)。timer の
+   * abort だけでなく、単調時計 (performance.now) の実の経過時間でも見る: 同期の処理や event loop の遅れで期限をまたぐと、timer の
+   * callback が走るより先にここへ来ることがあるため。
+   */
+  pastDeadline: () => NextResponse | null;
 };
 
 const MINUTE_SEC = 60;
@@ -107,18 +113,34 @@ export async function runImageLibraryRequest(
   // 3) 絶対の期限 (アップロードの route と同じ形)。各段の上限 (KV 5 秒・list / head / del 5 秒) は段ごとに数えるので、
   // 足すと関数の上限 (maxDuration) を超えうる。合計を 1 本の timer で締め、期限で deadline を abort する (Blob はこの signal
   // でも締まり、SDK の送り直しも止まる)。期限の後も handler の続きは動きうるので、handler は次の段 (使っている所の読み取り・
-  // del) の前に deadline.aborted を見て、始めない。
+  // head・del) の前に pastDeadline を見て、始めない。pastDeadline は timer に加えて単調時計の期限の時刻 (deadlineAt) も見る
+  // (timer の callback は期限ちょうどに走るとは限らない: 同期の処理の間に期限をまたいでも del を始めない)。
   const deadline = new AbortController();
+  const deadlineAt = performance.now() + IMAGE_LIBRARY_DEADLINE_MS;
+  let timedOut = false;
+  // 期限のログは 1 回だけ (timer と pastDeadline のどちらが先に気づいても)。
+  const expire = () => {
+    if (timedOut) return;
+    timedOut = true;
+    logImageLibraryFailure(kind, 'route_deadline');
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<NextResponse>((resolve) => {
     timer = setTimeout(() => {
-      logImageLibraryFailure(kind, 'route_deadline');
+      expire();
+      // 先に応答を決めてから止める (止めた段の 503 と同じ応答だが、どちらが返るかを順に任せない)。
       resolve(imageLibraryFail('storage_unavailable', 503));
       deadline.abort();
     }, IMAGE_LIBRARY_DEADLINE_MS);
   });
+  const pastDeadline = (): NextResponse | null => {
+    if (!timedOut && !deadline.signal.aborted && performance.now() < deadlineAt) return null;
+    expire();
+    deadline.abort();
+    return imageLibraryFail('storage_unavailable', 503);
+  };
   try {
-    return await Promise.race([guarded(req, kind, mode, deadline.signal, handler), expired]);
+    return await Promise.race([guarded(req, kind, mode, deadline.signal, pastDeadline, handler), expired]);
   } finally {
     clearTimeout(timer);
   }
@@ -129,6 +151,7 @@ async function guarded(
   kind: ImageLibraryKind,
   mode: 'admin' | 'all',
   deadline: AbortSignal,
+  pastDeadline: () => NextResponse | null,
   handler: (context: ImageLibraryContext) => Promise<NextResponse>,
 ): Promise<NextResponse> {
   // 4) 画面のウォレット (KV を読む前に形だけ)。
@@ -154,8 +177,9 @@ async function guarded(
   ) {
     return rateLimited(secondsUntilNextWindow(MINUTE_SEC));
   }
-  // 9) 本体。前の段 (KV) を待つ間に期限を過ぎていたら始めない (POST / GET はもう 503 を返している)。
-  if (deadline.aborted) return imageLibraryFail('storage_unavailable', 503);
+  // 9) 本体。前の段 (KV) を待つ間に期限を過ぎていたら始めない。
+  const late = pastDeadline();
+  if (late) return late;
   const ownerKey = imageOwnerKey(session.address, secret);
-  return handler({ address: session.address, ownerKey, prefix: imageOwnerPrefix(ownerKey), deadline });
+  return handler({ address: session.address, ownerKey, prefix: imageOwnerPrefix(ownerKey), deadline, pastDeadline });
 }

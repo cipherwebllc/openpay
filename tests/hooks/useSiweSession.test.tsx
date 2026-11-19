@@ -159,6 +159,21 @@ describe('useSiweSession', () => {
     expect(result.current.imageUploadSignIn).toBe(false);
   });
 
+  it('refreshSession は /me を取り直す (画面の API が本人の違い・権限の喪失を返したとき)', async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse(true, { ok: true, address: wallet.address, imageUpload: true, imageUploadSignIn: true }, 200))
+      .mockResolvedValue(jsonResponse(true, { ok: true, address: '0x2222222222222222222222222222222222222222', imageUploadSignIn: true }, 200));
+    const client = makeClient();
+    const { result } = renderHook(() => useSiweSession(), { wrapper: wrapper(client) });
+    await waitFor(() => expect(result.current.imageUpload).toBe(true));
+    act(() => {
+      result.current.refreshSession();
+    });
+    await waitFor(() => expect(result.current.isSignedIn).toBe(false));
+    expect(result.current.imageUpload).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
   it('画像: server が送らない (段階 off) ときはどちらも false', async () => {
     fetchSpy.mockResolvedValue(jsonResponse(true, { ok: true, address: wallet.address }, 200));
     const client = makeClient();

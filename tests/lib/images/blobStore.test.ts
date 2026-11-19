@@ -12,6 +12,7 @@ import {
   BLOB_LIST_DEADLINE_MS,
   BLOB_PUT_DEADLINE_MS,
   BlobDeadlineError,
+  BlobResponseError,
   countImagesUnder,
   deleteImageBlob,
   headImage,
@@ -137,12 +138,19 @@ describe('Blob の締切 (本物の SDK)', () => {
 
 describe('一覧と削除の SDK の呼び方 (本物の SDK)', () => {
   /** Blob の API が 1 回 status と本文を返す。 */
+  // 送った本文 (del の urls を確かめる)。
+  let bodies: unknown[] = [];
+  beforeEach(() => {
+    bodies = [];
+  });
+
   function blobApiReplies(status: number, body: unknown) {
     agent
       .get('https://vercel.com')
       .intercept({ path: (path) => path.startsWith('/api/blob'), method: () => true })
       .reply(status, (options) => {
         requests.push({ method: String(options.method), path: String(options.path) });
+        if (typeof options.body === 'string') bodies.push(JSON.parse(options.body));
         return body;
       })
       .persist();
@@ -189,6 +197,27 @@ describe('一覧と削除の SDK の呼び方 (本物の SDK)', () => {
     blobApiReplies(404, { error: { code: 'not_found', message: 'The requested blob does not exist' } });
     await expect(deleteImageBlob('v1/owner/product/id.jpg', new AbortController().signal)).resolves.toBeUndefined();
     expect(requests).toEqual([{ method: 'POST', path: '/api/blob/delete' }]);
+    // 本文の urls は指定した path の 1 件だけ (対象を組み違えると別の画像を消す)。
+    expect(bodies).toEqual([{ urls: ['v1/owner/product/id.jpg'] }]);
+  });
+
+  it('head の 200 に url が無い・別の path の url なら BlobResponseError (SDK は中身を確かめずに成功を返す)', async () => {
+    blobApiReplies(200, { pathname: 'v1/owner/product/id.jpg', size: 3, uploadedAt: '2026-11-19T00:00:00.000Z' });
+    await expect(headImage('v1/owner/product/id.jpg', new AbortController().signal)).rejects.toBeInstanceOf(BlobResponseError);
+    await agent.close();
+    agent = new MockAgent();
+    agent.disableNetConnect();
+    setGlobalDispatcher(agent);
+    blobApiReplies(200, { url: 'https://s.public.blob.vercel-storage.com/v1/owner/product/other.jpg', pathname: 'v1/owner/product/id.jpg' });
+    await expect(headImage('v1/owner/product/id.jpg', new AbortController().signal)).rejects.toBeInstanceOf(BlobResponseError);
+  });
+
+  it('list の行の日時が読めなければ BlobResponseError (Invalid Date を返さない)', async () => {
+    blobApiReplies(200, {
+      blobs: [{ url: 'https://s.public.blob.vercel-storage.com/v1/owner/product/a.jpg', downloadUrl: 'x', pathname: 'v1/owner/product/a.jpg', size: 3, uploadedAt: 'not a date', etag: 'e' }],
+      hasMore: false,
+    });
+    await expect(listImagePage('v1/owner/', undefined, 24, new AbortController().signal)).rejects.toBeInstanceOf(BlobResponseError);
   });
 
   it('del のほかの失敗 (403 など) は例外', async () => {

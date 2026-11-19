@@ -34,6 +34,33 @@ export class BlobDeadlineError extends Error {
 }
 
 /**
+ * Blob の応答の形が決めた形でない (route は 503 storage_unavailable にする)。SDK は 200 の応答の中身を確かめずに返すので
+ * (url が無くても成功を返す)、一覧と削除はここで確かめる: 確かめずに進むと、url の無い head で「使っている所」が見つからずに
+ * 消してしまう・読めない日時で 500 になる。
+ */
+export class BlobResponseError extends Error {
+  constructor() {
+    super('blob_response');
+    this.name = 'BlobResponseError';
+  }
+}
+
+/** url が https で、その path が pathname と同じ (`/<pathname>`) か。 */
+function urlIsFor(url: unknown, pathname: string): url is string {
+  if (typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'https:' && parsed.pathname === `/${pathname}`;
+  } catch {
+    return false;
+  }
+}
+
+function validDate(value: unknown): value is Date {
+  return value instanceof Date && !Number.isNaN(value.getTime());
+}
+
+/**
  * run を締切つきで動かす。締切は「limitMs が過ぎた」か「routeDeadline (route の絶対の期限) が abort された」の早い方。
  * 締切で signal を abort し (理由は既定の AbortError)、待たずに BlobDeadlineError で返す。routeDeadline が始めから abort
  * 済みなら、run を呼ばずに BlobDeadlineError (期限を過ぎてから Blob に触れない)。
@@ -117,7 +144,8 @@ export type ImageListPage = {
 
 /**
  * prefix の下を 1 ページだけ読む (cursor は前のページの list が返した値をそのまま渡す)。締切は list の上限 (5 秒) と route の
- * 絶対の期限の早い方。続きの有無・cursor の形の判定は呼び元 (route) がする。
+ * 絶対の期限の早い方。続きの有無・cursor の形の判定は呼び元 (route) がする。行の形 (path・その path の https の url・大きさ・
+ * 読める日時) と続きの有無が決めた形でなければ BlobResponseError (どの本人の行かの照合は route がする)。
  */
 export async function listImagePage(
   prefix: string,
@@ -127,24 +155,39 @@ export async function listImagePage(
 ): Promise<ImageListPage> {
   return withBlobDeadline(BLOB_LIST_DEADLINE_MS, routeDeadline, async (signal) => {
     const page = await list({ prefix, limit, cursor, abortSignal: signal });
-    return {
-      blobs: page.blobs.map(({ pathname, url, size, uploadedAt }) => ({ pathname, url, size, uploadedAt })),
-      cursor: page.cursor,
-      hasMore: page.hasMore,
-    };
+    if (!Array.isArray(page.blobs) || typeof page.hasMore !== 'boolean') throw new BlobResponseError();
+    const blobs = page.blobs.map(({ pathname, url, size, uploadedAt }) => {
+      if (
+        typeof pathname !== 'string' ||
+        !urlIsFor(url, pathname) ||
+        typeof size !== 'number' ||
+        !Number.isFinite(size) ||
+        size < 0 ||
+        !validDate(uploadedAt)
+      ) {
+        throw new BlobResponseError();
+      }
+      return { pathname, url, size, uploadedAt };
+    });
+    return { blobs, cursor: typeof page.cursor === 'string' ? page.cursor : undefined, hasMore: page.hasMore };
   });
 }
 
-/** path の画像の公開 URL。無ければ null (SDK の BlobNotFoundError = 送り直さない失敗)。ほかの失敗は例外。 */
+/**
+ * path の画像の公開 URL。無ければ null (SDK の BlobNotFoundError = 送り直さない失敗)。ほかの失敗は例外。応答の url がその path の
+ * https の URL でなければ BlobResponseError (使っている所を照合できないまま消さない)。
+ */
 export async function headImage(pathname: string, routeDeadline: AbortSignal): Promise<{ url: string } | null> {
   return withBlobDeadline(BLOB_HEAD_DEADLINE_MS, routeDeadline, async (signal) => {
+    let blob: Awaited<ReturnType<typeof head>>;
     try {
-      const blob = await head(pathname, { abortSignal: signal });
-      return { url: blob.url };
+      blob = await head(pathname, { abortSignal: signal });
     } catch (error) {
       if (error instanceof BlobNotFoundError) return null;
       throw error;
     }
+    if (!urlIsFor(blob?.url, pathname)) throw new BlobResponseError();
+    return { url: blob.url };
   });
 }
 

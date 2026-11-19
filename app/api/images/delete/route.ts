@@ -1,6 +1,6 @@
 import type { NextResponse } from 'next/server';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
-import { BlobDeadlineError, deleteImageBlob, headImage } from '@/lib/images/blobStore';
+import { BlobDeadlineError, BlobResponseError, deleteImageBlob, headImage } from '@/lib/images/blobStore';
 import { IMAGE_DELETE_MAX_BODY_BYTES, isImageExtension, type ImageDeleteTarget } from '@/lib/images/library';
 import {
   imageLibraryFail,
@@ -38,7 +38,7 @@ function parseTarget(value: unknown): ImageDeleteTarget | null {
 }
 
 export async function POST(req: Request): Promise<NextResponse> {
-  return runImageLibraryRequest(req, 'delete', async ({ address, ownerKey, deadline }) => {
+  return runImageLibraryRequest(req, 'delete', async ({ address, ownerKey, deadline, pastDeadline }) => {
     const body = await readJsonBodyCapped(req, IMAGE_DELETE_MAX_BODY_BYTES);
     if (!body.ok) {
       return body.reason === 'too_large'
@@ -49,30 +49,37 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (target === null) return imageLibraryFail('invalid_body', 400);
     const pathname = imageBlobPathFor(ownerKey, target.purpose, target.id, target.ext);
 
-    // 本文を待つ間に期限を過ぎていたら Blob に触れない (応答はもう 503)。
-    if (deadline.aborted) return imageLibraryFail('storage_unavailable', 503);
+    // 本文を待つ間に期限を過ぎていたら Blob に触れない。
+    let late = pastDeadline();
+    if (late) return late;
     let found: { url: string } | null;
     try {
       found = await headImage(pathname, deadline);
     } catch (error) {
-      logImageLibraryFailure('delete', error instanceof BlobDeadlineError ? 'head_deadline' : 'head_failed');
+      // 締切・応答の形の違い (url がその path の URL でない = 使っている所を照合できない)・ほかの失敗。どれも消さずに 503。
+      const code =
+        error instanceof BlobDeadlineError ? 'head_deadline' : error instanceof BlobResponseError ? 'head_invalid' : 'head_failed';
+      logImageLibraryFailure('delete', code);
       return imageLibraryFail('storage_unavailable', 503);
     }
     // 無い (もう消えた・二重の削除) なら消えた扱い。
     if (found === null) return imageLibraryNoContent();
 
-    // 使っている所は del の直前に読み直す (一覧を出した後に商品・プロフへ入れた画像も止める)。head は期限と競争して読む
-    // (期限が来たら上の catch で 503) ので、ここに来たのは期限の前。
-    const usage = await readImageUsage(address);
-    if (usage === null) {
-      logImageLibraryFailure('delete', 'usage_unavailable');
+    // 使っている所は del の直前に読み直す (一覧を出した後に商品・プロフへ入れた画像も止める)。
+    late = pastDeadline();
+    if (late) return late;
+    const read = await readImageUsage(address);
+    if (!read.ok) {
+      // storage = KV が読めない・unreadable = 本人の記録を読めない。どちらも消さない。
+      logImageLibraryFailure('delete', read.reason === 'storage' ? 'usage_unavailable' : 'usage_unreadable');
       return imageLibraryFail('storage_unavailable', 503);
     }
-    const usedIn = usage.usesOf(found.url);
+    const usedIn = read.usage.usesOf(found.url);
     if (usedIn.length > 0) return imageLibraryJson({ ok: false, error: 'image_in_use', usedIn }, 409);
 
-    // 使っている所を読む間に期限を過ぎていたら消さない (応答はもう 503)。
-    if (deadline.aborted) return imageLibraryFail('storage_unavailable', 503);
+    // 使っている所を読む間 (と同期の処理の間) に期限を過ぎていたら消さない。timer の callback を待たず、単調時計でも見る。
+    late = pastDeadline();
+    if (late) return late;
     try {
       await deleteImageBlob(pathname, deadline);
     } catch (error) {

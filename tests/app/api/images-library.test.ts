@@ -678,6 +678,192 @@ describe('images library: 削除 (POST /api/images/delete)', () => {
   });
 });
 
+describe('images library: 読めない記録 (レビュー 1 回目 MUST 1)', () => {
+  function seedHandle(raw: string) {
+    kvData.set(`wallet:handles:${OWNER.toLowerCase()}`, ['shop']);
+    kvData.set('handle:shop', raw);
+  }
+  function seedProduct(raw: string) {
+    kvData.set(`x402:hosted:owner:${OWNER.toLowerCase()}`, [PRODUCT_ID]);
+    kvData.set(`x402:hosted:${PRODUCT_ID}`, raw);
+  }
+  // 必須の項目 (createdAt) が欠けた handle の記録 (アバターに画像が残っている)。
+  const brokenHandle = () => {
+    const record = JSON.parse(handleRecord(OWNER, { profile: { avatar: urlFor(pathFor(1)) } }));
+    delete record.createdAt;
+    return JSON.stringify(record);
+  };
+  // 必須の項目 (title) が欠けた商品の記録 (表紙に画像が残っている)。
+  const brokenProduct = () => {
+    const record = JSON.parse(productRecord(PRODUCT_ID, OWNER, { imageUrl: urlFor(pathFor(1)) }));
+    delete record.title;
+    return JSON.stringify(record);
+  };
+
+  it.each([
+    ['handle の記録の必須の項目が欠けた', () => seedHandle(brokenHandle())],
+    ['handle の記録が JSON の object でない', () => seedHandle('"not a record"')],
+    ['handle の記録が JSON でない', () => seedHandle('{')],
+    ['商品の記録の必須の項目が欠けた', () => seedProduct(brokenProduct())],
+    ['商品の記録が JSON でない', () => seedProduct('not json')],
+  ])('%s: 削除は 503 で del を送らない (使っていないと言わない)', async (_label, seed) => {
+    addBlob(pathFor(1));
+    seed();
+    const response = await deleteImage(del(target(1)));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(blob.del).not.toHaveBeenCalled();
+    expect(store.has(pathFor(1))).toBe(true);
+    expect(failures()).toEqual(['images.delete.failed:usage_unreadable']);
+  });
+
+  it.each([
+    ['handle', () => seedHandle(brokenHandle())],
+    ['商品', () => seedProduct(brokenProduct())],
+  ])('%s の記録が読めなければ一覧も 503 (「使用なし」と出さない)', async (_label, seed) => {
+    addBlob(pathFor(1));
+    seed();
+    const response = await listImages(get());
+    expect(response.status).toBe(503);
+    expect(failures()).toEqual(['images.list.failed:usage_unreadable']);
+  });
+
+  it('MGET の値が null (index にあるが記録が消えた) は使っていない扱い (消せる)', async () => {
+    addBlob(pathFor(1));
+    kvData.set(`wallet:handles:${OWNER.toLowerCase()}`, ['gone']);
+    kvData.set(`x402:hosted:owner:${OWNER.toLowerCase()}`, [PRODUCT_ID]);
+    const response = await deleteImage(del(target(1)));
+    expect(response.status).toBe(204);
+    expect(blob.del).toHaveBeenCalledTimes(1);
+  });
+
+  it('parser が店舗の部分を落としても (受け付けていないチェーン)、保存された欄の画像は使用中に数える', async () => {
+    addBlob(pathFor(1));
+    addBlob(pathFor(2));
+    seedHandle(handleRecord(OWNER, {
+      storefront: {
+        chain: 'not-a-chain',
+        mode: 'storefront',
+        feePayer: 'merchant',
+        avatar: urlFor(pathFor(1)),
+        menu: [{ id: 'm1', name: 'コーヒー', price: '500', visual: { kind: 'image', url: urlFor(pathFor(2)) } }],
+      },
+    }));
+    expect((await deleteImage(del(target(1)))).status).toBe(409);
+    expect((await deleteImage(del(target(2)))).status).toBe(409);
+    expect(blob.del).not.toHaveBeenCalled();
+  });
+
+  it('parser が不正な URL として落とす欄 (512 字を超える追加画像) も、保存された値なら使用中に数える', async () => {
+    const longPath = `${pathFor(1)}`;
+    addBlob(longPath);
+    seedProduct(productRecord(PRODUCT_ID, OWNER, { galleryUrls: [`${urlFor(longPath)}?${'x'.repeat(600)}`] }));
+    const response = await deleteImage(del(target(1)));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ usedIn: [{ kind: 'product', id: PRODUCT_ID, field: 'gallery' }] });
+  });
+});
+
+describe('images library: Blob の応答の形 (レビュー 1 回目 MUST 3)', () => {
+  it.each([
+    ['url が無い', () => ({ pathname: pathFor(1) })],
+    ['url が別の path', () => ({ url: urlFor(pathFor(2)) })],
+    ['url が https でない', () => ({ url: urlFor(pathFor(1)).replace('https:', 'http:') })],
+    ['url が URL でない', () => ({ url: 'not a url' })],
+  ])('head の %s なら 503 で del を送らない', async (_label, body) => {
+    addBlob(pathFor(1));
+    blob.head.mockResolvedValueOnce(body());
+    const response = await deleteImage(del(target(1)));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(blob.del).not.toHaveBeenCalled();
+    expect(kv.kvLrange).not.toHaveBeenCalled();
+    expect(failures()).toEqual(['images.delete.failed:head_invalid']);
+  });
+
+  it.each([
+    ['読めない日時', { uploadedAt: new Date('not a date') }],
+    ['日時が Date でない', { uploadedAt: 'yesterday' }],
+    ['url が別の path', { url: urlFor(pathFor(9)) }],
+    ['大きさが数でない', { size: '12' }],
+  ])('一覧の行の %s は 500 ではなく 503', async (_label, patch) => {
+    blob.list.mockResolvedValueOnce({
+      blobs: [{ pathname: pathFor(1), url: urlFor(pathFor(1)), size: 1, uploadedAt: new Date(0), ...patch }],
+      hasMore: false,
+    });
+    const response = await listImages(get());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(failures()).toEqual(['images.list.failed:list_invalid']);
+  });
+
+  it('一覧の続きの有無が真偽でなければ 503', async () => {
+    blob.list.mockResolvedValueOnce({ blobs: [], hasMore: 'yes' });
+    expect((await listImages(get())).status).toBe(503);
+    expect(failures()).toEqual(['images.list.failed:list_invalid']);
+  });
+});
+
+describe('images library: 単調時計の期限 (レビュー 1 回目 MUST 2)', () => {
+  let now = 1_000;
+  beforeEach(() => {
+    now = 1_000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+  });
+
+  it('削除: 使っている所を読む間に (timer の callback より先に) 期限をまたいだら、del を始めず 503', async () => {
+    addBlob(pathFor(1));
+    kv.kvMget.mockImplementation(async (keys: string[]) => {
+      // 同期の処理・event loop の遅れで、期限の timer が走る前に 15 秒を過ぎた。
+      now += IMAGE_LIBRARY_DEADLINE_MS + 1;
+      return { ok: true, value: keys.map(() => null) };
+    });
+    const response = await deleteImage(del(target(1)));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(blob.del).not.toHaveBeenCalled();
+    expect(store.has(pathFor(1))).toBe(true);
+    // 期限のログは 1 回だけ (timer は応答の後に片づく)。
+    expect(failures()).toEqual(['images.delete.failed:route_deadline']);
+  });
+
+  it('削除: head の間に期限をまたいだら、使っている所を読まない', async () => {
+    addBlob(pathFor(1));
+    const original = blob.head.getMockImplementation();
+    blob.head.mockImplementationOnce(async (...args: unknown[]) => {
+      now += IMAGE_LIBRARY_DEADLINE_MS + 1;
+      return original?.(...args);
+    });
+    const response = await deleteImage(del(target(1)));
+    expect(response.status).toBe(503);
+    expect(kv.kvLrange).not.toHaveBeenCalled();
+    expect(blob.del).not.toHaveBeenCalled();
+  });
+
+  it('一覧: list の間に期限をまたいだら、使っている所を読まない', async () => {
+    addBlob(pathFor(1));
+    blob.list.mockImplementationOnce(async (options: { prefix: string }) => {
+      now += IMAGE_LIBRARY_DEADLINE_MS + 1;
+      return fakeList(options);
+    });
+    const response = await listImages(get());
+    expect(response.status).toBe(503);
+    expect(kv.kvLrange).not.toHaveBeenCalled();
+    expect(failures()).toEqual(['images.list.failed:route_deadline']);
+  });
+
+  it('期限の前なら同じ順で消える (単調時計が進んでいても 15 秒の内側)', async () => {
+    addBlob(pathFor(1));
+    // 2 回の MGET で合わせて 15 秒の 2 ms 手前まで進む。
+    kv.kvMget.mockImplementation(async (keys: string[]) => {
+      now += (IMAGE_LIBRARY_DEADLINE_MS - 2) / 2;
+      return { ok: true, value: keys.map(() => null) };
+    });
+    expect((await deleteImage(del(target(1)))).status).toBe(204);
+    expect(blob.del).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('images library: 絶対の期限 (15 秒・関数の上限より前)', () => {
   const never = () => new Promise<never>(() => {});
 

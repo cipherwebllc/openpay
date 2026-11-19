@@ -19,6 +19,7 @@ const siwe = vi.hoisted(() => ({
   isLoading: false,
   imageUpload: false,
   imageUploadSignIn: false,
+  refreshSession: vi.fn(),
 }));
 const client = vi.hoisted(() => ({ fetchImageLibraryPage: vi.fn(), deleteLibraryImage: vi.fn() }));
 
@@ -97,6 +98,7 @@ async function resolveDelete(index: number, result: ImageDeleteResult) {
 beforeEach(() => {
   account.address = undefined;
   Object.assign(siwe, { isSignedIn: false, isLoading: false, imageUpload: false, imageUploadSignIn: false });
+  siwe.refreshSession.mockReset();
   pages = [];
   deletes = [];
   client.fetchImageLibraryPage.mockReset().mockImplementation((wallet: string, cursor: string | null, signal?: AbortSignal) => {
@@ -146,6 +148,43 @@ describe('ImageLibrary: 出す・出さない', () => {
     const link = screen.getByRole('link', { name: new RegExp(ja.MePage.cards.images.title) });
     expect(link).toHaveAttribute('href', '/ja/me/images');
     expect(link).not.toHaveAttribute('target');
+  });
+});
+
+describe('ImageLibrary: 機能の案内は使えるときだけ (レビュー 1 回目 MUST 6)', () => {
+  const intro = T.intro.replace('{max}', '200');
+
+  function expectNoGuidance() {
+    expect(screen.queryByText(intro)).not.toBeInTheDocument();
+    expect(screen.queryByText(T.usageNote)).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('200 枚');
+  }
+
+  it('段階 off (サインインの導線も無い) では短い「使えません」の文だけ', () => {
+    renderWithIntl(<ImageLibrary />);
+    expect(screen.getByText(T.notAvailable)).toBeInTheDocument();
+    expectNoGuidance();
+  });
+
+  it('admin の段階で運営者でない (サインイン済み・imageUpload が無い) ときも案内を出さない', () => {
+    signIn(A, false);
+    renderWithIntl(<ImageLibrary />);
+    expect(screen.getByText(T.notAvailable)).toBeInTheDocument();
+    expectNoGuidance();
+  });
+
+  it('サインインの前 (運営者かどうかまだ分からない) は入口だけで、案内を出さない', () => {
+    siwe.imageUploadSignIn = true;
+    renderWithIntl(<ImageLibrary />);
+    expect(screen.getByRole('button', { name: T.signIn })).toBeInTheDocument();
+    expectNoGuidance();
+  });
+
+  it('使えるときだけ案内を出す', () => {
+    signIn(A);
+    renderWithIntl(<ImageLibrary />);
+    expect(screen.getByText(intro)).toBeInTheDocument();
+    expect(screen.getByText(T.usageNote)).toBeInTheDocument();
   });
 });
 
@@ -211,6 +250,7 @@ describe('ImageLibrary: 一覧', () => {
     renderWithIntl(<ImageLibrary />);
     await resolvePage(0, { ok: false, error: 'session_mismatch' });
     expect(screen.getByRole('alert')).toHaveTextContent(T.errors.unauthenticated);
+    expect(siwe.refreshSession).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole('button', { name: T.retry }));
     expect(client.fetchImageLibraryPage).toHaveBeenCalledTimes(2);
     await resolvePage(1, { ok: true, images: [item(1)], nextCursor: null });
@@ -307,6 +347,98 @@ describe('ImageLibrary: 消す', () => {
     await resolvePage(2, { ok: true, images: [item(2)], nextCursor: 'c:24' });
     expect(rowFor(2)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: T.loadMore })).toBeEnabled();
+  });
+});
+
+describe('ImageLibrary: 本人・権限を失ったと分かったとき (レビュー 1 回目 MUST 4)', () => {
+  async function shown() {
+    signIn(A);
+    renderWithIntl(<ImageLibrary />);
+    await resolvePage(0, { ok: true, images: [item(1), item(2)], nextCursor: 'c:24' });
+  }
+
+  function expectCleared() {
+    expect(document.querySelector('img')).toBeNull();
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: T.delete })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: T.loadMore })).not.toBeInTheDocument();
+  }
+
+  it('一覧を出した後の「もっと見る」が 401 session_mismatch なら、行と確認を消して /me を取り直す', async () => {
+    await shown();
+    fireEvent.click(within(rowFor(1)).getByRole('button', { name: T.delete }));
+    expect(within(rowFor(1)).getByRole('group')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: T.loadMore }));
+    await resolvePage(1, { ok: false, error: 'session_mismatch' });
+    expectCleared();
+    expect(screen.getByRole('alert')).toHaveTextContent(T.errors.unauthenticated);
+    expect(siwe.refreshSession).toHaveBeenCalledTimes(1);
+    expect(client.deleteLibraryImage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['403 forbidden', 'forbidden', T.errors.notAvailable],
+    ['404 not_found (段階 off)', 'not_found', T.errors.notAvailable],
+    ['401 unauthenticated', 'unauthenticated', T.errors.unauthenticated],
+  ] as const)('削除が %s なら、進んでいる GET を捨て、行を消して /me を取り直す', async (_label, error, message) => {
+    await shown();
+    fireEvent.click(screen.getByRole('button', { name: T.loadMore }));
+    fireEvent.click(within(rowFor(1)).getByRole('button', { name: T.delete }));
+    fireEvent.click(within(rowFor(1)).getByRole('button', { name: T.confirmDelete }));
+    fireEvent.click(within(rowFor(2)).getByRole('button', { name: T.delete }));
+    fireEvent.click(within(rowFor(2)).getByRole('button', { name: T.confirmDelete }));
+    await resolveDelete(0, { ok: false, error });
+    expectCleared();
+    expect(screen.getByRole('alert')).toHaveTextContent(message);
+    expect(siwe.refreshSession).toHaveBeenCalledTimes(1);
+    // 進んでいた「もっと見る」は取り消され、後から届いても入れない。
+    expect(pages[1].signal?.aborted).toBe(true);
+    await resolvePage(1, { ok: true, images: [item(9)], nextCursor: null });
+    // その前に始めたもう 1 つの削除が後から 204 で届いても、読み直さない (前の本人の一覧を出し直さない)。
+    await resolveDelete(1, { ok: true });
+    expectCleared();
+    expect(client.fetchImageLibraryPage).toHaveBeenCalledTimes(2);
+  });
+
+  it('失った後に「もう一度読み込む」で読み直せる (本人が戻っていれば一覧が出る)', async () => {
+    await shown();
+    fireEvent.click(screen.getByRole('button', { name: T.loadMore }));
+    await resolvePage(1, { ok: false, error: 'session_mismatch' });
+    fireEvent.click(screen.getByRole('button', { name: T.retry }));
+    await resolvePage(2, { ok: true, images: [item(3)], nextCursor: null });
+    expect(rowFor(3)).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+describe('ImageLibrary: 409 の使っている所を古い GET で上書きしない (レビュー 1 回目 MUST 5)', () => {
+  it('A の 204 → 読み直しの開始 → B の 409 → その GET が届く順でも、B は 409 の使っている所のまま。後から始まった GET の値は使う', async () => {
+    signIn(A);
+    renderWithIntl(<ImageLibrary />);
+    await resolvePage(0, { ok: true, images: [item(1), item(2), item(3)], nextCursor: null });
+    fireEvent.click(within(rowFor(1)).getByRole('button', { name: T.delete }));
+    fireEvent.click(within(rowFor(1)).getByRole('button', { name: T.confirmDelete }));
+    fireEvent.click(within(rowFor(2)).getByRole('button', { name: T.delete }));
+    fireEvent.click(within(rowFor(2)).getByRole('button', { name: T.confirmDelete }));
+
+    await resolveDelete(0, { ok: true });
+    expect(pages[1]).toMatchObject({ cursor: null });
+    await resolveDelete(1, { ok: false, error: 'image_in_use', usedIn: [{ kind: 'profile', handle: 'demo', field: 'avatar' }] });
+    expect(rowFor(2)).toHaveTextContent('@demo のアバター');
+
+    // 409 より前に始まった GET (B の使っている所はまだ空) が届く。
+    await resolvePage(1, { ok: true, images: [item(2), item(3)], nextCursor: null });
+    expect(rowFor(2)).toHaveTextContent('@demo のアバター');
+    expect(rowFor(2)).not.toHaveTextContent(T.notUsed);
+    expect(within(rowFor(2)).getByRole('alert')).toHaveTextContent(T.errors.inUse);
+
+    // 409 より後に始まった GET の値は使う (ほかのタブで外した後)。
+    fireEvent.click(within(rowFor(3)).getByRole('button', { name: T.delete }));
+    fireEvent.click(within(rowFor(3)).getByRole('button', { name: T.confirmDelete }));
+    await resolveDelete(2, { ok: true });
+    await resolvePage(2, { ok: true, images: [item(2)], nextCursor: null });
+    expect(rowFor(2)).toHaveTextContent(T.notUsed);
+    expect(rowFor(2)).not.toHaveTextContent('@demo のアバター');
   });
 });
 
