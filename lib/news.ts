@@ -38,6 +38,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'image-upload-2026-11-20',
+    date: '2026-11-20',
+    category: 'feature',
+    title: {
+      ja: '画像を、ファイルからアップロードできるようになりました',
+      en: 'You can now upload images from a file',
+    },
+    body: {
+      ja: '商品・プロフィール・店舗・レジの画像の欄で「画像を選ぶ」を押すと、画像をそのままアップロードできます（ウォレットでのサインインが必要です）。アップロードした画像は、マイページの「アップロードした画像」で確かめて、使っていないものを消せます。これまでどおり、URL を貼って設定することもできます。',
+      en: 'Press “Choose image” in an image field for a product, profile, shop or register item to upload the image directly (you need to sign in with your wallet). You can review the images you uploaded under “Uploaded images” on My Page and delete the ones you no longer use. You can still set an image by pasting its URL, as before.',
+    },
+    link: { href: '/guide/image-url', labelJa: '画像の設定のガイドを見る', labelEn: 'See the image setup guide' },
+  },
+  {
     id: 'shop-history-standard-2026-11-19',
     date: '2026-11-19',
     category: 'feature',
