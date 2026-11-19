@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { env } from '@/lib/env';
+import { isAdminWallet } from '@/lib/adminAuth';
+import { listingAssistantEnabled } from '@/lib/store/listingAssistantConfig';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import {
   getSellerDisclosure,
@@ -36,7 +38,9 @@ export async function GET(req: Request): Promise<NextResponse> {
       503,
     );
   }
-  return storePrivateJson({ ok: true, seller });
+  // 画面が AI 出品アシスタントの入口を出すか (フラグ ON かつ運営者)。POST の route も同じ順で自分で判定する。
+  const listingAssistant = listingAssistantEnabled() && isAdminWallet(auth.address);
+  return storePrivateJson({ ok: true, seller, listingAssistant });
 }
 
 export async function PUT(req: Request): Promise<NextResponse> {

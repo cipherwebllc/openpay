@@ -50,6 +50,7 @@ export {
   newHostedId,
   isHostedId,
   sanitizeHostedText,
+  sanitizeLine,
   parseHostedInput,
   parseStoredHostedProduct,
   hostedPurchaseMetadata,

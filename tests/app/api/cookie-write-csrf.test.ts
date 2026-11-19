@@ -138,6 +138,9 @@ const CASES: Case[] = [
     load: () => import('@/app/api/store/products/route') },
   { file: 'store/products/[id]/route.ts', method: 'PATCH', json: true, params: { id: 'x' },
     load: () => import('@/app/api/store/products/[id]/route') },
+  // AI 出品アシスタント (server-only のフラグは下の beforeAll で ON)。本文 {} はセッションより先に読んで通る。
+  { file: 'store/seller/listing-assistant/route.ts', method: 'POST', json: true,
+    load: () => import('@/app/api/store/seller/listing-assistant/route') },
   { file: 'store/seller/route.ts', method: 'PUT', json: true,
     load: () => import('@/app/api/store/seller/route') },
   { file: 'tip-messages/route.ts', method: 'DELETE', json: false,
@@ -172,6 +175,7 @@ const JSON_TYPE = { 'content-type': 'application/json' };
 
 beforeAll(() => {
   vi.stubEnv('ENABLE_AGENT_PURCHASES', '1');
+  vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', '1');
 });
 afterAll(() => {
   vi.unstubAllEnvs();
