@@ -3,8 +3,9 @@ import 'server-only';
 import { isAdminWallet } from '@/lib/adminAuth';
 
 // 画像のアップロードの server の設定 (段階・ownerKey の秘密・Blob の store)。server-only (掟 9: 秘密を client 共有の
-// lib/env.ts に入れない)。Blob の操作 (lib/images/blobStore.ts) と分けるのは、出品者の GET (app/api/store/seller) が
-// ここだけを見るため — @vercel/blob を出品者の GET と、その route を読む兄弟のテストに持ち込まない。
+// lib/env.ts に入れない)。Blob の操作 (lib/images/blobStore.ts) と分けるのは、出品者の GET (app/api/store/seller) と
+// @handle の持ち主の GET (app/api/handle) がここだけを見るため — @vercel/blob をその GET と、その route を読む兄弟の
+// テストに持ち込まない。
 
 export type ImageUploadMode = 'off' | 'admin' | 'all';
 
@@ -45,6 +46,17 @@ export function imageBlobStoreConfigured(): boolean {
   return (process.env.BLOB_STORE_ID?.trim() ?? '') !== '';
 }
 
+// IP の枠の秘密 (IP_HASH_SECRET) の最小の長さ。lib/net/ipHash の MIN_SECRET_BYTES と同じ値 (それより短いと hashIpBucket が
+// null を返し、POST の route は 503 not_configured で止まる)。ipHash を import しないのは、ipHash を vi.mock する兄弟のテストが
+// 出品者の GET を読むため (mock に無い export を読むと落ちる)。2 つが同じ判定であることは tests/app/api/handle-image-upload.test.ts が見る。
+const MIN_IP_HASH_SECRET_BYTES = 32;
+
+/** IP の枠を数えられる設定か (IP_HASH_SECRET が 32 byte 以上)。接続元の IP が分からない要求は POST の route が自分で止める。 */
+function imageUploadIpHashConfigured(): boolean {
+  const secret = process.env.IP_HASH_SECRET;
+  return !!secret && Buffer.byteLength(secret, 'utf8') >= MIN_IP_HASH_SECRET_BYTES;
+}
+
 /** この段階でそのウォレットがアップロードしてよいか (段階と権限だけ・設定の有無は見ない)。 */
 export function imageUploadAllowedFor(mode: ImageUploadMode, address: string): boolean {
   if (mode === 'all') return true;
@@ -53,10 +65,16 @@ export function imageUploadAllowedFor(mode: ImageUploadMode, address: string): b
 }
 
 /**
- * 画面が新しい画像の欄を出すか (出品者の GET の imageUpload)。段階・権限に加えて、秘密と Blob の設定がそろっているとき
- * だけ true (そろっていないのに欄を出すと、押すたびに 503 になる)。POST の route も同じ順で自分で判定する。
+ * 画面が新しい画像の欄を出すか (出品者の GET と、@handle の持ち主の GET /api/handle の imageUpload)。段階・権限に加えて、
+ * 秘密・Blob の設定・IP の枠の秘密がそろっているときだけ true (そろっていないのに欄を出すと、押すたびに 503 になる)。
+ * POST の route も同じ順で自分で判定する。
  */
 export function imageUploadAvailableFor(address: string): boolean {
   const mode = imageUploadMode();
-  return imageUploadAllowedFor(mode, address) && imageOwnerSecret() !== null && imageBlobStoreConfigured();
+  return (
+    imageUploadAllowedFor(mode, address) &&
+    imageOwnerSecret() !== null &&
+    imageBlobStoreConfigured() &&
+    imageUploadIpHashConfigured()
+  );
 }

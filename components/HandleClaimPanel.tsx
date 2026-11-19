@@ -12,7 +12,7 @@
 // (静かに複製が生まれるのが最大の混乱源だったため)。公開/更新は成功メッセージを出す。
 
 import { resolveTipCapability } from '@/lib/url/tip';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -153,6 +153,8 @@ export function HandleClaimPanel({
   onPublished,
   canAutoEdit,
   barSlots = [],
+  onImageUploadChange,
+  imageUploadBusy = false,
 }: {
   payload: HandlePublishPayload | null;
   publishBlockedReason?: string;
@@ -177,6 +179,13 @@ export function HandleClaimPanel({
   barSlots?: ReadonlyArray<HTMLElement | null>;
   /** 公開成功後、mutation 変数の送信 snapshot を親の baseline にする。 */
   onPublished?: (snapshot: PublishedHandleSnapshot) => void;
+  /**
+   * プロフの画像の欄 (アップロード) を出してよいかを親へ知らせる (持ち主の GET /api/handle の imageUpload・この部品が
+   * その GET を読むため)。サインインしていない (別のウォレットのセッションを含む) ときは false。
+   */
+  onImageUploadChange?: (available: boolean) => void;
+  /** 画像をアップロード中 (親の画像の欄)。届く前に公開すると画像が抜けるので、その間は公開を止める。 */
+  imageUploadBusy?: boolean;
 }) {
   const { isConnected, address } = useAccount();
   const t = useTranslations('HandleClaim');
@@ -243,6 +252,15 @@ export function HandleClaimPanel({
     enabled: env.enableHandles && isSignedIn,
     queryFn: fetchMyHandles,
   });
+
+  // 画像の欄を出すか。cache に残った別のセッションの値を、サインインしていない画面に使わない。今の取得が成功しているときだけ
+  // (再取得が 401 などで失敗すると、react-query は前の成功の data も残すので、data だけでは見ない)。
+  const imageUploadAvailable = isSignedIn && mine.isSuccess && mine.data?.imageUpload === true;
+  // 親へは描画の確定 (layout) で知らせる: effect まで待つと、false を読んだ描画の後に届いた古いアップロードの結果が、まだ
+  // 画像の欄のままの親に入る (親は同じ確定の中で欄を外し、操作の番号を進める)。
+  useLayoutEffect(() => {
+    onImageUploadChange?.(imageUploadAvailable);
+  }, [onImageUploadChange, imageUploadAvailable]);
 
   const publish = useMutation({
     mutationFn: async (snapshot: PublishMutationSnapshot) => {
@@ -373,6 +391,8 @@ export function HandleClaimPanel({
     !config || // 受取先/方法 未確定では取得/更新できない
     !validation.ok ||
     publish.isPending ||
+    // 画像のアップロード中 (届く前に公開すると、その画像が公開に入らない)。公開は帯のボタンだけ (form・Enter の送信は無い)。
+    imageUploadBusy ||
     // 他人が使用中なら不可。自分が所有する handle の更新は許可する。
     (availability.data?.available === false && !ownedNames.includes(normalized)) ||
     (atLimit && !ownedNames.includes(normalized));
@@ -399,7 +419,9 @@ export function HandleClaimPanel({
       ? t('barReasonReceiver')
       : !validation.ok
         ? t('barReasonHandle')
-        : null;
+        : imageUploadBusy
+          ? t('barReasonImageBusy')
+          : null;
   const barStatus = editingHandle && normalized === editingHandle
     ? isDirty
       ? t('unpublishedChanges')

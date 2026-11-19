@@ -127,13 +127,18 @@ describe('server の設定', () => {
     expect(imageUploadAllowedFor('admin', ADDRESS)).toBe(false);
   });
 
-  it('画面に出すか (imageUploadAvailableFor) は段階・権限・秘密・Blob のすべて', () => {
+  it('画面に出すか (imageUploadAvailableFor) は段階・権限・秘密・Blob・IP の枠の秘密のすべて', () => {
     vi.stubEnv('IMAGE_UPLOAD_MODE', 'admin');
     vi.stubEnv('ADMIN_WALLETS', ADDRESS);
     vi.stubEnv('IMAGE_OWNER_KEY_SECRET', SECRET);
     vi.stubEnv('BLOB_STORE_ID', 'store_abc');
+    vi.stubEnv('IP_HASH_SECRET', 'test-ip-hash-secret-0123456789abcdef');
     expect(imageUploadAvailableFor(ADDRESS)).toBe(true);
     vi.stubEnv('BLOB_STORE_ID', '');
+    expect(imageUploadAvailableFor(ADDRESS)).toBe(false);
+    vi.stubEnv('BLOB_STORE_ID', 'store_abc');
+    // IP の枠を数えられないと POST は 503 not_configured になるので、欄を出さない。
+    vi.stubEnv('IP_HASH_SECRET', '');
     expect(imageUploadAvailableFor(ADDRESS)).toBe(false);
   });
 

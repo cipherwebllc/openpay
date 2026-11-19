@@ -33,6 +33,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -288,9 +289,14 @@ export function useLocalStorageSettings<T extends object>(
     setSynced((cur) => mergeRemote(cur, stored, sanitize, rules));
   }, [storageKey, sanitize, rules]);
 
+  // 取り込みを保留するかは、描画の確定 (layout) で反映する: effect まで待つと、保留を始めた描画の直後に前面へ戻った (focus)
+  // ときに、まだ保留していない値で取り込んでしまう。
+  useLayoutEffect(() => {
+    holdImportRef.current = holdImport;
+  }, [holdImport]);
+
   // 会計が終わったら (holdImport が外れたら)、保留していた取り込みを 1 度行う。
   useEffect(() => {
-    holdImportRef.current = holdImport;
     if (holdImport || !importDeferredRef.current) return;
     importDeferredRef.current = false;
     pullNow();

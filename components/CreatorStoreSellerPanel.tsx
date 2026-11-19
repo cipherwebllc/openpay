@@ -23,7 +23,7 @@ import { SellerDisclosureSection } from './creator-store-seller/SellerDisclosure
 import { ProductListSection } from './creator-store-seller/ProductListSection';
 import { ProductEditorSection } from './creator-store-seller/ProductEditorSection';
 import { requestJson, StoreRequestError } from './creator-store-seller/request';
-import type { EditingProductState, ProductDetailResponse, ProductForm, ProductSummary, ProductsResponse, SellerDisclosure, SellerForm, SellerResponse } from './creator-store-seller/shared';
+import type { EditingProductState, ProductDetailResponse, ProductForm, ProductFormPatch, ProductSummary, ProductsResponse, SellerDisclosure, SellerForm, SellerResponse } from './creator-store-seller/shared';
 
 const EMPTY_PRODUCT_FORM: ProductForm = {
   productKind: 'digital',
@@ -236,10 +236,11 @@ function SignedInSellerPanel({
     }));
   };
 
-  const updateProduct = (patch: Partial<ProductForm>) => {
+  // patch は関数でもよい (最新のフォームから作る: 画像のアップロードの結果を、描画のときの値で上書きせずに足すため)。
+  const updateProduct = (patch: ProductFormPatch) => {
     setProductSaved(false);
     setLicenseValidationError(false);
-    setProductForm((current) => ({ ...current, ...patch }));
+    setProductForm((current) => ({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) }));
   };
 
   const saveSeller = useMutation({

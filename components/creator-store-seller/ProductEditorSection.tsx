@@ -20,9 +20,9 @@ import { CreatorStoreLicenseFields } from '@/components/CreatorStoreLicenseField
 import { ImageField } from '@/components/ImageField';
 import { nextImageOperation, type ImageOperationCounter } from '@/hooks/useImageUpload';
 import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
-import { ProductGalleryField } from './ProductGalleryField';
+import { ProductGalleryField, galleryUrlsOf } from './ProductGalleryField';
 import { errorCode, errorDetailKey, errorMessageKey } from './request';
-import { inputClass, type EditingProductState, type MutationView, type ProductForm } from './shared';
+import { inputClass, type EditingProductState, type MutationView, type ProductForm, type ProductFormPatch } from './shared';
 
 function ListingAssistantLoading({ error }: DynamicOptionsLoadingProps) {
   const t = useTranslations('CreatorStoreSeller.assistant');
@@ -162,7 +162,8 @@ type Props = {
   atLimit: boolean;
   licenseValidationError: boolean;
   productSaved: boolean;
-  updateProduct: (patch: Partial<ProductForm>) => void;
+  /** 関数の patch は最新のフォームから作る (追加画像のアップロードの結果を足すとき)。 */
+  updateProduct: (patch: ProductFormPatch) => void;
   cancelEdit: () => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
   saveProduct: Pick<MutationView<unknown>, 'isPending' | 'isError' | 'error' | 'submittedAt'>;
@@ -555,6 +556,10 @@ export function ProductEditorSection({
                 <ProductGalleryField
                   value={productForm.galleryUrls}
                   onChange={(galleryUrls) => updateProduct({ galleryUrls })}
+                  // 届いた画像は最新のフォームの追加画像の末尾に足す (描画のときの値を丸ごと書き戻さない)。
+                  onAppend={(url) =>
+                    updateProduct((current) => ({ galleryUrls: [...galleryUrlsOf(current.galleryUrls), url].join('\n') }))
+                  }
                   onBusyChange={(busy) => setImageBusy('gallery', busy)}
                   isLicense={isLicense}
                 />
