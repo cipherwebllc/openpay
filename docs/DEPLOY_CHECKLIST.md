@@ -3419,8 +3419,12 @@ PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品ア
 ### 20.1 前提
 - Vercel の Storage で Blob の store を **public** で作る (OpenPay 専用)。Preview でも試すなら store を分ける。
 - store を project に **OIDC** でつなぐ (つなぐ Environment を選ぶ)。`BLOB_STORE_ID` が入る。`BLOB_READ_WRITE_TOKEN` は入れない
-  (入っていたら消す: OIDC が取れないときに SDK がその長く生きる token を使う)。
-- `IMAGE_OWNER_KEY_SECRET` (Sensitive・32 byte 以上) を作って入れ、控えを安全な所に残す。**回さない** (回すと同じウォレットの画像が
+  (入っていたら消す: OIDC が取れないときに SDK がその長く生きる token を使う。つないだときに自動で入るかは Vercel の docs で
+  確かめきれていないので、env の一覧で見る。入っていても、OIDC と `BLOB_STORE_ID` がそろっていれば SDK は OIDC を先に使う
+  (@vercel/blob 2.8.2 の実体で確認))。
+- `IMAGE_OWNER_KEY_SECRET` (Sensitive・32 byte 以上) を作って入れ、控えを安全な所に残す。作り方は手元で
+  `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"` (.env.local.example と同じ)。Sensitive は
+  後から Vercel の画面で読めないので、**入れる前に**控えを取る。**回さない** (回すと同じウォレットの画像が
   別の path になり、枚数の数え方と PR 3 の一覧・削除が前の画像に届かなくなる)。値をチャット・ログ・PR に貼らない。
 - `ADMIN_WALLETS` に運営者本人の wallet だけが入っている。KV (Upstash) が動いている (全体の 1 日の枠を数える。数えられないと
   アップロードは止まる = fail-closed。URL の欄は使えるので保存と決済には波及しない)。
@@ -3449,6 +3453,10 @@ PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品ア
   エラーの応答とログにアドレス・ownerKey・path・URL は出ない。成功の応答の `url` だけは公開の Blob の URL そのもの (path を含む・設計どおりの例外)。
   request の `x-vercel-oidc-token` は Sentry の event と transaction から落とす (lib/telemetryRedaction)。
 - 上限: 1 ウォレット 200 枚 (Blob の list で数える)・1 日 (UTC) にウォレット 30 回・IP 60 回・全体 200 回。
+- `list_failed` が毎回出るとき (アップロードが 1 回も通らない): route は SDK の例外の文を捨てるので、ログからは原因が分からない。
+  次を順に見る: Production の env に `BLOB_STORE_ID` があるか・store が Production の Environment につながっているか・project の
+  OIDC (Secure backend access) が有効か・store が public で作られているか。`not_configured` なら `IMAGE_OWNER_KEY_SECRET`・
+  `BLOB_STORE_ID`・`IP_HASH_SECRET` のどれかが無いか短い。
 
 ### 20.4 戻し方
 - `IMAGE_UPLOAD_MODE` を空 (または `off`) にして再 deploy する (route は 404・出品者の GET の `imageUpload` は false で、フォームは
