@@ -501,7 +501,7 @@ describe('images library: 使っている所 (本人の handle と Store の商�
     kvData.set(`x402:hosted:h_${'d'.repeat(32)}`, productRecord(`h_${'e'.repeat(32)}`, OWNER, { imageUrl: urlFor(pathFor(13)) }));
   }
 
-  it('全部の欄を見つける (プロフ・店舗・商品の表紙と追加画像・販売停止のライセンスの商品)。他人の記録・別の origin・id の違う記録は数えない', async () => {
+  it('全部の欄を pathname で見つける (別の host・販売停止のライセンスも含む)。他人の記録・id の違う記録は数えない', async () => {
     vi.stubEnv('NEXT_PUBLIC_ENABLE_LICENSE_NFT', '');
     seedAllReferences();
     const body = await (await listImages(get())).json();
@@ -518,7 +518,8 @@ describe('images library: 使っている所 (本人の handle と Store の商�
     ]);
     expect(byId[imageId(8)]).toEqual([{ kind: 'product', id: PRODUCT_ID, title: '星の写真集', field: 'gallery' }]);
     expect(byId[imageId(9)]).toEqual([{ kind: 'product', id: LICENSE_ID, title: 'ライセンス', field: 'cover' }]);
-    for (const n of [10, 11, 12, 13]) expect(byId[imageId(n)]).toEqual([]);
+    expect(byId[imageId(11)]).toEqual([{ kind: 'storefront', handle: 'shop', field: 'menu' }]);
+    for (const n of [10, 12, 13]) expect(byId[imageId(n)]).toEqual([]);
   });
 
   it('1 回の一覧で KV は LRANGE 2 + MGET 2 (種類ごとに 1 回)・Blob は list 1 回', async () => {
@@ -658,6 +659,19 @@ describe('images library: 削除 (POST /api/images/delete)', () => {
     expect(failures()).toEqual(['images.delete.failed:usage_unavailable']);
   });
 
+  it.each(['記録', 'head'])('%s の URL が別の host でも同じ pathname を使っていれば 409 で消さない', async (otherHost) => {
+    const pathname = pathFor(1);
+    const otherUrl = `https://other.public.blob.vercel-storage.com/${pathname}`;
+    addBlob(pathname);
+    if (otherHost === 'head') blob.head.mockResolvedValueOnce({ url: otherUrl });
+    kvData.set(`wallet:handles:${OWNER.toLowerCase()}`, ['shop']);
+    kvData.set('handle:shop', handleRecord(OWNER, { profile: { avatar: otherHost === '記録' ? otherUrl : urlFor(pathname) } }));
+    const response = await deleteImage(del(target(1)));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: 'image_in_use', usedIn: [{ kind: 'profile', handle: 'shop', field: 'avatar' }] });
+    expect(blob.del).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['head の失敗', () => blob.head.mockRejectedValueOnce(new Error('head boom')), 'head_failed', false],
     ['del の失敗', () => blob.del.mockRejectedValueOnce(new Error('del boom')), 'delete_failed', true],
@@ -699,6 +713,22 @@ describe('images library: 読めない記録 (レビュー 1 回目 MUST 1)', ()
     delete record.title;
     return JSON.stringify(record);
   };
+  const seedHandleOwner = (owner: string) => {
+    const handle = JSON.parse(handleRecord(OWNER, { profile: { avatar: urlFor(pathFor(1)) } }));
+    seedHandle(JSON.stringify({ ...handle, owner }));
+  };
+  const seedThrowingRegistration = () => {
+    const license = JSON.parse(pausedLicenseRecord(OWNER, urlFor(pathFor(1))));
+    // 有効な商品の registration.status だけが壊れ、parser の文字列変換で例外になる。
+    license.registration.status = { toString: null };
+    kvData.set(`x402:hosted:owner:${OWNER.toLowerCase()}`, [LICENSE_ID]);
+    kvData.set(`x402:hosted:${LICENSE_ID}`, JSON.stringify(license));
+  };
+  const unreadableUsageCases = [
+    ['handle の owner が空', () => seedHandleOwner('')],
+    ['handle の owner が 40 桁の hex でない', () => seedHandleOwner(`0x${'g'.repeat(40)}`)],
+    ['商品の registration の parser が例外を投げる', seedThrowingRegistration],
+  ] as const;
 
   it.each([
     ['handle の記録の必須の項目が欠けた', () => seedHandle(brokenHandle())],
@@ -706,7 +736,8 @@ describe('images library: 読めない記録 (レビュー 1 回目 MUST 1)', ()
     ['handle の記録が JSON でない', () => seedHandle('{')],
     ['商品の記録の必須の項目が欠けた', () => seedProduct(brokenProduct())],
     ['商品の記録が JSON でない', () => seedProduct('not json')],
-  ])('%s: 削除は 503 で del を送らない (使っていないと言わない)', async (_label, seed) => {
+    ...unreadableUsageCases,
+  ] as const)('%s: 削除は 503 で del を送らない (使っていないと言わない)', async (_label, seed) => {
     addBlob(pathFor(1));
     seed();
     const response = await deleteImage(del(target(1)));
@@ -720,12 +751,24 @@ describe('images library: 読めない記録 (レビュー 1 回目 MUST 1)', ()
   it.each([
     ['handle', () => seedHandle(brokenHandle())],
     ['商品', () => seedProduct(brokenProduct())],
-  ])('%s の記録が読めなければ一覧も 503 (「使用なし」と出さない)', async (_label, seed) => {
+    ...unreadableUsageCases,
+  ] as const)('%s の記録が読めなければ一覧も 503 (「使用なし」と出さない)', async (_label, seed) => {
     addBlob(pathFor(1));
     seed();
     const response = await listImages(get());
     expect(response.status).toBe(503);
     expect(failures()).toEqual(['images.list.failed:usage_unreadable']);
+    expect(blob.del).not.toHaveBeenCalled();
+  });
+
+  it('有効な別アドレスの handle は読み飛ばし、本人の画像を未使用として消せる', async () => {
+    addBlob(pathFor(1));
+    seedHandleOwner(OTHER);
+    const response = await listImages(get());
+    expect(response.status).toBe(200);
+    expect((await response.json()).images).toMatchObject([{ id: imageId(1), usedIn: [] }]);
+    expect((await deleteImage(del(target(1)))).status).toBe(204);
+    expect(blob.del).toHaveBeenCalledTimes(1);
   });
 
   it('MGET の値が null (index にあるが記録が消えた) は使っていない扱い (消せる)', async () => {

@@ -47,7 +47,7 @@ describe('fetchImageLibraryPage', () => {
     ['nextCursor の形が違う', { ok: true, images: [], nextCursor: 3 }],
   ])('%s なら unknown', async (_label, body) => {
     fetchMock.mockResolvedValue(reply(200, body));
-    expect(await fetchImageLibraryPage(WALLET, null)).toEqual({ ok: false, error: 'unknown' });
+    expect(await fetchImageLibraryPage(WALLET, null)).toMatchObject({ ok: false, error: 'unknown' });
   });
 
   it.each([
@@ -58,7 +58,7 @@ describe('fetchImageLibraryPage', () => {
     [500, '', 'unknown'],
   ])('失敗 %i は code にする', async (status, body, error) => {
     fetchMock.mockResolvedValue(reply(status, body));
-    expect(await fetchImageLibraryPage(WALLET, null)).toEqual({ ok: false, error });
+    expect(await fetchImageLibraryPage(WALLET, null)).toMatchObject({ ok: false, error });
   });
 
   it('通信の失敗は network (例外を投げない)', async () => {
@@ -81,7 +81,7 @@ describe('deleteLibraryImage', () => {
 
   it('409 image_in_use は使っている所を返す', async () => {
     fetchMock.mockResolvedValue(reply(409, { ok: false, error: 'image_in_use', usedIn: ITEM.usedIn }));
-    expect(await deleteLibraryImage(WALLET, target)).toEqual({ ok: false, error: 'image_in_use', usedIn: ITEM.usedIn });
+    expect(await deleteLibraryImage(WALLET, target)).toMatchObject({ ok: false, error: 'image_in_use', usedIn: ITEM.usedIn });
   });
 
   it.each([
@@ -90,11 +90,21 @@ describe('deleteLibraryImage', () => {
     [200, { ok: true }, 'unknown'],
   ])('%i は code にする', async (status, body, error) => {
     fetchMock.mockResolvedValue(reply(status, body));
-    expect(await deleteLibraryImage(WALLET, target)).toEqual({ ok: false, error });
+    expect(await deleteLibraryImage(WALLET, target)).toMatchObject({ ok: false, error });
   });
 
   it('通信の失敗は network', async () => {
     fetchMock.mockRejectedValue(new TypeError('offline'));
     expect(await deleteLibraryImage(WALLET, target)).toEqual({ ok: false, error: 'network' });
+  });
+});
+
+describe('権限の喪失を判定する HTTP status', () => {
+  it.each([
+    ['一覧', () => fetchImageLibraryPage(WALLET, null)],
+    ['削除', () => deleteLibraryImage(WALLET, { purpose: 'product', id: ITEM.id, ext: 'jpg' })],
+  ] as const)('%s は本文の code と独立に status を返す', async (_label, request) => {
+    fetchMock.mockResolvedValue(reply(403, { ok: false, error: 'cross_site_request' }));
+    expect(await request()).toEqual({ ok: false, error: 'cross_site_request', status: 403 });
   });
 });

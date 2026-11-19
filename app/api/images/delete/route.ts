@@ -74,7 +74,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       logImageLibraryFailure('delete', read.reason === 'storage' ? 'usage_unavailable' : 'usage_unreadable');
       return imageLibraryFail('storage_unavailable', 503);
     }
-    const usedIn = read.usage.usesOf(found.url);
+    const usedIn = read.usage.usesOf(pathname);
     if (usedIn.length > 0) return imageLibraryJson({ ok: false, error: 'image_in_use', usedIn }, 409);
 
     // 使っている所を読む間 (と同期の処理の間) に期限を過ぎていたら消さない。timer の callback を待たず、単調時計でも見る。

@@ -12,6 +12,13 @@ import type { ImageDeleteResult, ImageLibraryPageResult } from '@/lib/images/lib
 const A = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const B = '0x2222222222222222222222222222222222222222';
 const T = ja.ImageLibrary;
+const intro = T.intro.replace('{max}', '200');
+
+function expectNoGuidance() {
+  expect(screen.queryByText(intro)).not.toBeInTheDocument();
+  expect(screen.queryByText(T.usageNote)).not.toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent('200 枚');
+}
 
 const account = vi.hoisted(() => ({ address: undefined as string | undefined }));
 const siwe = vi.hoisted(() => ({
@@ -98,7 +105,7 @@ async function resolveDelete(index: number, result: ImageDeleteResult) {
 beforeEach(() => {
   account.address = undefined;
   Object.assign(siwe, { isSignedIn: false, isLoading: false, imageUpload: false, imageUploadSignIn: false });
-  siwe.refreshSession.mockReset();
+  siwe.refreshSession.mockReset().mockResolvedValue(undefined);
   pages = [];
   deletes = [];
   client.fetchImageLibraryPage.mockReset().mockImplementation((wallet: string, cursor: string | null, signal?: AbortSignal) => {
@@ -152,14 +159,6 @@ describe('ImageLibrary: 出す・出さない', () => {
 });
 
 describe('ImageLibrary: 機能の案内は使えるときだけ (レビュー 1 回目 MUST 6)', () => {
-  const intro = T.intro.replace('{max}', '200');
-
-  function expectNoGuidance() {
-    expect(screen.queryByText(intro)).not.toBeInTheDocument();
-    expect(screen.queryByText(T.usageNote)).not.toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent('200 枚');
-  }
-
   it('段階 off (サインインの導線も無い) では短い「使えません」の文だけ', () => {
     renderWithIntl(<ImageLibrary />);
     expect(screen.getByText(T.notAvailable)).toBeInTheDocument();
@@ -248,9 +247,10 @@ describe('ImageLibrary: 一覧', () => {
   it('読めなければ失敗の文ともう一度読み込むボタン (401 はサインインし直しの文)', async () => {
     signIn(A);
     renderWithIntl(<ImageLibrary />);
-    await resolvePage(0, { ok: false, error: 'session_mismatch' });
+    await resolvePage(0, { ok: false, status: 401, error: 'unknown' });
     expect(screen.getByRole('alert')).toHaveTextContent(T.errors.unauthenticated);
     expect(siwe.refreshSession).toHaveBeenCalledTimes(1);
+    expectNoGuidance();
     fireEvent.click(screen.getByRole('button', { name: T.retry }));
     expect(client.fetchImageLibraryPage).toHaveBeenCalledTimes(2);
     await resolvePage(1, { ok: true, images: [item(1)], nextCursor: null });
@@ -358,6 +358,7 @@ describe('ImageLibrary: 本人・権限を失ったと分かったとき (レビ
   }
 
   function expectCleared() {
+    expectNoGuidance();
     expect(document.querySelector('img')).toBeNull();
     expect(screen.queryByRole('group')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: T.delete })).not.toBeInTheDocument();
@@ -369,7 +370,7 @@ describe('ImageLibrary: 本人・権限を失ったと分かったとき (レビ
     fireEvent.click(within(rowFor(1)).getByRole('button', { name: T.delete }));
     expect(within(rowFor(1)).getByRole('group')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: T.loadMore }));
-    await resolvePage(1, { ok: false, error: 'session_mismatch' });
+    await resolvePage(1, { ok: false, status: 401, error: 'session_mismatch' });
     expectCleared();
     expect(screen.getByRole('alert')).toHaveTextContent(T.errors.unauthenticated);
     expect(siwe.refreshSession).toHaveBeenCalledTimes(1);
@@ -377,17 +378,20 @@ describe('ImageLibrary: 本人・権限を失ったと分かったとき (レビ
   });
 
   it.each([
-    ['403 forbidden', 'forbidden', T.errors.notAvailable],
-    ['404 not_found (段階 off)', 'not_found', T.errors.notAvailable],
-    ['401 unauthenticated', 'unauthenticated', T.errors.unauthenticated],
-  ] as const)('削除が %s なら、進んでいる GET を捨て、行を消して /me を取り直す', async (_label, error, message) => {
+    [403, 'forbidden', T.errors.notAvailable],
+    [403, 'cross_site_request', T.errors.notAvailable],
+    [404, 'unknown', T.errors.notAvailable],
+    [401, 'unauthenticated', T.errors.unauthenticated],
+  ] as const)('削除が %i %s なら、進んでいる GET を捨て、/me を待つ間も行と案内を隠す', async (status, error, message) => {
     await shown();
+    const refresh = deferred<void>();
+    siwe.refreshSession.mockReturnValueOnce(refresh.promise);
     fireEvent.click(screen.getByRole('button', { name: T.loadMore }));
     fireEvent.click(within(rowFor(1)).getByRole('button', { name: T.delete }));
     fireEvent.click(within(rowFor(1)).getByRole('button', { name: T.confirmDelete }));
     fireEvent.click(within(rowFor(2)).getByRole('button', { name: T.delete }));
     fireEvent.click(within(rowFor(2)).getByRole('button', { name: T.confirmDelete }));
-    await resolveDelete(0, { ok: false, error });
+    await resolveDelete(0, { ok: false, status, error });
     expectCleared();
     expect(screen.getByRole('alert')).toHaveTextContent(message);
     expect(siwe.refreshSession).toHaveBeenCalledTimes(1);
@@ -398,20 +402,42 @@ describe('ImageLibrary: 本人・権限を失ったと分かったとき (レビ
     await resolveDelete(1, { ok: true });
     expectCleared();
     expect(client.fetchImageLibraryPage).toHaveBeenCalledTimes(2);
+    expect(siwe.refreshSession).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: T.retry })).toBeDisabled();
+    await act(async () => refresh.resolve());
+    expect(screen.getByRole('button', { name: T.retry })).toBeEnabled();
   });
 
   it('失った後に「もう一度読み込む」で読み直せる (本人が戻っていれば一覧が出る)', async () => {
     await shown();
     fireEvent.click(screen.getByRole('button', { name: T.loadMore }));
-    await resolvePage(1, { ok: false, error: 'session_mismatch' });
+    await resolvePage(1, { ok: false, status: 401, error: 'session_mismatch' });
     fireEvent.click(screen.getByRole('button', { name: T.retry }));
     await resolvePage(2, { ok: true, images: [item(3)], nextCursor: null });
     expect(rowFor(3)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.getByText(intro)).toBeInTheDocument();
   });
 });
 
 describe('ImageLibrary: 409 の使っている所を古い GET で上書きしない (レビュー 1 回目 MUST 5)', () => {
+  it('409 より後の「もっと見る」は既存の行を元の位置で更新し、使用なしになれば警告を消す', async () => {
+    signIn(A);
+    renderWithIntl(<ImageLibrary />);
+    await resolvePage(0, { ok: true, images: [item(1), item(2), item(3)], nextCursor: 'c:24' });
+    fireEvent.click(within(rowFor(2)).getByRole('button', { name: T.delete }));
+    fireEvent.click(within(rowFor(2)).getByRole('button', { name: T.confirmDelete }));
+    await resolveDelete(0, { ok: false, status: 409, error: 'image_in_use', usedIn: [{ kind: 'profile', handle: 'demo', field: 'avatar' }] });
+    expect(within(rowFor(2)).getByRole('alert')).toHaveTextContent(T.errors.inUse);
+    expect(rowFor(2)).toHaveTextContent('@demo のアバター');
+
+    fireEvent.click(screen.getByRole('button', { name: T.loadMore }));
+    await resolvePage(1, { ok: true, images: [item(4), item(2)], nextCursor: null });
+    expect(rowFor(2)).toHaveTextContent(T.notUsed);
+    expect(within(rowFor(2)).queryByRole('alert')).not.toBeInTheDocument();
+    expect(rows()).toEqual([rowFor(1), rowFor(2), rowFor(3), rowFor(4)]);
+  });
+
   it('A の 204 → 読み直しの開始 → B の 409 → その GET が届く順でも、B は 409 の使っている所のまま。後から始まった GET の値は使う', async () => {
     signIn(A);
     renderWithIntl(<ImageLibrary />);
@@ -427,10 +453,11 @@ describe('ImageLibrary: 409 の使っている所を古い GET で上書きし�
     expect(rowFor(2)).toHaveTextContent('@demo のアバター');
 
     // 409 より前に始まった GET (B の使っている所はまだ空) が届く。
-    await resolvePage(1, { ok: true, images: [item(2), item(3)], nextCursor: null });
+    await resolvePage(1, { ok: true, images: [item(3), item(4), item(2)], nextCursor: null });
     expect(rowFor(2)).toHaveTextContent('@demo のアバター');
     expect(rowFor(2)).not.toHaveTextContent(T.notUsed);
     expect(within(rowFor(2)).getByRole('alert')).toHaveTextContent(T.errors.inUse);
+    expect(rows()).toEqual([rowFor(2), rowFor(3), rowFor(4)]);
 
     // 409 より後に始まった GET の値は使う (ほかのタブで外した後)。
     fireEvent.click(within(rowFor(3)).getByRole('button', { name: T.delete }));
@@ -439,6 +466,8 @@ describe('ImageLibrary: 409 の使っている所を古い GET で上書きし�
     await resolvePage(2, { ok: true, images: [item(2)], nextCursor: null });
     expect(rowFor(2)).toHaveTextContent(T.notUsed);
     expect(rowFor(2)).not.toHaveTextContent('@demo のアバター');
+    expect(within(rowFor(2)).queryByRole('alert')).not.toBeInTheDocument();
+    expect(rows()).toEqual([rowFor(2)]);
   });
 });
 

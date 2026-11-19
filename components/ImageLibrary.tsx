@@ -54,9 +54,6 @@ const ERROR_KEYS: Record<ImageLibraryFailure, string> = {
 
 // 削除の結果が分からない失敗 (届いたか・消えたかを確かめられない)。行には出さず、一覧を読み直して今の状態を見せる。
 const UNKNOWN_RESULT: ReadonlySet<ImageLibraryFailure> = new Set(['network', 'storage_unavailable', 'unknown']);
-// 本人が替わった (別のタブでのサインインし直し・サインアウト・期限切れ) か、権限が無くなった (段階 off・admin の段階で運営者でない)
-// と確定する失敗。
-const ACCESS_LOST: ReadonlySet<ImageLibraryFailure> = new Set(['unauthenticated', 'session_mismatch', 'forbidden', 'not_found']);
 
 const buttonClass =
   'inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:border-brand hover:text-brand disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400';
@@ -83,8 +80,6 @@ export function ImageLibrary() {
   const { isSignedIn, isLoading, imageUpload, imageUploadSignIn, refreshSession } = useSiweSession();
 
   let body;
-  // 機能の案内は使えるとき (一覧を出すとき) だけ。
-  let usable = false;
   if (isLoading) {
     body = (
       <p role="status" className="mt-6 text-sm text-slate-500">
@@ -92,7 +87,6 @@ export function ImageLibrary() {
       </p>
     );
   } else if (isSignedIn && imageUpload && address) {
-    usable = true;
     body = <ImageLibraryList key={address.toLowerCase()} wallet={address} onAccessLost={refreshSession} />;
   } else if (!isSignedIn && imageUploadSignIn) {
     body = (
@@ -108,12 +102,6 @@ export function ImageLibrary() {
         {t('back')}
       </Link>
       <h1 className="mt-2 text-2xl font-bold text-slate-900">{t('title')}</h1>
-      {usable ? (
-        <>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('intro', { max: IMAGE_OWNER_MAX_IMAGES })}</p>
-          <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('usageNote')}</p>
-        </>
-      ) : null}
       {body}
     </div>
   );
@@ -121,13 +109,14 @@ export function ImageLibrary() {
 
 type RowError = { error: ImageLibraryFailure };
 
-function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLost: () => void }) {
+function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLost: () => Promise<void> }) {
   const t = useTranslations('ImageLibrary');
   const locale = useLocale();
   const [rows, setRows] = useState<ImageLibraryItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<ImageLibraryFailure | null>(null);
+  const [access, setAccess] = useState<'allowed' | 'refreshing' | 'retry'>('allowed');
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreError, setMoreError] = useState<ImageLibraryFailure | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
@@ -156,19 +145,36 @@ function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLo
     if (confirming !== null) confirmCancel.current?.focus();
   }, [confirming]);
 
-  /** GET の結果の行に、それより後に 409 で分かった使っている所を重ねる。後から始まった GET の結果なら、その 409 の値は捨てる。 */
-  const withOverrides = (images: ImageLibraryItem[], seq: number): ImageLibraryItem[] =>
-    images.map((item) => {
+  const applyPage = (images: ImageLibraryItem[], seq: number, append: boolean) => {
+    const updates = new Map<string, ImageLibraryItem>();
+    for (const item of images) {
       const key = itemKey(item);
       const override = usageOverrides.current.get(key);
-      if (!override) return item;
-      if (override.seq >= seq) return { ...item, usedIn: override.usedIn };
-      usageOverrides.current.delete(key);
-      return item;
+      if (override && override.seq >= seq) {
+        updates.set(key, { ...item, usedIn: override.usedIn });
+      } else {
+        updates.set(key, item);
+        usageOverrides.current.delete(key);
+      }
+    }
+    setRows((previous) => {
+      const merged = new Map<string, ImageLibraryItem>();
+      for (const row of previous) {
+        const key = itemKey(row);
+        if (append || updates.has(key)) merged.set(key, row);
+      }
+      // Map は同じ key を更新しても順序を保つ。新しい行だけが末尾に並ぶ。
+      for (const [key, item] of updates) merged.set(key, item);
+      return [...merged.values()];
     });
+    setRowErrors((previous) => Object.fromEntries(Object.entries(previous).filter(
+      ([key, { error }]) => error !== 'image_in_use' || updates.get(key)?.usedIn.length !== 0,
+    )));
+  };
 
-  /** 本人が替わった・権限が無くなった: 進んでいる GET を捨て、行と確認を消し、/me を取り直す。 */
-  const loseAccess = (error: ImageLibraryFailure) => {
+  /** 権限を失った HTTP status なら、古い応答と表示を捨てて /me を取り直す。 */
+  const handleAccessLoss = (status?: number) => {
+    if (status !== 401 && status !== 403 && status !== 404) return false;
     epoch.current += 1;
     generation.current += 1;
     controller.current?.abort();
@@ -185,13 +191,15 @@ function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLo
     setDeleting(new Set());
     setRowErrors({});
     setUnknownResult(false);
-    setListError(error);
-    onAccessLost();
+    setListError(status === 401 ? 'unauthenticated' : 'forbidden');
+    setAccess('refreshing');
+    void onAccessLost().then(() => setAccess('retry'));
+    return true;
   };
   // reload (useCallback・依存は wallet だけ) から、最新の描画の関数を呼ぶ。
-  const latest = useRef({ loseAccess, withOverrides });
+  const latest = useRef({ handleAccessLoss, applyPage });
   useEffect(() => {
-    latest.current = { loseAccess, withOverrides };
+    latest.current = { handleAccessLoss, applyPage };
   });
 
   const reload = useCallback(() => {
@@ -209,13 +217,11 @@ function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLo
     setMoreError(null);
     void fetchImageLibraryPage(wallet, null, request.signal).then((result) => {
       if (current !== generation.current) return;
-      if (!result.ok && ACCESS_LOST.has(result.error)) {
-        latest.current.loseAccess(result.error);
-        return;
-      }
+      if (!result.ok && latest.current.handleAccessLoss(result.status)) return;
       setLoading(false);
       if (result.ok) {
-        setRows(latest.current.withOverrides(result.images, seq));
+        latest.current.applyPage(result.images, seq, false);
+        setAccess('allowed');
         setNextCursor(result.nextCursor);
       } else {
         setListError(result.error);
@@ -243,18 +249,11 @@ function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLo
     setMoreError(null);
     void fetchImageLibraryPage(wallet, nextCursor, controller.current?.signal).then((result) => {
       if (current !== generation.current) return;
-      if (!result.ok && ACCESS_LOST.has(result.error)) {
-        latest.current.loseAccess(result.error);
-        return;
-      }
+      if (!result.ok && latest.current.handleAccessLoss(result.status)) return;
       loadingMoreRef.current = false;
       setLoadingMore(false);
       if (result.ok) {
-        const images = latest.current.withOverrides(result.images, seq);
-        setRows((previous) => {
-          const seen = new Set(previous.map(itemKey));
-          return [...previous, ...images.filter((item) => !seen.has(itemKey(item)))];
-        });
+        latest.current.applyPage(result.images, seq, true);
         setNextCursor(result.nextCursor);
       } else {
         setMoreError(result.error);
@@ -289,10 +288,7 @@ function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLo
         reload();
         return;
       }
-      if (ACCESS_LOST.has(result.error)) {
-        latest.current.loseAccess(result.error);
-        return;
-      }
+      if (latest.current.handleAccessLoss(result.status)) return;
       if (result.error === 'image_in_use' && result.usedIn) {
         const usedIn = result.usedIn;
         // 今までに始まった GET (まだ届いていないものも) の結果で、この使っている所を上書きしない。
@@ -310,20 +306,16 @@ function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLo
 
   const dateFormat = new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' });
 
-  if (loading && rows.length === 0) {
-    return (
-      <p role="status" className="mt-6 text-sm text-slate-500">
-        {t('loading')}
-      </p>
-    );
-  }
-
-  return (
+  const content = loading && rows.length === 0 ? (
+    <p role="status" className="mt-6 text-sm text-slate-500">
+      {t('loading')}
+    </p>
+  ) : (
     <div className="mt-6">
       {listError ? (
         <div role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           <p>{t(`errors.${ERROR_KEYS[listError]}`)}</p>
-          <button type="button" onClick={reload} className={`mt-2 ${buttonClass}`}>
+          <button type="button" onClick={reload} disabled={access === 'refreshing'} className={`mt-2 ${buttonClass}`}>
             {t('retry')}
           </button>
         </div>
@@ -433,5 +425,16 @@ function ImageLibraryList({ wallet, onAccessLost }: { wallet: string; onAccessLo
         </div>
       ) : null}
     </div>
+  );
+  return (
+    <>
+      {access === 'allowed' ? (
+        <>
+          <p className="mt-2 text-sm leading-relaxed text-slate-600">{t('intro', { max: IMAGE_OWNER_MAX_IMAGES })}</p>
+          <p className="mt-2 text-xs leading-relaxed text-slate-500">{t('usageNote')}</p>
+        </>
+      ) : null}
+      {content}
+    </>
   );
 }

@@ -16,13 +16,15 @@ import { isImagePurpose } from '@/lib/images/purpose';
 
 export type ImageLibraryFailure = ImageLibraryErrorCode | 'network' | 'unknown';
 
+type FailureResult = { ok: false; error: ImageLibraryFailure; status?: number };
+
 export type ImageLibraryPageResult =
   | { ok: true; images: ImageLibraryItem[]; nextCursor: string | null }
-  | { ok: false; error: ImageLibraryFailure };
+  | FailureResult;
 
 export type ImageDeleteResult =
   | { ok: true }
-  | { ok: false; error: ImageLibraryFailure; usedIn?: ImageUse[] };
+  | (FailureResult & { usedIn?: ImageUse[] });
 
 // 本文が JSON でない応答 (Vercel の 504 など) は HTTP status から code を決める。
 const STATUS_ERROR_CODES: Partial<Record<number, ImageLibraryErrorCode>> = {
@@ -73,8 +75,9 @@ function isItem(value: unknown): value is ImageLibraryItem {
   );
 }
 
-function failure(json: Record<string, unknown> | null, status: number): ImageLibraryFailure {
-  return isImageLibraryErrorCode(json?.error) ? json.error : (STATUS_ERROR_CODES[status] ?? 'unknown');
+function failure(json: Record<string, unknown> | null, status: number): FailureResult {
+  const error = isImageLibraryErrorCode(json?.error) ? json.error : (STATUS_ERROR_CODES[status] ?? 'unknown');
+  return { ok: false, error, status };
 }
 
 /** 一覧の 1 ページ。cursor は前のページの nextCursor (最初のページは null)。 */
@@ -100,9 +103,9 @@ export async function fetchImageLibraryPage(
     if (Array.isArray(images) && images.every(isItem) && (nextCursor === null || typeof nextCursor === 'string')) {
       return { ok: true, images, nextCursor };
     }
-    return { ok: false, error: 'unknown' };
+    return { ok: false, error: 'unknown', status: response.status };
   }
-  return { ok: false, error: failure(json, response.status) };
+  return failure(json, response.status);
 }
 
 /** 1 枚を消す。204 = 消えた (もう無かった場合も)。409 image_in_use は使っている所 (usedIn) を返す。 */
@@ -120,7 +123,7 @@ export async function deleteLibraryImage(wallet: string, target: ImageDeleteTarg
   }
   if (response.status === 204) return { ok: true };
   const json = record(await response.json().catch(() => null));
-  const error = failure(json, response.status);
-  if (error === 'image_in_use' && isUses(json?.usedIn)) return { ok: false, error, usedIn: json.usedIn };
-  return { ok: false, error };
+  const result = failure(json, response.status);
+  if (result.error === 'image_in_use' && isUses(json?.usedIn)) return { ...result, usedIn: json.usedIn };
+  return result;
 }

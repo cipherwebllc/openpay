@@ -128,9 +128,7 @@ export function useSiweSession() {
      * /me を取り直す (画面の API が 401 session_mismatch・403 などで「本人が替わった・権限が無くなった」と分かったとき)。
      * 結果は sessionAddress・isSignedIn・imageUpload に反映される。
      */
-    refreshSession: () => {
-      void qc.invalidateQueries({ queryKey: ME_KEY });
-    },
+    refreshSession: () => qc.invalidateQueries({ queryKey: ME_KEY }),
     /** セッションは在るが接続中 wallet と別アドレス (要再ログイン)。 */
     mismatch: !!sessionAddress && !!address && !sameAddress,
     isLoading: me.isLoading,

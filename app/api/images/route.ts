@@ -79,7 +79,7 @@ export async function GET(req: Request): Promise<NextResponse> {
       url: blob.url,
       size: blob.size,
       uploadedAt: blob.uploadedAt.toISOString(),
-      usedIn: usage?.usesOf(blob.url) ?? [],
+      usedIn: usage?.usesOf(blob.pathname) ?? [],
     }));
     return imageLibraryJson({ ok: true, images, nextCursor: page.hasMore ? page.cursor : null });
   });
