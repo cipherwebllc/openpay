@@ -331,6 +331,33 @@ describe('imageUpload が true のとき', () => {
     expect(screen.getByRole('button', { name: S.saveProduct })).toBeEnabled();
   });
 
+  it('AI の送信中に出品者の GET の取り直しで imageUpload が false になり、今の URL の欄に手で入れても、遅れて届いた AI の画像は入らない', async () => {
+    const seller = { imageUpload: true, listingAssistant: true };
+    stubApi(seller);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderWithIntl(
+      <QueryClientProvider client={client}>
+        <CreatorStoreSellerPanel handle="alice" />
+      </QueryClientProvider>,
+    );
+    const { useAsCover } = await openAssistantWithImage();
+    fireEvent.click(useAsCover);
+    await waitFor(() => expect(uploads).toHaveLength(1));
+
+    seller.imageUpload = false;
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['creator-store', 'seller'] });
+    });
+    // false の枝 = 今の URL の欄 (画像の欄の group は無い)。
+    await waitFor(() => expect(screen.queryByRole('group', { name: S.coverImageLabel })).not.toBeInTheDocument());
+    const urlInput = screen.getByLabelText(S.imageUrlLabel);
+    fireEvent.change(urlInput, { target: { value: 'https://images.example/typed.png' } });
+    await answer(0, `${BLOB}/product/late-ai.jpg`);
+
+    expect(screen.getByLabelText(S.imageUrlLabel)).toHaveValue('https://images.example/typed.png');
+    expect(screen.queryByText(A.coverApplied)).not.toBeInTheDocument();
+  });
+
   it('AI の送信中に表紙を「外す」と、遅れて届いた AI の画像は入らない', async () => {
     stubApi({ imageUpload: true, listingAssistant: true });
     renderPanel();

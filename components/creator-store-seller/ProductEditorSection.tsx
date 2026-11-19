@@ -7,7 +7,7 @@
 // (ListingAssistantEntry・ListingAssistant) が持つ — 親の key の内側なので、アカウントを切り替えると一緒に消える。
 // ここが持つのは「画像をアップロード中か」と「表紙の操作の番号」だけ (中身を持たない・アップロード中は保存を止める)。
 
-import { Component, Fragment, useCallback, useRef, useState, type FormEventHandler, type ReactNode } from 'react';
+import { Component, Fragment, useCallback, useEffect, useRef, useState, type FormEventHandler, type ReactNode } from 'react';
 import { useTranslations } from 'next-intl';
 import dynamic, { type DynamicOptionsLoadingProps } from 'next/dynamic';
 import Link from 'next/link';
@@ -18,7 +18,7 @@ import { MAX_USAGE_NOTE_LEN, type UsagePermission } from '@/lib/store/usageTerms
 import { HOSTED_PRODUCT_CATEGORIES } from '@/lib/x402/storeMeta';
 import { CreatorStoreLicenseFields } from '@/components/CreatorStoreLicenseFields';
 import { ImageField } from '@/components/ImageField';
-import type { ImageOperationCounter } from '@/hooks/useImageUpload';
+import { nextImageOperation, type ImageOperationCounter } from '@/hooks/useImageUpload';
 import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
 import { ProductGalleryField } from './ProductGalleryField';
 import { errorCode, errorDetailKey, errorMessageKey } from './request';
@@ -205,6 +205,15 @@ export function ProductEditorSection({
   // 表紙 (imageUrl) を書き換える操作の番号。表紙の欄 (選ぶ・外す・URL の手入力) と AI 出品アシスタント (この画像を表紙に
   // 使う・元に戻す) が共有し、最後の操作だけが表紙に反映される (hooks/useImageUpload)。追加画像は足すだけなので使わない。
   const coverOperation = useRef(0);
+  // imageUpload が切り替わったら (出品者の GET の取り直し) 表紙の操作を 1 つ進め、切り替わる前に始まった AI の表紙の
+  // アップロードを入れない。false の枝の URL の欄は今のまま (番号を進めない) なので、そこでの手入力を後から届いた画像が
+  // 上書きしないように、ここで先に無効にする。
+  const imageUploadSeen = useRef(imageUpload);
+  useEffect(() => {
+    if (imageUploadSeen.current === imageUpload) return;
+    imageUploadSeen.current = imageUpload;
+    nextImageOperation(coverOperation);
+  }, [imageUpload]);
   const submitUnlessImageBusy: FormEventHandler<HTMLFormElement> = (event) => {
     // Enter での送信も止める (保存のボタンは無効にしてあるが、送信の経路はボタンだけではない)。
     if (imageBusy) {
