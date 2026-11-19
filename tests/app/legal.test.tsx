@@ -106,11 +106,12 @@ describe('Legal pages', () => {
       const ja14 = locale === 'ja';
       expect(privacy.section1.body).toContain(ja14 ? '(12) 画像のアップロード機能' : '(12) When the image upload feature is used');
       expect(privacy.section1.body).toContain(ja14 ? '端末内で描き直し' : "redrawn on the user's device");
-      expect(privacy.section1.body).toContain(ja14 ? '同じウォレットからアップロードされたことを知り得ます' : 'uploaded from the same wallet');
+      expect(privacy.section1.body).toContain(ja14 ? '複数の URL を知る第三者は、それらが同じウォレットからアップロードされたことを知り得ます' : 'a third party who knows several of the URLs can tell');
       expect(privacy.section2.body).toContain(ja14 ? '(14) アップロードされた画像は' : '(14) Uploaded images are published');
       expect(privacy.section2.body).toContain(ja14 ? 'URL を知る誰でも閲覧できる' : 'anyone who knows the URL');
-      // (10) の非公開は商品本文だけ (掲載情報は一覧と商品ページで公開・画像は (14))。
-      expect(privacy.section2.body).toContain(ja14 ? '商品の題名・説明・価格・画像などの掲載情報は、ストアの一覧と商品ページで公開します' : 'is published in the Store list and on product pages');
+      // (10) の非公開は商品本文だけ (購入者・有効なライセンスの保有者に提供・出品者は管理画面で確認)。一覧には表紙・商品ページには追加の画像も。
+      expect(privacy.section2.body).toContain(ja14 ? '有効なライセンスの保有者への提供' : 'holders of a valid license');
+      expect(privacy.section2.body).toContain(ja14 ? '表紙の画像はストアの一覧に、追加の画像を含む画像は商品ページに掲載します' : 'together with the cover image, is shown in the Store list');
       expect(privacy.section3.body).toContain('Vercel Blob');
       expect(privacy.sectionExternal.body).toContain('Vercel Blob');
       expect(privacy.sectionExternal.body).toContain(ja14 ? '画像の URL を含む閲覧の情報' : 'including the image URL');
