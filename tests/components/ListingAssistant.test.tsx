@@ -426,6 +426,19 @@ describe('ListingAssistant: 案の反映', () => {
     expect(latestForm.tags).toBe('Coo World, 照明、3D');
   });
 
+  it('タグの案を制御文字だけにすると、解析で 0 件になるので空欄と同じに止める (既存のタグを空にしない)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => okResponse(draftOf({ tags: { value: ['a', 'b'], fits: true } }))));
+    renderAssistant();
+    await generateWithMemo();
+    const applyTags = screen.getByRole('button', { name: A.applyTags });
+    expect(applyTags).toBeEnabled();
+    fireEvent.change(screen.getByRole('textbox', { name: A.fieldTags }), { target: { value: '\u007f' } });
+    expect(applyTags).toBeDisabled();
+    fireEvent.click(applyTags);
+    expect(updates).toEqual([]);
+    expect(latestForm.tags).toBe('Coo World, 照明、3D');
+  });
+
   it('案の説明に、保存すると案が消えるので英語の紹介と X の投稿文は保存の前にコピーするよう書く', async () => {
     renderAssistant();
     await generateWithMemo();

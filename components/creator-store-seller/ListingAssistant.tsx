@@ -214,7 +214,11 @@ function lineIssue(value: string, max: number): FitIssue | null {
 function tagsIssue(value: string): FitIssue | null {
   const items = splitTags(value);
   if (items.length === 0) return { kind: 'empty' };
-  return parseHostedTags(items).ok ? null : { kind: 'tags' };
+  const parsed = parseHostedTags(items);
+  if (!parsed.ok) return { kind: 'tags' };
+  // 制御文字だけのタグは parseHostedTags が黙って落とすので、解析の後に 0 件なら空欄と同じに止める
+  // (「タグに入れる」で既存のタグを空で上書きするのを断つ・Codex のレビュー)。
+  return parsed.tags && parsed.tags.length > 0 ? null : { kind: 'empty' };
 }
 
 const FIELD_MAX: Record<Exclude<TextField, 'tags'>, number> = {
