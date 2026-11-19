@@ -280,4 +280,70 @@ describe('imageUpload が true のとき', () => {
     fireEvent.click(screen.getByRole('button', { name: A.undoCover }));
     expect(coverGroup().querySelector('img')).toHaveAttribute('src', 'https://images.example/cover.png');
   });
+
+  async function openAssistantWithImage(name = 'shot.png') {
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    await screen.findByRole('heading', { name: '商品を編集' });
+    fireEvent.click(screen.getByRole('button', { name: A.open }));
+    const input = (await screen.findByLabelText(A.imageLabel)) as HTMLInputElement;
+    pick(input, name);
+    return { input, useAsCover: await screen.findByRole('button', { name: A.useAsCover }) };
+  }
+
+  it('AI の表紙の応答が遅れて届いても、その間に手で入れた表紙の URL を上書きしない', async () => {
+    stubApi({ imageUpload: true, listingAssistant: true });
+    renderPanel();
+    const { useAsCover } = await openAssistantWithImage();
+    fireEvent.click(useAsCover);
+    await waitFor(() => expect(uploads).toHaveLength(1));
+
+    fireEvent.click(within(coverGroup()).getByRole('button', { name: I.useUrl }));
+    fireEvent.change(screen.getByLabelText(S.imageUrlLabel), { target: { value: 'https://images.example/typed.png' } });
+    await answer(0, `${BLOB}/product/late-ai.jpg`);
+
+    expect(screen.getByLabelText(S.imageUrlLabel)).toHaveValue('https://images.example/typed.png');
+    expect(screen.queryByText(A.coverApplied)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: S.saveProduct })).toBeEnabled();
+  });
+
+  it('表紙の欄のアップロードの応答が遅れて届いても、その間に AI で入れた表紙を上書きしない', async () => {
+    stubApi({ imageUpload: true, listingAssistant: true });
+    renderPanel();
+    const { useAsCover } = await openAssistantWithImage();
+    pick(fileInputIn(coverGroup()), 'field.jpg');
+    await waitFor(() => expect(uploads).toHaveLength(1));
+    fireEvent.click(useAsCover);
+    await waitFor(() => expect(uploads).toHaveLength(2));
+    await answer(1, `${BLOB}/product/ai.jpg`);
+    expect(coverGroup().querySelector('img')).toHaveAttribute('src', `${BLOB}/product/ai.jpg`);
+    await answer(0, `${BLOB}/product/late-field.jpg`);
+    expect(coverGroup().querySelector('img')).toHaveAttribute('src', `${BLOB}/product/ai.jpg`);
+    expect(screen.getByRole('button', { name: S.saveProduct })).toBeEnabled();
+  });
+
+  it('AI で画像を選び直している間 (準備中) は「この画像を表紙に使う」を押せない (前の画像を公開しない)', async () => {
+    stubApi({ imageUpload: true, listingAssistant: true });
+    let finishB!: () => void;
+    prepare.listing
+      .mockResolvedValueOnce({ ok: true, image: { data: '/9j/4A==', bytes: 4, width: 10, height: 10 } })
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          finishB = () => resolve({ ok: true, image: { data: '/9j/4B==', bytes: 4, width: 20, height: 20 } });
+        }),
+      );
+    renderPanel();
+    const { input, useAsCover } = await openAssistantWithImage('a.png');
+    expect(useAsCover).toBeEnabled();
+    pick(input, 'b.png');
+    await waitFor(() => expect(screen.getByRole('button', { name: A.useAsCover })).toBeDisabled());
+    fireEvent.click(screen.getByRole('button', { name: A.useAsCover }));
+    expect(prepare.upload).not.toHaveBeenCalled();
+
+    await act(async () => finishB());
+    const ready = screen.getByRole('button', { name: A.useAsCover });
+    expect(ready).toBeEnabled();
+    fireEvent.click(ready);
+    await waitFor(() => expect(prepare.upload).toHaveBeenCalledTimes(1));
+    expect(prepare.upload).toHaveBeenCalledWith(expect.objectContaining({ name: 'b.png' }), 'product');
+  });
 });

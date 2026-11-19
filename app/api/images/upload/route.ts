@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { readBytesBodyCapped } from '@/lib/httpBodyCap';
-import { countImagesUnder, putPublicImage } from '@/lib/images/blobStore';
+import { BlobDeadlineError, countImagesUnder, putPublicImage } from '@/lib/images/blobStore';
 import {
   imageBlobStoreConfigured,
   imageOwnerSecret,
@@ -34,15 +34,14 @@ import { checkIpRateLimit, checkReadRateLimit } from '@/lib/relay/relayGuards';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-// 本文 1 MiB の読み取り・Blob の list (5 秒で打ち切り)・put (10 秒で打ち切り) の分。
+// 本文 1 MiB の読み取り・Blob の list (cursor を追う全体で 5 秒の締切)・put (10 秒の締切) の分。締切で固定の 503 を返せるよう、
+// 締切の合計より長くする (lib/images/blobStore)。
 export const maxDuration = 20;
 
 const DAY_SEC = 86_400;
 // 認証前の IP の制限 (app/api/store/_shared.ts の ipAllowed と同じ数)。未認証の連打にセッションの KV を読ませない。
 const IP_RATE_LIMIT_MAX = 60;
 const IP_RATE_LIMIT_WINDOW_SEC = 60;
-// 保有の数え方: 上限 (200) に届いたかが分かれば足りる。
-const OWNER_LIST_LIMIT = IMAGE_OWNER_MAX_IMAGES + 1;
 
 function json(body: unknown, status = 200, headers?: HeadersInit): NextResponse {
   const responseHeaders = new Headers(headers);
@@ -76,8 +75,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 2) 別 origin からの書き込み (cookie で認証する) を止める。本文は JSON ではないので Content-Type は 7) で見る。
   const csrf = rejectCrossOriginWrite(req, { json: false });
   if (csrf) return csrf;
-  // 3) 認証前の IP の制限 (分ごと)。
+  // 3) 認証前の IP の制限 (分ごと)。IP の bucket が作れない (IP_HASH_SECRET が無い・短い・接続元が分からない) と、
+  // checkIpRateLimit は数えずに通し、下の IP の 1 日の枠も効かない。ウォレットを作り直せば Blob に書ける量が増えるので、
+  // この route では止める (ほかの route の「hash が無ければ飛ばす」とは違う)。止めても URL の欄は使える (掟 13)。
   const ipBucket = hashIpBucket(clientIp(req));
+  if (ipBucket === null) return fail('not_configured', 503);
   if (!(await checkIpRateLimit('images-upload', ipBucket, IP_RATE_LIMIT_MAX, IP_RATE_LIMIT_WINDOW_SEC))) {
     return rateLimited(IP_RATE_LIMIT_WINDOW_SEC);
   }
@@ -99,7 +101,6 @@ export async function POST(req: Request): Promise<NextResponse> {
   const contentType = declaredType(req);
   if (contentType === null) return fail('unsupported_media_type', 415);
   // 8) 9) 1 日 (UTC) の回数: ウォレットごと・IP ごと。checkReadRateLimit は KV 障害で通す (既存の limiter と同じ fail-open)。
-  // IP の hash が作れない (IP_HASH_SECRET が無い等) ときは IP の枠を飛ばす (checkIpRateLimit と同じ・共有の bucket に寄せない)。
   if (
     !(await checkReadRateLimit(
       `images:upload:wallet:${session.address.toLowerCase()}`,
@@ -109,10 +110,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   ) {
     return rateLimited(secondsUntilNextUtcDay());
   }
-  if (
-    ipBucket !== null &&
-    !(await checkReadRateLimit(`images:upload:ip:${ipBucket}`, IMAGE_UPLOAD_DAILY_PER_IP, DAY_SEC))
-  ) {
+  if (!(await checkReadRateLimit(`images:upload:ip:${ipBucket}`, IMAGE_UPLOAD_DAILY_PER_IP, DAY_SEC))) {
     return rateLimited(secondsUntilNextUtcDay());
   }
 
@@ -124,13 +122,13 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 11) 先頭 byte が宣言した形式と同じか。
   if (sniffImageType(body.bytes) !== contentType) return fail('invalid_image', 415);
 
-  // 12) そのウォレットが置いている枚数。数えられなければ止める (上限を確かめずに置かない)。
+  // 12) そのウォレットが置いている枚数 (上限に届くか最後のページまで cursor を追う)。数えられなければ止める (上限を確かめずに置かない)。
   const ownerKey = imageOwnerKey(session.address, secret);
   let owned: number;
   try {
-    owned = await countImagesUnder(imageOwnerPrefix(ownerKey), OWNER_LIST_LIMIT);
-  } catch {
-    logger.warn('images.upload.failed', { code: 'list_failed' });
+    owned = await countImagesUnder(imageOwnerPrefix(ownerKey), IMAGE_OWNER_MAX_IMAGES);
+  } catch (error) {
+    logger.warn('images.upload.failed', { code: error instanceof BlobDeadlineError ? 'list_deadline' : 'list_failed' });
     return fail('storage_unavailable', 503);
   }
   if (owned >= IMAGE_OWNER_MAX_IMAGES) return fail('image_limit', 409);
@@ -148,7 +146,12 @@ export async function POST(req: Request): Promise<NextResponse> {
   let url: string;
   try {
     url = await putPublicImage(imageBlobPath(ownerKey, purpose, newImageId(), contentType), body.bytes, contentType);
-  } catch {
+  } catch (error) {
+    // 締切は 503 (Blob が遅い・混んでいる)。ほかの失敗は 502。どちらも SDK の文は出さない。
+    if (error instanceof BlobDeadlineError) {
+      logger.warn('images.upload.failed', { code: 'put_deadline' });
+      return fail('storage_unavailable', 503);
+    }
     logger.warn('images.upload.failed', { code: 'put_failed' });
     return fail('upload_failed', 502);
   }

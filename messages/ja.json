@@ -1358,7 +1358,7 @@
       "imagePreviewAlt": "送る画像",
       "imageRemove": "画像を外す",
       "useAsCover": "この画像を表紙に使う",
-      "useAsCoverHint": "押すと、この画像を公開の場所に置いて表紙に入れます。",
+      "useAsCoverHint": "押すと、この画像を OpenPay に保存して表紙に入れます。",
       "coverApplied": "表紙に入れました",
       "undoCover": "表紙を元に戻す",
       "imageDecodeFailed": "画像を読み込めませんでした。JPEG か PNG の画像を選んでください。",
@@ -1689,7 +1689,7 @@
     "previewFailed": "画像を表示できません",
     "uploading": "アップロードしています…",
     "cancel": "やめる",
-    "hint": "JPEG・PNG・WebP を選べます。長辺 {max}px に縮め、位置情報などの撮影の情報を消してから、公開の場所に置きます。",
+    "hint": "JPEG・PNG・WebP を選べます。長辺 {max}px に縮め、撮影場所などの情報を消してから OpenPay に保存します。",
     "keepOriginal": "元の画像はそのままです。",
     "errors": {
       "notAvailable": "今は画像をアップロードできません。URL で指定してください。",

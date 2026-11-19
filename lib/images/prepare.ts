@@ -4,7 +4,8 @@
 // - 共通の部品 (decodeImage・scaledSize・drawToCanvas・canvasBlob) は AI 出品アシスタント
 //   (components/creator-store-seller/listingAssistantImage.ts・白を敷いた JPEG・base64) とアップロードで使う。
 // - prepareUploadImage はアップロード用: 長辺は用途の定数 (lib/images/purpose の IMAGE_MAX_EDGE)・拡大しない・
-//   写真は JPEG (品質 0.85 → 0.6)・透過のある画像は PNG (透過を保ち、1 MiB を超えたら縮めてもう一度)。
+//   透けない画像 (写真) は JPEG (品質 0.85 → 0.6)・透ける画素のある画像は PNG (透過を保ち、1 MiB を超えたら縮めてもう一度)。
+//   どちらにするかは file の type ではなく、描いた画素で決める。
 
 import { IMAGE_MAX_EDGE, IMAGE_UPLOAD_MAX_BYTES, type ImagePurpose, type ImageUploadMimeType } from '@/lib/images/purpose';
 
@@ -95,8 +96,8 @@ export async function prepareUploadImage(file: Blob, purpose: ImagePurpose): Pro
     const canvas = drawToCanvas(bitmap, width, height);
     if (!canvas) return { ok: false, error: 'unsupported' };
 
-    // JPEG の file は透けない。ほかの形式 (PNG・WebP) は描いた画素で確かめる。
-    if (file.type === 'image/jpeg' || !hasTransparency(canvas)) {
+    // 形式は描いた画素で決める (file の type は名前の拡張子から決まるので、.jpg という名前の透過 PNG もある)。
+    if (!hasTransparency(canvas)) {
       for (const quality of UPLOAD_JPEG_QUALITIES) {
         const blob = await canvasBlob(canvas, 'image/jpeg', quality);
         // JPEG を作れないブラウザは PNG を返す (宣言と中身を食い違わせない) ので送らない。

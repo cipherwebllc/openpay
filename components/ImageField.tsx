@@ -146,7 +146,13 @@ export function ImageField({
   const t = useTranslations('ImageField');
   const fileInput = useRef<HTMLInputElement>(null);
   const [urlOpen, setUrlOpen] = useState(false);
-  const { busy, error, cancel, clearError, onFileChange } = useImageUpload({ purpose, onUploaded: onChange, onBusyChange });
+  const { busy, error, cancel, clearError, onFileChange } = useImageUpload({
+    purpose,
+    onUploaded: onChange,
+    onBusyChange,
+    // 送っている間に表紙がほかから変わったら (AI の表紙・元に戻す)、届いた画像で上書きしない。
+    guardValue: value,
+  });
   const current = value.trim();
   // 欄の値がほかから変わったら (AI の「この画像を表紙に使う」・元に戻す など)、前の失敗の文は今の画像の話でなくなるので消す。
   useEffect(() => {

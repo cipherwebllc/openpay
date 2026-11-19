@@ -1358,7 +1358,7 @@
       "imagePreviewAlt": "Image to send",
       "imageRemove": "Remove image",
       "useAsCover": "Use this image as the cover",
-      "useAsCoverHint": "Pressing this places the image at a public location and sets it as the cover.",
+      "useAsCoverHint": "Pressing this saves the image to OpenPay and sets it as the cover.",
       "coverApplied": "Set as the cover",
       "undoCover": "Undo the cover",
       "imageDecodeFailed": "Could not read the image. Choose a JPEG or PNG image.",
@@ -1689,7 +1689,7 @@
     "previewFailed": "Can't show this image",
     "uploading": "Uploading…",
     "cancel": "Cancel",
-    "hint": "Choose a JPEG, PNG or WebP. It is resized to {max}px on the long side and stripped of location and other camera data before being placed at a public location.",
+    "hint": "Choose a JPEG, PNG or WebP. It is resized to {max}px on the long side and stripped of location and other camera data, then saved to OpenPay.",
     "keepOriginal": "The current image is unchanged.",
     "errors": {
       "notAvailable": "Image upload isn't available right now. Please use a URL.",

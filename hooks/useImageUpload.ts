@@ -9,11 +9,15 @@ import { uploadImageFile, type ImageUploadFailure } from '@/lib/images/uploadCli
 // - 取消 (cancel)・unmount の後に届いた古い応答は捨てる (フォームの値を上書きしない)。
 // - busy を親へ知らせる (親はアップロード中の保存を止める)。unmount でも false を知らせる。
 // - 失敗は code を返すだけ: 元の値は呼び元が持ったまま (onUploaded は成功のときだけ呼ぶ)。
+// - guardValue を渡すと、送り始めたときの値と届いたときの値が違えば入れない (送っている間にほかの操作 = 手入力・外す・
+//   ほかの欄のアップロード・AI の表紙・元に戻す が値を変えたら、後から届いた古い画像でその操作を上書きしない)。
 
 export type UseImageUploadOptions = {
   purpose: ImagePurpose;
   onUploaded: (url: string) => void;
   onBusyChange?: (busy: boolean) => void;
+  /** 入れる先の今の値 (表紙の URL など)。送り始めたときと届いたときで違えば、届いた画像を入れない。 */
+  guardValue?: string;
 };
 
 export type ImageUploadState = {
@@ -26,7 +30,7 @@ export type ImageUploadState = {
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
 };
 
-export function useImageUpload({ purpose, onUploaded, onBusyChange }: UseImageUploadOptions): ImageUploadState {
+export function useImageUpload({ purpose, onUploaded, onBusyChange, guardValue }: UseImageUploadOptions): ImageUploadState {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ImageUploadFailure | null>(null);
   // 送るたび・取り消すたびに増やす。応答が届いたとき値が変わっていれば、その応答は古い (捨てる)。
@@ -34,9 +38,9 @@ export function useImageUpload({ purpose, onUploaded, onBusyChange }: UseImageUp
   const controller = useRef<AbortController | null>(null);
   // state の反映 (ボタンの無効化) より先に、同じ tick の 2 回目を止める。
   const inFlight = useRef(false);
-  const callbacks = useRef({ onUploaded, onBusyChange });
+  const callbacks = useRef({ onUploaded, onBusyChange, guardValue });
   useEffect(() => {
-    callbacks.current = { onUploaded, onBusyChange };
+    callbacks.current = { onUploaded, onBusyChange, guardValue };
   });
 
   useEffect(() => {
@@ -73,6 +77,7 @@ export function useImageUpload({ purpose, onUploaded, onBusyChange }: UseImageUp
       const id = ++request.current;
       const abort = new AbortController();
       controller.current = abort;
+      const startedWith = callbacks.current.guardValue;
       setBusy(true);
       setError(null);
       const result = await uploadImageFile(file, purpose, abort.signal);
@@ -80,8 +85,13 @@ export function useImageUpload({ purpose, onUploaded, onBusyChange }: UseImageUp
       inFlight.current = false;
       controller.current = null;
       setBusy(false);
-      if (result.ok) callbacks.current.onUploaded(result.url);
-      else setError(result.error);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      // 送っている間にほかの操作が値を変えていたら、その操作を残す (後から届いた画像で上書きしない)。
+      if (callbacks.current.guardValue !== startedWith) return;
+      callbacks.current.onUploaded(result.url);
     },
     [purpose],
   );

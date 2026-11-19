@@ -115,7 +115,8 @@ const CASES: Case[] = [
   { file: 'handle/route.ts', method: 'POST', json: true,
     load: () => import('@/app/api/handle/route') },
   // 画像のアップロード (server-only の段階は下の beforeAll で admin)。本文は画像の byte 列 (JSON でない)。
-  { file: 'images/upload/route.ts', method: 'POST', json: false,
+  // 検査を通った要求は、この表の要求が接続元の header を持たない (IP の bucket が作れない) ので 503 で止まる (セッションの前)。
+  { file: 'images/upload/route.ts', method: 'POST', json: false, pass: { status: 503, readsSession: false },
     load: () => import('@/app/api/images/upload/route') },
   { file: 'handle/[handle]/route.ts', method: 'DELETE', json: false, params: { handle: 'shop' },
     load: () => import('@/app/api/handle/[handle]/route') },

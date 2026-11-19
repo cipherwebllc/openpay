@@ -64,14 +64,14 @@ afterEach(() => {
 });
 
 describe('prepareUploadImage', () => {
-  it('写真 (JPEG の file) は長辺を用途の大きさに縮めて JPEG (品質 0.85)・白は敷かない・透過を調べない', async () => {
+  it('写真 (透けない画像) は長辺を用途の大きさに縮めて JPEG (品質 0.85)・白は敷かない・描いた画素を調べる', async () => {
     stubBitmap(4032, 3024);
     const result = await prepareUploadImage(file('image/jpeg'), 'product');
     expect(IMAGE_MAX_EDGE.product).toBe(1280);
     expect(result.ok && result.image).toMatchObject({ type: 'image/jpeg', width: 1280, height: 960 });
     expect(toBlobCalls).toEqual([{ type: 'image/jpeg', quality: UPLOAD_JPEG_QUALITIES[0], width: 1280, height: 960 }]);
     expect(context!.fillRect).not.toHaveBeenCalled();
-    expect(context!.getImageData).not.toHaveBeenCalled();
+    expect(context!.getImageData).toHaveBeenCalledWith(0, 0, 1280, 960);
     expect(context!.drawImage).toHaveBeenCalledWith(expect.objectContaining({ width: 4032 }), 0, 0, 1280, 960);
     expect(close).toHaveBeenCalledTimes(1);
   });
@@ -100,6 +100,18 @@ describe('prepareUploadImage', () => {
       expect(toBlobCalls[0].type).toBe('image/jpeg');
     }
     expect(context!.getImageData).toHaveBeenCalledWith(0, 0, 800, 600);
+  });
+
+  it.each([
+    ['JPEG と宣言した (.jpg の名前の) 透過のある画像は PNG', 'image/jpeg', 0, 'image/png'],
+    ['PNG と宣言した透けない画像は JPEG', 'image/png', 255, 'image/jpeg'],
+    ['type の無い透過のある画像は PNG', '', 128, 'image/png'],
+  ] as const)('形式は宣言ではなく描いた画素で決める: %s', async (_label, declared, pixelAlpha, expected) => {
+    stubBitmap(800, 600);
+    alpha = pixelAlpha;
+    const result = await prepareUploadImage(file(declared), 'product');
+    expect(result.ok && result.image.type).toBe(expected);
+    expect(toBlobCalls[0].type).toBe(expected);
   });
 
   it('透過のある画像は PNG のまま (透過を保つ)', async () => {

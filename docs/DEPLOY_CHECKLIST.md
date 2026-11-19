@@ -3424,6 +3424,10 @@ PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品ア
   別の path になり、枚数の数え方と PR 3 の一覧・削除が前の画像に届かなくなる)。値をチャット・ログ・PR に貼らない。
 - `ADMIN_WALLETS` に運営者本人の wallet だけが入っている。KV (Upstash) が動いている (全体の 1 日の枠を数える。数えられないと
   アップロードは止まる = fail-closed。URL の欄は使えるので保存と決済には波及しない)。
+- `IP_HASH_SECRET` (32 byte 以上) が入っている。無い・短いと IP の枠を数えられないので、アップロードは 503 `not_configured` で
+  止まる (この route だけ。ほかの route は従来どおり IP の枠を飛ばして通す)。
+- 本番に `DEBUG` / `NEXT_PUBLIC_DEBUG` の `blob` を入れない。入れると SDK が送り直しのときに path (`v1/<ownerKey>/…`) を
+  console.debug に出す (受け入れる限界: path は公開の URL の一部で秘密ではないが、ログには残さない方針)。
 - Vercel の Spend Management で通知の金額を決めて設定する (点灯の条件)。project 全体を止める設定はしない (決済まで止まる)。
 
 ### 20.2 点灯 (admin)
@@ -3437,8 +3441,10 @@ PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品ア
 ### 20.3 見張る
 - Vercel の Usage の Blob: 保存の量・Advanced Operations (1 回のアップロードで put 1 + list 1)・Data Transfer。
 - Upstash: 1 回のアップロードで 9 コマンド前後 (セッションの読み取り・IP の分・ウォレットと IP の日・全体の日の INCR と EXPIRE NX)。
-- ログ (Sentry にも出る) の `images.upload.failed` の `code`: `list_failed` (Blob の list)・`global_count_unavailable` (KV)・
-  `put_failed` (Blob の put)。アドレス・path・URL は出ない。
+- ログ (Sentry にも出る) の `images.upload.failed` の `code`: `list_failed`・`list_deadline` (Blob の list・cursor を追う全体で
+  5 秒の締切)・`global_count_unavailable` (KV)・`put_failed`・`put_deadline` (Blob の put・10 秒の締切)。エラーの応答とログに
+  アドレス・ownerKey・path・URL は出ない。成功の応答の `url` だけは公開の Blob の URL そのもの (path を含む・設計どおりの例外)。
+  request の `x-vercel-oidc-token` は Sentry の event と transaction から落とす (lib/telemetryRedaction)。
 - 上限: 1 ウォレット 200 枚 (Blob の list で数える)・1 日 (UTC) にウォレット 30 回・IP 60 回・全体 200 回。
 
 ### 20.4 戻し方

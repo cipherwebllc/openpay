@@ -198,6 +198,17 @@ describe('ImageField', () => {
     expect(value()).toBe('https://images.example/typed.png');
   });
 
+  it('送っている間に値がほかから変わったら (AI の表紙・元に戻す)、届いた画像で上書きしない', async () => {
+    const onBusyChange = vi.fn();
+    const { container } = renderWithIntl(<Harness onBusyChange={onBusyChange} />);
+    choose(container);
+    fireEvent.click(screen.getByRole('button', { name: 'ほかから替える' }));
+    await act(async () => pending[0].resolve({ ok: true, url: NEW }));
+    expect(value()).toBe('https://images.example/from-elsewhere.png');
+    expect(onBusyChange).toHaveBeenLastCalledWith(false);
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
   it('unmount の後に届いた応答は捨て、busy は false を知らせる', async () => {
     const onBusyChange = vi.fn();
     const onChange = vi.fn();

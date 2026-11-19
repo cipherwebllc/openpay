@@ -270,11 +270,13 @@ export function ListingAssistant({ productForm, updateProduct, imageUpload = fal
   const cover = useImageUpload({
     purpose: 'product',
     onUploaded: (url) => {
-      // 届いたときの表紙を「元に戻す」の先にする。
+      // 届いたときの表紙 (= 押したときの表紙・下の guardValue) を「元に戻す」の先にする。
       setCoverApplied({ before: productForm.imageUrl, after: url });
       updateProduct({ imageUrl: url });
     },
     onBusyChange: onImageBusyChange,
+    // 送っている間に表紙が変わったら (手入力・外す・表紙の欄のアップロード)、その操作を残し、届いた画像を入れない。
+    guardValue: productForm.imageUrl,
   });
   const [imageError, setImageError] = useState<ListingImageError | null>(null);
   const [imagePreparing, setImagePreparing] = useState(false);
@@ -577,7 +579,8 @@ export function ListingAssistant({ productForm, updateProduct, imageUpload = fal
               <button
                 type="button"
                 onClick={() => void cover.upload(imageFile)}
-                disabled={cover.busy}
+                // 画像を選び直した直後 (準備中) は前の画像の file が残っているので押させない。
+                disabled={cover.busy || imagePreparing}
                 aria-describedby="creator-store-listing-assistant-cover-hint"
                 className={buttonClass}
               >

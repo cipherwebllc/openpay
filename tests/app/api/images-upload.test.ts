@@ -49,7 +49,7 @@ vi.mock('@/lib/x402/hostedStore', async (importOriginal) => ({
 import { POST } from '@/app/api/images/upload/route';
 import { GET as getSeller } from '@/app/api/store/seller/route';
 import { imageOwnerKey } from '@/lib/images/ownerKey';
-import { IMAGE_CACHE_MAX_AGE_SEC } from '@/lib/images/blobStore';
+import { BLOB_LIST_DEADLINE_MS, BLOB_PUT_DEADLINE_MS, IMAGE_CACHE_MAX_AGE_SEC } from '@/lib/images/blobStore';
 import { imageUploadGlobalDailyKey } from '@/lib/images/dailyCap';
 
 /** 先頭が JPEG / PNG の印の byte 列 (中身は詰め物)。 */
@@ -108,6 +108,9 @@ beforeEach(() => {
   checkReadRateLimit.mockResolvedValue(true);
   kv.isKvConfigured.mockReturnValue(true);
   kv.kvIncr.mockResolvedValue({ ok: true, value: 1 });
+  // 前の test の mockResolvedValueOnce が残って次の test に漏れないよう、Blob の mock は毎回まっさらにする。
+  blob.list.mockReset();
+  blob.put.mockReset();
   blob.list.mockResolvedValue({ blobs: [], hasMore: false });
   blob.put.mockImplementation(async (pathname: string) => ({ url: `${BLOB_URL_BASE}/${pathname}`, pathname }));
   getSellerDisclosure.mockResolvedValue(null);
@@ -265,11 +268,28 @@ describe('images upload: 1 日の回数', () => {
     expectStoppedBeforeBody(req);
   });
 
-  it('IP の hash が作れないときは IP の枠を飛ばす (共有の bucket に寄せない)', async () => {
+  it('ウォレットの枠で断ったら IP の枠を使わない', async () => {
+    const counted: string[] = [];
+    checkReadRateLimit.mockImplementation(async (key: string) => {
+      counted.push(key.startsWith('images:upload:wallet:') ? 'wallet' : key.startsWith('images:upload:ip:') ? 'ip' : key);
+      return !key.startsWith('images:upload:wallet:');
+    });
+    expect((await POST(post())).status).toBe(429);
+    expect(counted).toEqual(['wallet']);
+  });
+});
+
+describe('images upload: IP を数えられないとき', () => {
+  it('IP の bucket が作れない (IP_HASH_SECRET が無い・接続元が分からない) なら 503 で、セッション・本文・枠に届かない', async () => {
     hashIpBucket.mockReturnValue(null);
-    expect((await POST(post())).status).toBe(200);
-    expect(checkReadRateLimit).toHaveBeenCalledTimes(1);
-    expect(checkReadRateLimit).toHaveBeenCalledWith(`images:upload:wallet:${OWNER.toLowerCase()}`, 30, DAY);
+    const req = post();
+    const response = await POST(req);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'not_configured' });
+    expect(checkIpRateLimit).not.toHaveBeenCalled();
+    expect(requireSession).not.toHaveBeenCalled();
+    expect(checkReadRateLimit).not.toHaveBeenCalled();
+    expectStoppedBeforeBody(req);
   });
 });
 
@@ -310,19 +330,71 @@ describe('images upload: 本文', () => {
 });
 
 describe('images upload: 保有の枚数と全体の枠', () => {
-  it('自分の prefix だけを limit 201 で数え、200 枚あれば 409 image_limit (全体の枠を使わない)', async () => {
-    blob.list.mockResolvedValue({ blobs: Array.from({ length: 200 }, (_, i) => ({ pathname: `x${i}` })), hasMore: true });
+  const blobs = (count: number) => Array.from({ length: count }, (_, i) => ({ pathname: `x${i}` }));
+
+  it('自分の prefix だけを数え、200 枚あれば 409 image_limit (全体の枠を使わない)', async () => {
+    blob.list.mockResolvedValue({ blobs: blobs(200), hasMore: true, cursor: 'c1' });
     const response = await POST(post());
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ ok: false, error: 'image_limit' });
-    expect(blob.list).toHaveBeenCalledWith(expect.objectContaining({ prefix: ownerPrefix(), limit: 201 }));
+    expect(blob.list).toHaveBeenCalledTimes(1);
+    expect(blob.list).toHaveBeenCalledWith(expect.objectContaining({ prefix: ownerPrefix(), limit: 200, cursor: undefined }));
     expect(kv.kvIncr).not.toHaveBeenCalled();
     expect(blob.put).not.toHaveBeenCalled();
   });
 
-  it('199 枚なら置ける', async () => {
-    blob.list.mockResolvedValue({ blobs: Array.from({ length: 199 }, (_, i) => ({ pathname: `x${i}` })), hasMore: false });
+  it('199 枚なら置ける (最後のページ)', async () => {
+    blob.list.mockResolvedValue({ blobs: blobs(199), hasMore: false });
     expect((await POST(post())).status).toBe(200);
+  });
+
+  it('1 ページ目が 199 枚で続きがあれば、同じ prefix で cursor を追って数える (200 枚に届けば 409)', async () => {
+    blob.list
+      .mockResolvedValueOnce({ blobs: blobs(199), hasMore: true, cursor: 'c1' })
+      .mockResolvedValueOnce({ blobs: blobs(1), hasMore: true, cursor: 'c2' });
+    const response = await POST(post());
+    expect(response.status).toBe(409);
+    expect(blob.list).toHaveBeenCalledTimes(2);
+    expect(blob.list.mock.calls[1][0]).toMatchObject({ prefix: ownerPrefix(), limit: 1, cursor: 'c1' });
+    expect(blob.put).not.toHaveBeenCalled();
+  });
+
+  it('続きのページが空で終われば 199 枚として置ける', async () => {
+    blob.list
+      .mockResolvedValueOnce({ blobs: blobs(150), hasMore: true, cursor: 'c1' })
+      .mockResolvedValueOnce({ blobs: blobs(49), hasMore: false });
+    expect((await POST(post())).status).toBe(200);
+    expect(blob.list).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['続きのページで失敗', () => blob.list.mockResolvedValueOnce({ blobs: blobs(10), hasMore: true, cursor: 'c1' }).mockRejectedValueOnce(new Error('page 2'))],
+    ['続きがあるのに cursor が無い', () => blob.list.mockResolvedValueOnce({ blobs: blobs(10), hasMore: true })],
+  ])('%s なら 503 storage_unavailable (置かない)', async (_label, setup) => {
+    setup();
+    const response = await POST(post());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(kv.kvIncr).not.toHaveBeenCalled();
+  });
+
+  it('list が締切 (cursor を追う全体で 5 秒) までに終わらなければ 503 で、signal は AbortError で中断する', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let signal: AbortSignal | undefined;
+    blob.list.mockImplementation((options: { abortSignal: AbortSignal }) => {
+      signal = options.abortSignal;
+      return new Promise(() => {});
+    });
+    const pending = POST(post());
+    await vi.advanceTimersByTimeAsync(BLOB_LIST_DEADLINE_MS);
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(signal?.aborted).toBe(true);
+    expect((signal?.reason as DOMException).name).toBe('AbortError');
+    expect(logger.warn).toHaveBeenCalledWith('images.upload.failed', { code: 'list_deadline' });
+    expect(blob.put).not.toHaveBeenCalled();
   });
 
   it('list が失敗したら 503 storage_unavailable (置かない・全体の枠を使わない)', async () => {
@@ -335,10 +407,10 @@ describe('images upload: 保有の枚数と全体の枠', () => {
     expect(logger.warn).toHaveBeenCalledWith('images.upload.failed', { code: 'list_failed' });
   });
 
-  it('全体の 1 日の枠は最後 (list の後・put の前) に数える', async () => {
+  it('全体の 1 日の枠は最後 (ウォレット → IP → list の後・put の前) に数える', async () => {
     const order: string[] = [];
-    checkReadRateLimit.mockImplementation(async () => {
-      order.push('daily');
+    checkReadRateLimit.mockImplementation(async (key: string) => {
+      order.push(key.startsWith('images:upload:wallet:') ? 'wallet' : key.startsWith('images:upload:ip:') ? 'ip' : key);
       return true;
     });
     blob.list.mockImplementation(async () => {
@@ -354,7 +426,7 @@ describe('images upload: 保有の枚数と全体の枠', () => {
       return { url: `${BLOB_URL_BASE}/${pathname}` };
     });
     expect((await POST(post())).status).toBe(200);
-    expect(order).toEqual(['daily', 'daily', 'list', 'global', 'put']);
+    expect(order).toEqual(['wallet', 'ip', 'list', 'global', 'put']);
     expect(kv.kvIncr).toHaveBeenCalledWith(imageUploadGlobalDailyKey(), { initialTtlSec: 2 * DAY });
   });
 
@@ -411,6 +483,23 @@ describe('images upload: 置く', () => {
     expect(first).toMatch(new RegExp(`^${ownerPrefix()}avatar/[A-Za-z0-9_-]{22}\\.png$`));
     expect(second).not.toBe(first);
     expect(blob.put.mock.calls[0][2]).toMatchObject({ contentType: 'image/png' });
+  });
+
+  it('put が締切 (10 秒) までに終わらなければ 503 storage_unavailable で、signal は AbortError で中断する', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    let signal: AbortSignal | undefined;
+    blob.put.mockImplementation((_pathname: string, _body: unknown, options: { abortSignal: AbortSignal }) => {
+      signal = options.abortSignal;
+      return new Promise(() => {});
+    });
+    const pending = POST(post());
+    await vi.advanceTimersByTimeAsync(BLOB_PUT_DEADLINE_MS);
+    const response = await pending;
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(signal?.aborted).toBe(true);
+    expect((signal?.reason as DOMException).name).toBe('AbortError');
+    expect(logger.warn).toHaveBeenCalledWith('images.upload.failed', { code: 'put_deadline' });
   });
 
   it('put が失敗したら 502 upload_failed (固定の code だけをログに出す)', async () => {

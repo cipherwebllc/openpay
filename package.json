@@ -22,6 +22,9 @@
     "*.{ts,tsx,js,jsx}": "eslint --fix"
   },
   "overrides": {
+    "@vercel/cli-config": {
+      "zod": "4.6.7"
+    },
     "axios": "^1.20.0",
     "fast-uri": "^3.1.2",
     "form-data": "^4.0.6",
