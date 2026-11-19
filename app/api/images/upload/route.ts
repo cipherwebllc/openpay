@@ -87,8 +87,23 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 数えるので、足すと関数の上限を超えうる。合計を 1 本の timer で締める。
   // - 期限で deadline を abort する。list と put はこの signal でも締まり (各上限と残り時間の短い方)、SDK の送り直しも止まる。
   // - 期限の後も upload() の続きは動きうる (待っていた KV が後から返る等)。応答はもう返してあるので、続きは次の段を
-  //   始めない (Blob に置かない・全体の枠を使わない: upload の中の deadline.aborted の確認)。
+  //   始めない (Blob に置かない・全体の枠を使わない: upload の中の pastDeadline の確認)。
+  // - pastDeadline は timer の abort に加えて単調時計 (performance.now) の期限の時刻でも見る: 同期の処理や event loop の遅れで
+  //   期限をまたぐと、timer の callback が走る前に次の段 (list・全体の枠・put) を始めうる (一覧と削除の lib/images/management と同じ)。
   const deadline = new AbortController();
+  const deadlineAt = performance.now() + IMAGE_UPLOAD_DEADLINE_MS;
+  // 単調時計で先に気づいたときも route_deadline を 1 回だけ出す (timer が先に走ったときは timer が出している。upload() が
+  // ここで返ると finally で timer を片づけるので、2 回は出ない)。
+  let clockDeadlineLogged = false;
+  const pastDeadline = (): boolean => {
+    if (deadline.signal.aborted) return true;
+    if (performance.now() < deadlineAt) return false;
+    if (!clockDeadlineLogged) {
+      clockDeadlineLogged = true;
+      logger.warn('images.upload.failed', { code: 'route_deadline' });
+    }
+    return true;
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expired = new Promise<NextResponse>((resolve) => {
     timer = setTimeout(() => {
@@ -99,14 +114,19 @@ export async function POST(req: Request): Promise<NextResponse> {
     }, IMAGE_UPLOAD_DEADLINE_MS);
   });
   try {
-    return await Promise.race([upload(req, mode, deadline.signal), expired]);
+    return await Promise.race([upload(req, mode, deadline.signal, pastDeadline), expired]);
   } finally {
     clearTimeout(timer);
   }
 }
 
-/** 3) から先 (待つ段)。deadline は POST の絶対の期限。 */
-async function upload(req: Request, mode: ImageUploadMode, deadline: AbortSignal): Promise<NextResponse> {
+/** 3) から先 (待つ段)。deadline は POST の絶対の期限 (Blob に渡す signal)・pastDeadline は次の段を始める前の確かめ。 */
+async function upload(
+  req: Request,
+  mode: ImageUploadMode,
+  deadline: AbortSignal,
+  pastDeadline: () => boolean,
+): Promise<NextResponse> {
   // 3) 認証前の IP の制限 (分ごと)。IP の bucket が作れない (IP_HASH_SECRET が無い・短い・接続元が分からない) と、
   // checkIpRateLimit は数えずに通し、下の IP の 1 日の枠も効かない。ウォレットを作り直せば Blob に書ける量が増えるので、
   // この route では止める (ほかの route の「hash が無ければ飛ばす」とは違う)。止めても URL の欄は使える (掟 13)。
@@ -157,7 +177,7 @@ async function upload(req: Request, mode: ImageUploadMode, deadline: AbortSignal
   // 12) そのウォレットが置いている枚数 (上限に届くか最後のページまで cursor を追う)。数えられなければ止める (上限を確かめずに置かない)。
   // 締切は list の上限 (5 秒) と絶対の期限までの残りの短い方。ここまでの段 (KV・本文) を待つ間に期限を過ぎていたら、
   // list を始めない (POST がもう 503 を返し、route_deadline をログに出している。list の締切としてログに出さない)。
-  if (deadline.aborted) return fail('storage_unavailable', 503);
+  if (pastDeadline()) return fail('storage_unavailable', 503);
   const ownerKey = imageOwnerKey(session.address, secret);
   let owned: number;
   try {
@@ -169,7 +189,8 @@ async function upload(req: Request, mode: ImageUploadMode, deadline: AbortSignal
   if (owned >= IMAGE_OWNER_MAX_IMAGES) return fail('image_limit', 409);
 
   // 13) 全体の 1 日の回数は最後に数える (ここまでで断った要求に全体の枠を使わせない)。KV が無い・失敗したら止める
-  // (fail-closed・lib/images/dailyCap)。絶対の期限を過ぎた要求はここに届かない (12 の list が期限で止まる)。
+  // (fail-closed・lib/images/dailyCap)。list が期限の直前に返った後に同期の処理で期限をまたいだら、全体の枠を使わない。
+  if (pastDeadline()) return fail('storage_unavailable', 503);
   const global = await countGlobalImageUpload();
   if (global === 'unavailable') {
     logger.warn('images.upload.failed', { code: 'global_count_unavailable' });
@@ -179,7 +200,7 @@ async function upload(req: Request, mode: ImageUploadMode, deadline: AbortSignal
 
   // 14) 置く。締切は put の上限 (10 秒) と絶対の期限までの残りの短い方。13 の KV を待つ間に期限を過ぎていたら置かない
   // (12 と同じ)。
-  if (deadline.aborted) return fail('storage_unavailable', 503);
+  if (pastDeadline()) return fail('storage_unavailable', 503);
   let url: string;
   try {
     url = await putPublicImage(
