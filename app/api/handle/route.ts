@@ -2,7 +2,8 @@
 //
 // POST /api/handle { handle, config, profile?, expectedUpdatedAt? }
 //   → 予約 (新規) or 所有者による version 付き設定更新
-// GET  /api/handle  → 自分が保有する handle を**レコード込み**で返す (編集 UI の prefill 用)
+// GET  /api/handle  → 自分が保有する handle を**レコード込み**で返す (編集 UI の prefill 用)。
+//   imageUpload = プロフの画像の欄 (アップロード) を出すか (lib/images/config の imageUploadAvailableFor)。
 
 import { NextResponse } from 'next/server';
 import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
@@ -28,6 +29,7 @@ import {
   listHandleRecordsForOwner,
 } from '@/lib/handleStore';
 import { checkClientIpBucketRateLimit } from '@/lib/net/clientRateLimit';
+import { imageUploadAvailableFor } from '@/lib/images/config';
 
 export const runtime = 'nodejs';
 export const maxDuration = 10;
@@ -182,6 +184,9 @@ export async function GET() {
         updatedAt: o.record.updatedAt,
       })),
       max: MAX_HANDLES_PER_WALLET,
+      // プロフの画面が画像の欄 (アップロード) を出すか (出品者の GET と同じ判定・lib/images/config)。false のとき画面は
+      // 今の URL の欄のまま。POST /api/images/upload も同じ順で自分で判定する。env を読むだけ (KV・Blob に触れない)。
+      imageUpload: imageUploadAvailableFor(session.address),
     },
     { headers: { 'Cache-Control': 'private, no-store' } },
   );

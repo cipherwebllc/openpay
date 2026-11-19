@@ -121,6 +121,8 @@ beforeEach(() => {
   vi.stubEnv('IMAGE_UPLOAD_MODE', 'admin');
   vi.stubEnv('IMAGE_OWNER_KEY_SECRET', SECRET);
   vi.stubEnv('BLOB_STORE_ID', 'store_test');
+  // IP の枠の秘密 (出品者の GET の imageUpload が見る。POST の IP の bucket は hashIpBucket の mock で決める)。
+  vi.stubEnv('IP_HASH_SECRET', 'test-ip-hash-secret-0123456789abcdef');
   vi.stubEnv('ADMIN_WALLETS', `0x3333333333333333333333333333333333333333, ${OWNER}`);
   session(OWNER);
   hashIpBucket.mockReturnValue('hashed-ip');
@@ -745,6 +747,9 @@ describe('出品者の GET: imageUpload', () => {
     ['秘密が無い', () => vi.stubEnv('IMAGE_OWNER_KEY_SECRET', undefined)],
     ['秘密が短い', () => vi.stubEnv('IMAGE_OWNER_KEY_SECRET', 'short')],
     ['Blob の store が無い', () => vi.stubEnv('BLOB_STORE_ID', undefined)],
+    // IP の枠を数えられないと POST は 503 not_configured になるので、欄を出さない (押すたびに 503 にしない)。
+    ['IP の枠の秘密 (IP_HASH_SECRET) が無い', () => vi.stubEnv('IP_HASH_SECRET', undefined)],
+    ['IP の枠の秘密が 32 byte より短い', () => vi.stubEnv('IP_HASH_SECRET', 'a'.repeat(31))],
   ])('%s なら false (画面は今の URL の欄のまま)', async (_label, setup) => {
     setup();
     expect(await imageUploadFlag()).toBe(false);

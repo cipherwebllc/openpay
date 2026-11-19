@@ -3413,8 +3413,9 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 ## §20 画像のアップロード (運営者だけの試し)
 
 `POST /api/images/upload` が画像 (JPEG / PNG・1 MiB まで) を受けて Vercel Blob の **public** store に置き、その URL を返す。
-PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品アシスタントの「この画像を表紙に使う」。保存の形は今と同じ URL の文字列で、
-お金の動き (relay・settle・fee・order) と購入の snapshot には触れない。env の説明は docs/ENV.md。
+使うのは出品フォームの表紙・追加画像と、AI 出品アシスタントの「この画像を表紙に使う」(PR 1)、プロフのアバター・カバー・リンクの
+画像 (PR 2)。保存の形は今と同じ URL の文字列で、お金の動き (relay・settle・fee・order) と購入の snapshot には触れない。env の説明は
+docs/ENV.md。
 
 ### 20.1 前提
 - Vercel の Storage で Blob の store を **public** で作る (OpenPay 専用)。Preview でも試すなら store を分ける。
@@ -3436,10 +3437,13 @@ PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品ア
 
 ### 20.2 点灯 (admin)
 1. Production に `IMAGE_UPLOAD_MODE=admin` を入れて再 deploy する (server の env は deploy し直すまで効かない)。
-2. 運営者の wallet で出品フォームに「画像を選ぶ」が出て、ほかの wallet では今の URL の欄のままなことを見る
-   (出品者の GET の `imageUpload`)。
+2. 運営者の wallet で出品フォームとプロフ (作成画面の「プロフ」) に「画像を選ぶ」が出て、ほかの wallet では今の URL の欄のまま
+   なことを見る (出品者の GET と @handle の持ち主の GET `/api/handle` の `imageUpload`。秘密・Blob・`IP_HASH_SECRET` のどれかが
+   無いときも URL の欄のまま)。
 3. 試す順: 表紙 → 追加画像 (4 枚まで・外す・「URL で指定する ›」) → AI 出品アシスタントの「この画像を表紙に使う」(押す前は
-   アップロードしない)。それぞれ保存し、Store の一覧・商品ページ・OG に出ることを見る。
+   アップロードしない)。それぞれ保存し、Store の一覧・商品ページ・OG に出ることを見る。プロフはアバター → カバー → リンクの
+   画像 (行を並べ替えても選んだ行に入る) の順に入れて公開し、公開ページ (`/@handle`) に出ることを見る (アップロード中は公開の
+   ボタンが止まる)。
 4. 写真は JPEG、透過の PNG (ロゴ) は透けたままの PNG になることを見る。
 
 ### 20.3 見張る
@@ -3459,12 +3463,15 @@ PR 1 で使うのは出品フォームの表紙・追加画像と、AI 出品ア
   `BLOB_STORE_ID`・`IP_HASH_SECRET` のどれかが無いか短い。
 
 ### 20.4 戻し方
-- `IMAGE_UPLOAD_MODE` を空 (または `off`) にして再 deploy する (route は 404・出品者の GET の `imageUpload` は false で、フォームは
-  今の URL の欄に戻る)。置いた画像と、それを使っている商品の欄はそのまま残る (消さない)。
+- `IMAGE_UPLOAD_MODE` を空 (または `off`) にして再 deploy する (route は 404・出品者の GET と @handle の持ち主の GET の
+  `imageUpload` は false で、フォームとプロフは今の URL の欄に戻る)。置いた画像と、それを使っている商品・プロフの欄はそのまま
+  残る (消さない)。
 
 ### 20.5 通報のとき
 - 画像の URL の path (`v1/<ownerKey>/…`) を Vercel の Storage の Blob の画面で探して消す。表示する側は読めない画像を隠すが、
-  商品の欄には URL が残るので、その商品の表紙・追加画像の欄も外す (既存の takedown の手順と合わせる)。
+  商品の欄には URL が残るので、その商品の表紙・追加画像の欄も外す (既存の takedown の手順と合わせる)。プロフの画像 (path の
+  用途が `avatar`・`cover`・`link`) なら、その @handle のアバター・カバー・リンクの画像の欄に URL が残る (公開ページは読めない
+  画像を隠す)。
 - ライセンス NFT の metadata (`/api/license/metadata/[id]`) は商品の `imageUrl` を返し続けるので、欄を外すまで消した画像の URL を返す。
 - ブラウザなどのキャッシュには残りうる (置くときの cacheControlMaxAge は 1 年)。
 

@@ -11,6 +11,7 @@
 // flag OFF で何も描画しない。
 // 状態 (下書き・編集中の handle・公開の基準・シートの開閉・公開ボタンの帯の置き場・並べ替え) はすべてここが持ち、
 // 各節の描画は components/handle-profile-builder/* に分けている (各節は props で受け取って描画と操作の中継だけを行う)。
+// 画像の欄 (アップロード・持ち主の GET の imageUpload が true のときだけ) の状態は handle-profile-builder/imageUploads。
 
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { AtSign } from 'lucide-react';
@@ -54,6 +55,7 @@ import {
   type PublishedHandleSnapshot,
 } from '@/lib/handlePublish';
 import { draftFromPublished } from './handle-profile-builder/draft';
+import { useImageBusyKeys, useProfileImageUploads } from './handle-profile-builder/imageUploads';
 import { HandleMiniPreview } from './handle-profile-builder/MiniPreview';
 import { PreviewSection } from './handle-profile-builder/PreviewSection';
 import { ProfileSection } from './handle-profile-builder/ProfileSection';
@@ -69,7 +71,17 @@ export function HandleProfileBuilder({
   const tb = useTranslations('HandleProfileBuilder');
   const tc = useTranslations('HandleClaim');
   const locale = useLocale();
-  const { settings: draft, setSettings, hydrated } = useHandleProfileDraft();
+  // 画像をアップロード中の欄 (アバター・カバー・リンクの行)。1 つでもあれば公開を止め、別のタブの下書きを取り込まない。
+  const { busy: imageBusy, setBusy: setImageBusy } = useImageBusyKeys();
+  const { settings: draft, setSettings, hydrated } = useHandleProfileDraft(imageBusy);
+  // 画像の欄 (アップロード) を出すか: 持ち主の GET /api/handle の imageUpload (段階・権限・設定がそろったとき) を、その GET を
+  // 読む HandleClaimPanel が知らせる。下書きを読み込むまでは出さない (読み込みで下書きが入れ替わるため)。false なら今の URL の欄。
+  const [imageUploadAvailable, setImageUploadAvailable] = useState(false);
+  const images = useProfileImageUploads({
+    enabled: hydrated && imageUploadAvailable,
+    links: draft.links,
+    setBusy: setImageBusy,
+  });
   const { address: connected } = useAccount();
   const origin = useOrigin();
   const linkCopy = useCopyToClipboard();
@@ -260,6 +272,8 @@ export function HandleProfileBuilder({
   // 編集をやめて新規作成へ。編集前の下書きがあれば復元 (作業を消さない)。スナップショットが
   // 無い (= 直接新規作成中に呼ばれた等) ときだけ既定へ (受取先は使い回せるので保持)。
   const onStopEditing = () => {
+    // 下書きを入れ替える前に、画像の欄の送信を無効にする (前の下書きに向けた画像を、戻した下書きに入れない)。
+    images.draftReplaced();
     setEditingHandle(null);
     onPublishedHandleChange?.(null);
     dispatchPublishBaseline({ type: 'discarded' });
@@ -281,6 +295,8 @@ export function HandleProfileBuilder({
     // 新規作成モードから編集に入る初回のみ、現在の下書きを退避 (編集→別編集の連続では
     // 退避済みの「編集前」を保ったまま上書きしない)。
     if (editingHandle === null) preEditDraftRef.current = draft;
+    // 下書きを入れ替える前に、画像の欄の送信を無効にする (前の下書きに向けた画像を、読み込んだ @handle に入れない)。
+    images.draftReplaced();
     // 公開中の内容を読み込んだので、このタブの見本の印は消す (編集をやめて戻した下書きは、手を入れたものと数える)。
     setLookSeed(null);
     setEditingHandle(handle);
@@ -382,6 +398,8 @@ export function HandleProfileBuilder({
                   onPublishedHandleChange?.(snapshot.handle);
                   dispatchPublishBaseline({ type: 'published', snapshot });
                 }}
+                onImageUploadChange={setImageUploadAvailable}
+                imageUploadBusy={imageBusy}
               />
             </SectionCard>
           </div>
@@ -423,6 +441,7 @@ export function HandleProfileBuilder({
             hasInsecure={hasInsecure}
             invalidThanksUrl={invalidThanksUrl}
             callbackUrlError={callbackUrlError}
+            images={images}
           />
         </div>
 

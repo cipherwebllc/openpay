@@ -16,7 +16,8 @@ export type OwnedHandle = {
   updatedAt?: number;
 };
 // max は API が常に返す (app/api/handle/route.ts)。欠けたら未定義のまま渡し、使う側の既定 (HandleClaimPanel は上限) に任せる。
-export type MineResponse = { handles: OwnedHandle[]; max?: number };
+// imageUpload = プロフの画像の欄 (アップロード) を出すか。true のときだけ true (無い・別の値は false = 今の URL の欄のまま)。
+export type MineResponse = { handles: OwnedHandle[]; max?: number; imageUpload?: boolean };
 
 /** 保存・解除の後に全 wallet 分をまとめて invalidate する接頭辞。 */
 export const MY_HANDLES_ROOT_KEY = ['handle-mine'] as const;
@@ -35,5 +36,5 @@ export async function fetchMyHandles(): Promise<MineResponse> {
           !!h && typeof h === 'object' && typeof (h as OwnedHandle).handle === 'string' && !!(h as OwnedHandle).config,
       )
     : [];
-  return { handles, max: typeof json.max === 'number' ? json.max : undefined };
+  return { handles, max: typeof json.max === 'number' ? json.max : undefined, imageUpload: json.imageUpload === true };
 }

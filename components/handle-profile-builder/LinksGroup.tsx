@@ -5,6 +5,7 @@
 
 import { Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { ImageField } from '@/components/ImageField';
 import { OptionalGroup } from '@/components/OptionalGroup';
 import { ReorderableRow } from '@/components/ReorderableRow';
 import {
@@ -14,6 +15,7 @@ import {
   MAX_PROFILE_EMBEDS,
   MAX_PROFILE_LINKS,
 } from '@/lib/handle';
+import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
 import type { HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import {
   FieldGroup,
@@ -23,6 +25,7 @@ import {
   type ReorderLabels,
   type RowReorder,
 } from './fields';
+import type { ProfileImageUploads } from './imageUploads';
 
 export function LinksGroup({
   draft,
@@ -32,6 +35,7 @@ export function LinksGroup({
   filledLinks,
   filledLabel,
   hasInsecure,
+  images,
 }: {
   draft: HandleProfileDraft;
   update: DraftUpdate;
@@ -41,9 +45,22 @@ export function LinksGroup({
   filledLabel: (count: number) => string;
   /** 非 https の SNS・リンク・画像が公開から外れること (注意を出す)。 */
   hasInsecure: boolean;
+  /** 画像の欄 (アップロード) の状態。enabled が false なら今の URL の欄のまま。 */
+  images: ProfileImageUploads;
 }) {
   const t = useTranslations('HandleProfile');
   const tb = useTranslations('HandleProfileBuilder');
+
+  // 行の画像を入れる (画像の欄)。行は位置ではなく id で探す: アップロードの間に行を並べ替え・削除しても、送り始めた行に入れる
+  // (その行が消えていたら入れない)。
+  const setLinkImage = (rowId: string, imageUrl: string) => {
+    const index = images.linkRowIds.indexOf(rowId);
+    const link = index < 0 ? undefined : draft.links[index];
+    if (!link || link.kind === 'heading') return;
+    const next = [...draft.links];
+    next[index] = { ...link, imageUrl };
+    update({ links: next });
+  };
 
   const embedCount = draft.links.reduce(
     (count, link) =>
@@ -79,10 +96,17 @@ export function LinksGroup({
             ))}
           </div>
         </fieldset>
-        <div className="space-y-2">
+        {images.enabled ? (
+          <p className="mb-2 text-xs leading-relaxed text-slate-500">
+            {tb('linkImageHint', { max: IMAGE_MAX_EDGE.link })}
+          </p>
+        ) : null}
+        {/* 画像の欄では行が高くなるので、行の間に線を引いてどの行の欄かを分かるようにする。false は今のまま。 */}
+        <div className={images.enabled ? 'divide-y divide-slate-200 [&>*]:py-3 [&>*:first-child]:pt-0' : 'space-y-2'}>
           {draft.links.map((l, i) => (
             <ReorderableRow
-              key={i}
+              // 画像の欄では行の id を key にする (並べ替え・削除で、アップロード中の欄が行と一緒に動く)。false は今のまま。
+              key={images.enabled ? images.linkRowIds[i] : i}
               {...linksReorder.rowProps(i, draft.links.length)}
               labels={reorderLabels}
             >
@@ -119,6 +143,25 @@ export function LinksGroup({
                 </div>
               ) : (
                 <div className="flex min-w-0 flex-1 flex-wrap items-end gap-2">
+                  {images.enabled ? (
+                    // 画像の欄は行の先頭に 1 行で (絵文字・ラベル・URL の欄の並びは今のまま)。下書きが丸ごと入れ替わったら
+                    // 作り直す。操作の番号は行の id ごと。
+                    <div className="basis-full">
+                      <ImageField
+                        key={images.session}
+                        id={`handle-link-image-${images.linkRowIds[i]}`}
+                        label={tb('linkImageLabel')}
+                        urlLabel={tb('imageUrlLabel')}
+                        value={l.imageUrl ?? ''}
+                        onChange={(imageUrl) => setLinkImage(images.linkRowIds[i], imageUrl)}
+                        purpose="link"
+                        onBusyChange={images.link(images.linkRowIds[i]).onBusyChange}
+                        operation={images.link(images.linkRowIds[i]).operation}
+                        urlMaxLength={MAX_LINK_IMAGE_URL_LEN}
+                        previewClassName="h-11 w-11 rounded-md"
+                      />
+                    </div>
+                  ) : null}
                   <label className="w-14 shrink-0">
                     <span className={linkFieldLabelClass}>
                       {t('emojiAria')}
@@ -136,6 +179,8 @@ export function LinksGroup({
                       className="h-11 w-full rounded-lg border border-slate-300 bg-white px-2 text-center text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                     />
                   </label>
+                  {images.enabled ? null : (
+                  // images.enabled が false の画面は今のまま (この中は変えない)。
                   <label className="min-w-[10rem] flex-[2]">
                     <span className={linkFieldLabelClass}>
                       {tb('imageUrlLabel')}
@@ -153,6 +198,7 @@ export function LinksGroup({
                       className={inputClass}
                     />
                   </label>
+                  )}
                   <label className="min-w-[6rem] flex-[2]">
                     <span className={linkFieldLabelClass}>
                       {tb('linkLabel')}

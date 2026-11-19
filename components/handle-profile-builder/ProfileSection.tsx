@@ -6,11 +6,14 @@
 
 import { UserRound } from 'lucide-react';
 import { useTranslations } from 'next-intl';
+import { ImageField } from '@/components/ImageField';
 import { SectionCard } from '@/components/SectionCard';
-import { MAX_BIO_LEN } from '@/lib/handle';
+import { MAX_AVATAR_URL_LEN, MAX_BIO_LEN } from '@/lib/handle';
+import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
 import { DEFAULT_PROFILE_DRAFT, type HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import { AdvancedGroup } from './AdvancedGroup';
 import { Field, inputClass, textareaClass, type DraftUpdate, type RowReorder } from './fields';
+import type { ProfileImageUploads } from './imageUploads';
 import { LinksGroup } from './LinksGroup';
 import { LookGroup } from './LookGroup';
 import { SocialsGroup } from './SocialsGroup';
@@ -25,6 +28,7 @@ export function ProfileSection({
   hasInsecure,
   invalidThanksUrl,
   callbackUrlError,
+  images,
 }: {
   draft: HandleProfileDraft;
   update: DraftUpdate;
@@ -35,8 +39,11 @@ export function ProfileSection({
   hasInsecure: boolean;
   invalidThanksUrl: boolean;
   callbackUrlError: string | undefined;
+  /** 画像の欄 (アップロード) の状態。enabled が false なら今の URL の欄のまま。 */
+  images: ProfileImageUploads;
 }) {
   const t = useTranslations('HandleProfile');
+  const tImage = useTranslations('ImageField');
 
   // 任意のまとまりに入っている項目の数 (見出しの右に出す)。見た目は既定から変えたものを数える。
   const filledLook = [
@@ -81,6 +88,29 @@ export function ProfileSection({
             className={textareaClass}
           />
         </Field>
+        {images.enabled ? (
+          // 画像の欄。下書きが丸ごと入れ替わったら作り直す (前の下書きに向けたアップロードの応答を入れない)。
+          <ImageField
+            key={images.session}
+            id="handle-profile-avatar"
+            label={t('avatarImageLabel')}
+            urlLabel={t('avatarLabel')}
+            value={draft.avatar}
+            onChange={(avatar) => update({ avatar })}
+            purpose="avatar"
+            onBusyChange={images.avatar.onBusyChange}
+            operation={images.avatar.operation}
+            urlMaxLength={MAX_AVATAR_URL_LEN}
+            hint={
+              <p className="text-xs leading-relaxed text-slate-500">
+                {t('avatarImageHint')} {tImage('hint', { max: IMAGE_MAX_EDGE.avatar })}
+              </p>
+            }
+            urlHint={<p className="mt-1 text-xs text-slate-500">{t('avatarHint')}</p>}
+            previewClassName="h-20 w-20 rounded-full"
+          />
+        ) : (
+        // images.enabled が false の画面は今のまま (この中は変えない)。
         <Field label={t('avatarLabel')} hint={t('avatarHint')}>
           <input
             type="url"
@@ -90,6 +120,7 @@ export function ProfileSection({
             className={inputClass}
           />
         </Field>
+        )}
         <LookGroup
           draft={draft}
           update={update}
@@ -97,6 +128,7 @@ export function ProfileSection({
           pickerAccent={pickerAccent}
           filledLook={filledLook}
           filledLabel={filledLabel}
+          images={images}
         />
         <SocialsGroup
           draft={draft}
@@ -114,6 +146,7 @@ export function ProfileSection({
           filledLinks={filledLinks}
           filledLabel={filledLabel}
           hasInsecure={hasInsecure}
+          images={images}
         />
         <AdvancedGroup
           draft={draft}

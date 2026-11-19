@@ -8,10 +8,13 @@ import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { handleFontClass } from '@/components/handleFonts';
 import { HandleThemePicker } from '@/components/HandleThemePicker';
+import { ImageField } from '@/components/ImageField';
 import { OptionalGroup } from '@/components/OptionalGroup';
-import { HANDLE_FONTS } from '@/lib/handle';
+import { HANDLE_FONTS, MAX_COVER_URL_LEN } from '@/lib/handle';
+import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
 import type { HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
 import { Field, inputClass, type DraftUpdate } from './fields';
+import type { ProfileImageUploads } from './imageUploads';
 
 export function LookGroup({
   draft,
@@ -20,6 +23,7 @@ export function LookGroup({
   pickerAccent,
   filledLook,
   filledLabel,
+  images,
 }: {
   draft: HandleProfileDraft;
   update: DraftUpdate;
@@ -28,8 +32,11 @@ export function LookGroup({
   pickerAccent: string;
   filledLook: number;
   filledLabel: (count: number) => string;
+  /** 画像の欄 (アップロード) の状態。enabled が false なら今の URL の欄のまま。 */
+  images: ProfileImageUploads;
 }) {
   const t = useTranslations('HandleProfile');
+  const tImage = useTranslations('ImageField');
   const locale = useLocale();
   return (
     <OptionalGroup icon={Palette} title={t('groupLook')} filled={filledLook} filledLabel={filledLabel}>
@@ -70,6 +77,41 @@ export function LookGroup({
           ))}
         </div>
       </fieldset>
+      {images.enabled ? (
+        // 画像の欄 (横長)。下書きが丸ごと入れ替わったら作り直す。ガイドへの導線は「URL で指定する ›」を開いたときに出す。
+        <ImageField
+          key={images.session}
+          id="handle-profile-cover"
+          label={t('coverImageLabel')}
+          urlLabel={t('coverLabel')}
+          value={draft.cover}
+          onChange={(cover) => update({ cover })}
+          purpose="cover"
+          onBusyChange={images.cover.onBusyChange}
+          operation={images.cover.operation}
+          urlMaxLength={MAX_COVER_URL_LEN}
+          hint={
+            <p className="text-xs leading-relaxed text-slate-500">
+              {t('coverImageHint')} {tImage('hint', { max: IMAGE_MAX_EDGE.cover })}
+            </p>
+          }
+          urlHint={
+            <p className="mt-1 text-xs text-slate-500">
+              {t('coverHint')}{' '}
+              <Link
+                href={`/${locale}/guide/image-url`}
+                prefetch={false}
+                className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+              >
+                {t('imageGuideLink')}
+              </Link>
+            </p>
+          }
+          previewClassName="h-16 w-48 rounded-lg"
+        />
+      ) : (
+      <>
+      {/* images.enabled が false の画面は今のまま (この中は変えない)。 */}
       <Field label={t('coverLabel')} hint={t('coverHint')}>
         <input
           type="url"
@@ -90,6 +132,8 @@ export function LookGroup({
           {t('imageGuideLink')}
         </Link>
       </p>
+      </>
+      )}
     </OptionalGroup>
   );
 }

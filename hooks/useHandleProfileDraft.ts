@@ -208,11 +208,16 @@ const SYNC_RULES: SettingsSyncRules<HandleProfileDraft> = {
   importable: { to: isSettledReceiverInput },
 };
 
-export function useHandleProfileDraft() {
+/**
+ * holdImport = 画像をアップロード中 (プロフの画像の欄)。その間は別のタブの下書きを取り込まず、終わってから 1 度取り込む
+ * (hooks/useLocalStorageSettings)。取り込みはリンクの行を作り直すので、途中で取り込むと、送り始めた行が分からなくなる。
+ */
+export function useHandleProfileDraft(holdImport = false) {
   return useLocalStorageSettings<HandleProfileDraft>(
     STORAGE_KEY,
     DEFAULT_PROFILE_DRAFT,
     sanitize,
     SYNC_RULES,
+    holdImport,
   );
 }
