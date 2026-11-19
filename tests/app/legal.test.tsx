@@ -63,9 +63,9 @@ describe('Legal pages', () => {
         : ['seller operates', 'availability', '60 seconds', 'wallet address, product, revision and timestamps', 'does not store or serve', 'responsible for delivery', '(6)', 'third parties', 'not immediately recalled', 'holder without a purchase history', '(14)', '(7)', '(11)']) expect(clause).toContain(text);
       renderWithIntl(<TermsPage />, { locale });
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-07');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-20');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-07');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-20');
     });
 
     it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
@@ -89,7 +89,24 @@ describe('Legal pages', () => {
       expect(clause(ja, 17)).toContain('公開台帳'); expect(clause(en, 17)).toContain('public ledger');
       expect(clause(ja, 17)).toContain('公開 Verify API'); expect(clause(en, 17)).toContain('public Verify API');
       expect(clause(ja, 16)).toContain('法的適合性の認定を意味しません'); expect(clause(en, 16)).toContain('not legal clearance');
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-07');
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-20');
+    });
+    it.each(['ja', 'en'] as const)('%s: 第 14 条 (アップロードした画像) が render され、プライバシーに画像の取得・公開・委託・外部送信・保管がある', async (locale) => {
+      const messages = locale === 'ja' ? (await import('@/messages/ja.json')).default : (await import('@/messages/en.json')).default;
+      const article = messages.Terms.article14.body;
+      for (const text of locale === 'ja'
+        ? ['画像の欄から画像をアップロード', '表明し保証', '予告なく削除', '自動では削除されず', 'キャッシュ', '継続を保証せず']
+        : ['upload images from the image fields', 'represent and warrant', 'without notice, delete', 'not deleted automatically', 'caches', 'does not guarantee continued']) {
+        expect(article).toContain(text);
+      }
+      renderWithIntl(<TermsPage />, { locale });
+      expect(screen.getByText(messages.Terms.article14.title)).toBeInTheDocument();
+      const privacy = messages.Privacy;
+      expect(privacy.section1.body).toContain('(12)');
+      expect(privacy.section2.body).toContain('(14)');
+      expect(privacy.section3.body).toContain('Vercel Blob');
+      expect(privacy.sectionExternal.body).toContain('Vercel Blob');
+      expect(privacy.section4.body).toContain(locale === 'ja' ? '「アップロードした画像」から削除するまで' : 'until the user deletes them from “Uploaded images”');
     });
     it('ja: h1 と 11 条すべての title が render される', () => {
       renderWithIntl(<TermsPage />, { locale: 'ja' });
@@ -812,7 +829,8 @@ describe('Legal pages', () => {
       //   Terms 第 5 条 (10) と特商法「対価以外の費用」に足すため同日改定 (料金は変えない)。免責は据置。
       // 2026-11-07 改定案: 「売上をほかのウォレットへ移す」(送金 1 回 2 JPYC・移す額に上乗せ) を Terms 第 5 条 (12)・特商法・免責に
       //   足す (施行日は仮置き・flag の点灯日で確定する・DEPLOY_CHECKLIST §18.2)。プライバシーも同日 (下)。
-      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-07');
+      // 2026-11-20 改定: 第 14 条（アップロードした画像）を新設 (Terms とプライバシーだけ・特商法・免責は据置)。
+      expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-20');
       expect(LEGAL_ENTITY.tokuteiEffectiveDate).toBe('2026-11-07');
       expect(LEGAL_ENTITY.disclaimerEffectiveDate).toBe('2026-11-07');
       // 2026-09-10 改定案: 保護配布のチケット情報の第三者提供を追記。
@@ -820,7 +838,8 @@ describe('Legal pages', () => {
       // 2026-10-20: x402 の USDC の検証・精算の送信先 (CDP を委託先に・Circle Gateway を別の段落で) を開示。
       // 2026-11-07 改定案: 「売上をほかのウォレットへ移す」の濫用の集計 (1-(11)・2-(13)・4.) と、2-(9) のエラー監視のただし書き
       //   (ウォレットアドレスを含む警告を送ることがある) を足す (施行日は仮置き・点灯日で確定する)。
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-07');
+      // 2026-11-20 改定: 画像のアップロード (1-(12)・2-(14)・委託先の Vercel Blob・3-3 の画像の配信元・4. の保管) を足す。
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-20');
     });
   });
 
