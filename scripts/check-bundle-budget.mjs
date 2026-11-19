@@ -116,8 +116,12 @@ const BUDGETS_KB = {
   //   だったので 434 に繰り上がった。お店の端末で送るの画面 (StoreDeviceCheckoutForm) を遅延の chunk にして下げる案は、
   //   chunk がウォレットの再接続より遅れて届くと hydration の誤り (React #418) を出した (chunk を 3 秒遅らせて 10 回中 10 回・
   //   next/dynamic でも React.lazy でも同じ) のでやめた。ssr: false の遅延は初めの HTML に画面が入らないので採らない。
+  // 2026-11-20 /checkout だけ 434 → 435 (画像のアップロード PR 1165〜1168 の後)。全ページ共通のサインインの部品 (hooks/useSiweSession の
+  //   /me の imageUpload・imageUploadSignIn・imageUploadOpen と refreshSession・WalletBadge の導線) が数百 byte 増え、main の CI の表で
+  //   /checkout が 434 と 435 を行き来した (cbc25f02 で 435 = 落ちた・同じ /checkout のコードの 0452dba9 で 434 = 通った)。
+  //   /checkout 自身の import graph は変えていない。下げ直すときはサインインの部品を遅延にする案から (hydration #418 の前例に注意)。
   '/[locale]/[handle]': 448,
-  '/[locale]/checkout': 434,
+  '/[locale]/checkout': 435,
   // 2026-10-10 E22/F2: 予算の外にあった主要画面。顧客の支払い導線 (/order = モバイル注文・/scan = 読み取り)・
   // お店の画面 (/history・/billing)・AI ストア (/store・/discovery)。実測 order 366 / scan 388 / history 407 /
   // store 259 / billing 331 / discovery 310 に各 +5。
