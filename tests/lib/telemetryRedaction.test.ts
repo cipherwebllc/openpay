@@ -8,6 +8,7 @@ import {
   scrubSentryServerTransaction,
   scrubSentryTransaction,
 } from '@/lib/telemetryRedaction';
+import { IMAGE_LIBRARY_WALLET_HEADER } from '@/lib/images/library';
 
 const SECRET = 'Bearer-secret-must-not-leak';
 const SECRET_URL = `https://user:${SECRET}@hooks.example.com/api/webhooks/${SECRET}?token=${SECRET}`;
@@ -218,6 +219,24 @@ describe('telemetry URL redaction', () => {
     expect(transaction?.contexts?.trace?.data).toEqual({ 'http.method': 'POST' });
     expect(transaction?.spans?.[0].data).toEqual({ 'http.method': 'POST' });
     expect(JSON.stringify(transaction)).not.toContain(SECRET);
+  });
+
+  it('画像の一覧・削除の画面のウォレット (x-openpay-wallet) を error の event と transaction の両方から落とす', () => {
+    expect(IMAGE_LIBRARY_WALLET_HEADER).toBe('x-openpay-wallet');
+    const wallet = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
+    const error = scrubSentryServerEvent({
+      request: { method: 'POST', url: 'https://open-pay.jp/api/images/delete', headers: { 'X-OpenPay-Wallet': wallet, accept: '*/*' } },
+      contexts: { trace: { trace_id: 't', span_id: 's', data: { 'http.request.header.x_openpay_wallet': wallet, 'http.method': 'POST' } } },
+    } as Parameters<typeof scrubSentryServerEvent>[0]);
+    expect(error?.request?.headers).toEqual({ accept: '*/*' });
+    expect(JSON.stringify(error)).not.toContain(wallet);
+    const transaction = scrubSentryServerTransaction({
+      type: 'transaction',
+      transaction: 'GET /api/images',
+      request: { method: 'GET', headers: { 'x-openpay-wallet': wallet } },
+      spans: [{ span_id: 'a', trace_id: 't', start_timestamp: 0, data: { 'http.request.header.x_openpay_wallet': wallet } }],
+    } as Parameters<typeof scrubSentryServerTransaction>[0]);
+    expect(JSON.stringify(transaction)).not.toContain(wallet);
   });
 
   it('instrumentation.ts の node の Sentry は、受けた request の本文を採らない (httpIntegration の maxIncomingRequestBodySize: none)', () => {

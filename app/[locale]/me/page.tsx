@@ -18,6 +18,7 @@ import {
   UserRound,
 } from 'lucide-react';
 import { AppShell } from '@/components/AppShell';
+import { ImageLibraryCard } from '@/components/ImageLibraryCard';
 import { TipInboxCard } from '@/components/TipInboxCard';
 import { env } from '@/lib/env';
 
@@ -113,6 +114,8 @@ export default async function MePage({
               </Link>
             </li>
           ))}
+          {/* アップロードした画像 (/me/images)。サインイン済みの本人が画像のアップロードを使えるときだけ (component 側で null)。 */}
+          <ImageLibraryCard />
         </ul>
 
         <p className="mt-6 text-xs leading-relaxed text-slate-400">

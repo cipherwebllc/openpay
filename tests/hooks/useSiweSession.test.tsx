@@ -126,7 +126,46 @@ describe('useSiweSession', () => {
     await waitFor(() => expect(result.current.signOutError?.message).toBe(message));
     expect(invalidateSpy).not.toHaveBeenCalled();
     expect(result.current.isSignedIn).toBe(true);
-    expect(client.getQueryData(['siwe', 'me'])).toBe(wallet.address);
+    expect(client.getQueryData(['siwe', 'me'])).toEqual({ address: wallet.address, imageUpload: false, imageUploadSignIn: false });
+  });
+
+  it('画像: imageUpload は今の取得が成功していて、セッションが接続中の wallet と一致するときだけ true', async () => {
+    fetchSpy.mockResolvedValue(
+      jsonResponse(true, { ok: true, address: wallet.address, imageUpload: true, imageUploadSignIn: true }, 200),
+    );
+    const client = makeClient();
+    const { result, rerender } = renderHook(() => useSiweSession(), { wrapper: wrapper(client) });
+    await waitFor(() => expect(result.current.imageUpload).toBe(true));
+    expect(result.current.imageUploadSignIn).toBe(true);
+
+    // 別の wallet に切り替えた (セッションは前の wallet のまま) → 前の true を使わない。
+    const original = wallet.address;
+    wallet.address = '0x2222222222222222222222222222222222222222';
+    rerender();
+    expect(result.current.isSignedIn).toBe(false);
+    expect(result.current.imageUpload).toBe(false);
+    expect(result.current.imageUploadSignIn).toBe(true);
+    wallet.address = original;
+    rerender();
+    expect(result.current.imageUpload).toBe(true);
+
+    // 取り直しが失敗した (503) → cache に前の値が残っていても false。
+    fetchSpy.mockResolvedValue(jsonResponse(false, { ok: false, error: 'session_storage_unavailable' }, 503));
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['siwe', 'me'] });
+    });
+    await waitFor(() => expect(client.getQueryState(['siwe', 'me'])?.status).toBe('error'));
+    expect(result.current.imageUpload).toBe(false);
+    expect(result.current.imageUploadSignIn).toBe(false);
+  });
+
+  it('画像: server が送らない (段階 off) ときはどちらも false', async () => {
+    fetchSpy.mockResolvedValue(jsonResponse(true, { ok: true, address: wallet.address }, 200));
+    const client = makeClient();
+    const { result } = renderHook(() => useSiweSession(), { wrapper: wrapper(client) });
+    await waitFor(() => expect(result.current.isSignedIn).toBe(true));
+    expect(result.current.imageUpload).toBe(false);
+    expect(result.current.imageUploadSignIn).toBe(false);
   });
 
   it('サインアウト成功時にも tip-messages cache を invalidate する', async () => {

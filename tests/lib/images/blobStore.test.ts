@@ -7,10 +7,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MockAgent, getGlobalDispatcher, setGlobalDispatcher, type Dispatcher } from 'undici';
 import {
+  BLOB_DEL_DEADLINE_MS,
+  BLOB_HEAD_DEADLINE_MS,
   BLOB_LIST_DEADLINE_MS,
   BLOB_PUT_DEADLINE_MS,
   BlobDeadlineError,
   countImagesUnder,
+  deleteImageBlob,
+  headImage,
+  listImagePage,
   putPublicImage,
 } from '@/lib/images/blobStore';
 
@@ -67,6 +72,10 @@ const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0]);
 const operations = [
   ['list (cursor を追う全体)', (route: AbortSignal) => countImagesUnder('v1/owner/', 200, route), BLOB_LIST_DEADLINE_MS],
   ['put', (route: AbortSignal) => putPublicImage('v1/owner/product/id.jpg', JPEG, 'image/jpeg', route), BLOB_PUT_DEADLINE_MS],
+  // 一覧と削除 (PR 3A)。
+  ['list (一覧の 1 ページ)', (route: AbortSignal) => listImagePage('v1/owner/', 'c1', 24, route), BLOB_LIST_DEADLINE_MS],
+  ['head', (route: AbortSignal) => headImage('v1/owner/product/id.jpg', route), BLOB_HEAD_DEADLINE_MS],
+  ['del', (route: AbortSignal) => deleteImageBlob('v1/owner/product/id.jpg', route), BLOB_DEL_DEADLINE_MS],
 ] as const;
 
 describe('Blob の締切 (本物の SDK)', () => {
@@ -123,5 +132,67 @@ describe('Blob の締切 (本物の SDK)', () => {
     await advance(120_000, 1_000);
     expect(requests).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('一覧と削除の SDK の呼び方 (本物の SDK)', () => {
+  /** Blob の API が 1 回 status と本文を返す。 */
+  function blobApiReplies(status: number, body: unknown) {
+    agent
+      .get('https://vercel.com')
+      .intercept({ path: (path) => path.startsWith('/api/blob'), method: () => true })
+      .reply(status, (options) => {
+        requests.push({ method: String(options.method), path: String(options.path) });
+        return body;
+      })
+      .persist();
+  }
+
+  it('list は本人の prefix・limit・cursor をそのまま送り、続きの cursor を返す', async () => {
+    blobApiReplies(200, {
+      blobs: [{ url: 'https://s.public.blob.vercel-storage.com/v1/owner/product/a.jpg', downloadUrl: 'x', pathname: 'v1/owner/product/a.jpg', size: 3, uploadedAt: '2026-11-19T00:00:00.000Z', etag: 'e' }],
+      hasMore: true,
+      cursor: 'next',
+    });
+    const page = await listImagePage('v1/owner/', 'c1', 24, new AbortController().signal);
+    expect(page).toEqual({
+      blobs: [{ pathname: 'v1/owner/product/a.jpg', url: 'https://s.public.blob.vercel-storage.com/v1/owner/product/a.jpg', size: 3, uploadedAt: new Date('2026-11-19T00:00:00.000Z') }],
+      cursor: 'next',
+      hasMore: true,
+    });
+    const url = new URL(`https://vercel.com${requests[0].path}`);
+    expect(requests[0].method).toBe('GET');
+    expect(url.searchParams.get('prefix')).toBe('v1/owner/');
+    expect(url.searchParams.get('limit')).toBe('24');
+    expect(url.searchParams.get('cursor')).toBe('c1');
+  });
+
+  it('head は path を送り、無い画像 (not_found) は送り直さずに null', async () => {
+    blobApiReplies(404, { error: { code: 'not_found', message: 'The requested blob does not exist' } });
+    await expect(headImage('v1/owner/product/id.jpg', new AbortController().signal)).resolves.toBeNull();
+    expect(requests).toHaveLength(1);
+    expect(new URL(`https://vercel.com${requests[0].path}`).searchParams.get('url')).toBe('v1/owner/product/id.jpg');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('head は公開の URL を返す', async () => {
+    blobApiReplies(200, {
+      url: 'https://s.public.blob.vercel-storage.com/v1/owner/product/id.jpg', downloadUrl: 'x', pathname: 'v1/owner/product/id.jpg',
+      size: 3, contentType: 'image/jpeg', contentDisposition: '', cacheControl: '', uploadedAt: '2026-11-19T00:00:00.000Z', etag: 'e',
+    });
+    await expect(headImage('v1/owner/product/id.jpg', new AbortController().signal)).resolves.toEqual({
+      url: 'https://s.public.blob.vercel-storage.com/v1/owner/product/id.jpg',
+    });
+  });
+
+  it('del は path を 1 つだけ送り、無い画像 (not_found) でも消えた扱いで返す', async () => {
+    blobApiReplies(404, { error: { code: 'not_found', message: 'The requested blob does not exist' } });
+    await expect(deleteImageBlob('v1/owner/product/id.jpg', new AbortController().signal)).resolves.toBeUndefined();
+    expect(requests).toEqual([{ method: 'POST', path: '/api/blob/delete' }]);
+  });
+
+  it('del のほかの失敗 (403 など) は例外', async () => {
+    blobApiReplies(403, { error: { code: 'forbidden', message: 'no' } });
+    await expect(deleteImageBlob('v1/owner/product/id.jpg', new AbortController().signal)).rejects.toThrow();
   });
 });

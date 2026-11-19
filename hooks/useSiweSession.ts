@@ -27,13 +27,20 @@ const AUTH_DEPENDENT_KEYS = [
   ['tip-messages'],
 ] as const;
 
-type MeResponse = { ok: boolean; address: Address | null };
+type MeResponse = { ok: boolean; address: Address | null; imageUpload?: boolean; imageUploadSignIn?: boolean };
 
-async function fetchMe(): Promise<Address | null> {
+/** /me の cache の値。画像の 2 つは server が true のときだけ送る (欠けていれば false)。 */
+type MeData = { address: Address | null; imageUpload: boolean; imageUploadSignIn: boolean };
+
+async function fetchMe(): Promise<MeData> {
   const res = await fetch('/api/auth/siwe/me', { cache: 'no-store' });
   if (!res.ok) throw new Error(`siwe_me_http_${res.status}`);
   const json = (await res.json()) as MeResponse;
-  return json.address ?? null;
+  return {
+    address: json.address ?? null,
+    imageUpload: json.imageUpload === true,
+    imageUploadSignIn: json.imageUploadSignIn === true,
+  };
 }
 
 async function postJson(url: string, body?: unknown): Promise<Response> {
@@ -100,7 +107,7 @@ export function useSiweSession() {
     onSuccess: invalidateAuthScoped,
   });
 
-  const sessionAddress = me.data ?? null;
+  const sessionAddress = me.data?.address ?? null;
   const sameAddress =
     !!sessionAddress &&
     !!address &&
@@ -110,6 +117,13 @@ export function useSiweSession() {
     sessionAddress,
     /** セッションが現在接続中の wallet と一致してログイン済か。 */
     isSignedIn: sameAddress,
+    /**
+     * サインイン済みの本人が画像のアップロード・一覧・削除を使えるか (/me の imageUpload)。今の取得が成功していて、
+     * セッションが接続中の wallet と一致しているときだけ true (取り直しの失敗中・別の wallet に切り替えた後は、前の true を使わない)。
+     */
+    imageUpload: sameAddress && me.isSuccess && me.data.imageUpload,
+    /** サインインすると画像の機能を使えるかもしれない (/me の imageUploadSignIn・ヘッダのサインインの導線 = 掟 7)。 */
+    imageUploadSignIn: me.isSuccess && me.data.imageUploadSignIn,
     /** セッションは在るが接続中 wallet と別アドレス (要再ログイン)。 */
     mismatch: !!sessionAddress && !!address && !sameAddress,
     isLoading: me.isLoading,

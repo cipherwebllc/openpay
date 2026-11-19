@@ -1709,6 +1709,60 @@
       "unavailable": "The upload didn't go through. Please wait a moment and try again.",
       "network": "Couldn't connect. Please try again where the signal is better.",
       "unknown": "The upload failed."
+    },
+    "openLibrary": "Open your uploaded images (new tab)"
+  },
+  "ImageLibrary": {
+    "metaTitle": "Uploaded images — OpenPay",
+    "metaDescription": "The images you uploaded to OpenPay, and deleting the ones you no longer use.",
+    "back": "‹ My Page",
+    "title": "Uploaded images",
+    "intro": "Images you saved to OpenPay from an image field. Each wallet can keep up to {max} images. Deleting an image you no longer use frees a slot for a new upload.",
+    "usageNote": "\"Used in\" only checks the image fields of your products, public profile and shop. It can't check this device's register items, drafts, or order links and QR codes you have shared.",
+    "signInPrompt": "Sign in with the wallet you uploaded the images with to see the list.",
+    "signIn": "Sign in to see the list",
+    "notAvailable": "This feature isn't available right now.",
+    "loading": "Loading…",
+    "empty": "You haven't uploaded any images yet.",
+    "loadMore": "Show more",
+    "loadingMore": "Loading…",
+    "retry": "Load again",
+    "uploadedAt": "Uploaded {date}",
+    "purposes": {
+      "product": "Product image",
+      "avatar": "Avatar",
+      "cover": "Cover",
+      "link": "Link image",
+      "preset": "Register item image",
+      "storefront": "Shop image"
+    },
+    "notUsed": "Not used in products, your public profile or your shop",
+    "usedInLabel": "Used in",
+    "uses": {
+      "productCover": "Cover of product \"{title}\"",
+      "productGallery": "Extra image of product \"{title}\"",
+      "profileAvatar": "Avatar of @{handle}",
+      "profileCover": "Cover of @{handle}",
+      "profileLink": "Link image on @{handle}",
+      "storefrontAvatar": "Shop icon of @{handle}",
+      "storefrontCover": "Shop cover of @{handle}",
+      "storefrontMenu": "Menu image in the shop of @{handle}"
+    },
+    "delete": "Delete",
+    "deleting": "Deleting…",
+    "confirmTitle": "Delete this image?",
+    "confirmBody": "This can't be undone. Wherever the image is used (including this device's register items, drafts, and order links and QR codes you have shared), it will no longer be shown.",
+    "confirmDelete": "Delete",
+    "cancel": "Cancel",
+    "errors": {
+      "inUse": "The image is in use, so it wasn't deleted. Remove it from those fields first.",
+      "unauthenticated": "Please sign in again, then try again.",
+      "rateLimited": "Too many requests. Please wait a moment and try again.",
+      "notAvailable": "This feature isn't available right now.",
+      "unavailable": "Couldn't load right now. Please wait a moment and try again.",
+      "network": "Couldn't connect. Please try again where the signal is better.",
+      "unknown": "Something went wrong. Please try again.",
+      "deleteUnknown": "We couldn't confirm whether the image was deleted, so the list was reloaded."
     }
   },
   "CheckoutForm": {
@@ -3627,6 +3681,10 @@
       "selling": {
         "title": "Profile & listings",
         "desc": "Edit your @handle profile, register and manage digital goods."
+      },
+      "images": {
+        "title": "Uploaded images",
+        "desc": "The images you saved to OpenPay, and deleting the ones you no longer use."
       }
     },
     "note": "No account needed. History is stored on this device; purchases and selling use your wallet connection.",

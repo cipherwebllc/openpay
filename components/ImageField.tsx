@@ -11,7 +11,8 @@
 // この欄を出すかは親が決める (出品者の GET の imageUpload が true のときだけ・false なら親は今の URL の欄を出す)。
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useTranslations } from 'next-intl';
+import Link from 'next/link';
+import { useLocale, useTranslations } from 'next-intl';
 import { ExternalImage } from '@/components/ExternalImage';
 import { nextImageOperation, useImageUpload, type ImageOperationCounter } from '@/hooks/useImageUpload';
 import { IMAGE_FIELD_ACCEPT, IMAGE_OWNER_MAX_IMAGES, type ImagePurpose } from '@/lib/images/purpose';
@@ -54,7 +55,11 @@ const urlToggleClass =
 const urlInputClass =
   'mt-1 min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 sm:text-sm';
 
-/** アップロード中の表示 (やめる) と失敗の文。画像の欄と Store の「画像を追加」が使う。 */
+/**
+ * アップロード中の表示 (やめる) と失敗の文。画像の欄と Store の「画像を追加」・AI の「この画像を表紙に使う」が使う。
+ * 上限 (image_limit) の文には、アップロードした画像の一覧 (/me/images) へのリンクを付ける。別のタブで開く (編集中のフォームの
+ * 値を残す)・先読みしない (一覧の GET と Blob の list はタブを開いたときだけ)。
+ */
 export function ImageUploadStatus({
   busy,
   error,
@@ -65,6 +70,7 @@ export function ImageUploadStatus({
   onCancel: () => void;
 }) {
   const t = useTranslations('ImageField');
+  const locale = useLocale();
   return (
     <>
       {busy ? (
@@ -80,6 +86,20 @@ export function ImageUploadStatus({
       {error ? (
         <p role="alert" className="text-xs leading-relaxed text-red-700">
           {t(imageUploadErrorKey(error), { max: IMAGE_OWNER_MAX_IMAGES })} {t('keepOriginal')}
+          {error === 'image_limit' ? (
+            <>
+              {' '}
+              <Link
+                href={`/${locale}/me/images`}
+                prefetch={false}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-medium underline underline-offset-2"
+              >
+                {t('openLibrary')}
+              </Link>
+            </>
+          ) : null}
         </p>
       ) : null}
     </>

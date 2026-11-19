@@ -23,8 +23,17 @@ export function WalletBadge() {
   const t = useTranslations('Nav');
   const tConnect = useTranslations('ConnectButton');
   const visible = useVisibleConnectors(connectors);
-  const { isSignedIn, mismatch, signIn, isSigningIn, signInError, signOut, isSigningOut, signOutError } =
-    useSiweSession();
+  const {
+    isSignedIn,
+    mismatch,
+    signIn,
+    isSigningIn,
+    signInError,
+    signOut,
+    isSigningOut,
+    signOutError,
+    imageUploadSignIn,
+  } = useSiweSession();
   // SIWE ログインを必要とする機能 (freee 連携 / a1 OpenPay 利用料 / Pro 加入 / CSV パス購入 /
   // 着金プッシュ通知 / チップ質問 inbox) が有効なときだけログイン UI を出す。すべて OFF では
   // 「繋ぐ/切る」だけ表示し、無意味なログイン導線を出さない。⚠️ SIWE を要する flag をここに足し忘れるとヘッダーから
@@ -40,7 +49,10 @@ export function WalletBadge() {
     // Delivery UI is a strict child of Creator Store, so its SIWE entry is covered here.
     env.enableCreatorStoreUi ||
     env.enableHandles || // P2-M/掟7: /api/handle は SIWE 必須ゆえヘッダのサインイン導線に含める
-    env.enableAgentPurchases;
+    env.enableAgentPurchases ||
+    // 画像のアップロード・アップロードした画像の一覧と削除 (/me/images)。段階 (IMAGE_UPLOAD_MODE) は server だけの env なので、
+    // 公開の flag ではなく /api/auth/siwe/me の imageUploadSignIn (このヘッダが既に読む GET・呼び出しは増えない) で決める。
+    imageUploadSignIn;
 
   // 署名失敗 (user reject 含む) は握りつぶしてエラー文言は signInError 経由で出す。
   const handleSignIn = () => {

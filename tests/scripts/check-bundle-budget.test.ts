@@ -37,6 +37,8 @@ const F11_PAGES: Array<[string, number]> = [
   ['/[locale]/license-terms/directory-v1', 236],
   ['/[locale]/license-terms/standard-v1', 236],
   ['/[locale]/me', 237],
+  // 2026-11-19 /me/images を新設 (アップロードした画像・手元の build 246 kB から CI の見込み 243)。
+  ['/[locale]/me/images', 243],
   ['/[locale]/news', 238],
   ['/[locale]/order/status', 201],
   ['/[locale]/orders/hall', 260],
@@ -128,6 +130,7 @@ ${CHECKOUT_ROW}
 ├ ● /[locale]/license-terms/directory-v1          2.46 kB         236 kB
 ├ ● /[locale]/license-terms/standard-v1           2.46 kB         236 kB
 ├ ● /[locale]/me                                  4.16 kB         237 kB
+├ ● /[locale]/me/images                           11.5 kB         243 kB
 ├ ● /[locale]/news                                4.33 kB         238 kB
 ├ ● /[locale]/order                               9.47 kB         349 kB
 ├ ● /[locale]/order/status                        4.72 kB         201 kB

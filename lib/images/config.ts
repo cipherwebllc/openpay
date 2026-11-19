@@ -64,17 +64,25 @@ export function imageUploadAllowedFor(mode: ImageUploadMode, address: string): b
   return mode === 'admin' && isAdminWallet(address);
 }
 
+/** 秘密・Blob の設定・IP の枠の秘密がそろっているか (段階と権限は見ない)。 */
+function imageUploadConfigured(): boolean {
+  return imageOwnerSecret() !== null && imageBlobStoreConfigured() && imageUploadIpHashConfigured();
+}
+
 /**
- * 画面が新しい画像の欄を出すか (出品者の GET と、@handle の持ち主の GET /api/handle の imageUpload)。段階・権限に加えて、
- * 秘密・Blob の設定・IP の枠の秘密がそろっているときだけ true (そろっていないのに欄を出すと、押すたびに 503 になる)。
- * POST の route も同じ順で自分で判定する。
+ * 画面が新しい画像の欄を出すか (出品者の GET と、@handle の持ち主の GET /api/handle と、/api/auth/siwe/me の imageUpload)。
+ * 段階・権限に加えて、秘密・Blob の設定・IP の枠の秘密がそろっているときだけ true (そろっていないのに欄を出すと、押すたびに
+ * 503 になる)。アップロード・一覧・削除の route も同じ順で自分で判定する。
  */
 export function imageUploadAvailableFor(address: string): boolean {
-  const mode = imageUploadMode();
-  return (
-    imageUploadAllowedFor(mode, address) &&
-    imageOwnerSecret() !== null &&
-    imageBlobStoreConfigured() &&
-    imageUploadIpHashConfigured()
-  );
+  return imageUploadAllowedFor(imageUploadMode(), address) && imageUploadConfigured();
+}
+
+/**
+ * サインインの前に「サインインすると画像の機能を使えるかもしれない」と言えるか (/api/auth/siwe/me の imageUploadSignIn・
+ * ヘッダのサインインの導線 = 掟 7)。段階が admin / all で設定がそろっているときだけ true。admin では運営者かどうかは
+ * サインインするまで分からないので、全員にサインインの導線だけを出す (画像の欄と一覧は imageUploadAvailableFor で決める)。
+ */
+export function imageUploadSignInOffered(): boolean {
+  return imageUploadMode() !== 'off' && imageUploadConfigured();
 }

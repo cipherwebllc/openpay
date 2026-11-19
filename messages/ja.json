@@ -1709,6 +1709,60 @@
       "unavailable": "今はアップロードできませんでした。少し待ってからもう一度お試しください。",
       "network": "通信できませんでした。電波のよい所でもう一度お試しください。",
       "unknown": "アップロードできませんでした。"
+    },
+    "openLibrary": "アップロードした画像を開く (新しいタブ)"
+  },
+  "ImageLibrary": {
+    "metaTitle": "アップロードした画像 — OpenPay",
+    "metaDescription": "OpenPay にアップロードした画像の一覧と、使っていない画像の削除。",
+    "back": "‹ マイページ",
+    "title": "アップロードした画像",
+    "intro": "画像の欄から OpenPay に保存した画像です。1 つのウォレットで {max} 枚まで置けます。使っていない画像を消すと、その分またアップロードできます。",
+    "usageNote": "「使っている所」は、商品・公開プロフィール・店舗の画像の欄だけを見ています。この端末のレジの商品・下書き・配った注文リンクや QR は確かめられません。",
+    "signInPrompt": "画像をアップロードしたウォレットでサインインすると、一覧を見られます。",
+    "signIn": "サインインして一覧を見る",
+    "notAvailable": "今はこの機能を使えません。",
+    "loading": "読み込んでいます…",
+    "empty": "アップロードした画像はまだありません。",
+    "loadMore": "もっと見る",
+    "loadingMore": "読み込んでいます…",
+    "retry": "もう一度読み込む",
+    "uploadedAt": "{date} にアップロード",
+    "purposes": {
+      "product": "商品の画像",
+      "avatar": "アバター",
+      "cover": "カバー",
+      "link": "リンクの画像",
+      "preset": "レジの商品の画像",
+      "storefront": "店舗の画像"
+    },
+    "notUsed": "商品・公開プロフィール・店舗での使用なし",
+    "usedInLabel": "使っている所",
+    "uses": {
+      "productCover": "商品「{title}」の表紙",
+      "productGallery": "商品「{title}」の追加画像",
+      "profileAvatar": "@{handle} のアバター",
+      "profileCover": "@{handle} のカバー",
+      "profileLink": "@{handle} のリンクの画像",
+      "storefrontAvatar": "@{handle} の店舗のアイコン",
+      "storefrontCover": "@{handle} の店舗のカバー",
+      "storefrontMenu": "@{handle} の店舗のメニューの画像"
+    },
+    "delete": "消す",
+    "deleting": "消しています…",
+    "confirmTitle": "この画像を消しますか？",
+    "confirmBody": "消すと元に戻せません。この画像を使っている所 (この端末のレジの商品・下書き・配った注文リンクや QR を含む) では、表示されなくなります。",
+    "confirmDelete": "消す",
+    "cancel": "やめる",
+    "errors": {
+      "inUse": "使っている所があるので消せませんでした。先に、その欄から画像を外してください。",
+      "unauthenticated": "サインインし直してから、もう一度お試しください。",
+      "rateLimited": "操作の回数の上限に達しました。少し待ってからもう一度お試しください。",
+      "notAvailable": "今はこの機能を使えません。",
+      "unavailable": "今は読み込めませんでした。少し待ってからもう一度お試しください。",
+      "network": "通信できませんでした。電波のよい所でもう一度お試しください。",
+      "unknown": "うまくいきませんでした。もう一度お試しください。",
+      "deleteUnknown": "消せたかどうかを確かめられなかったので、一覧を読み直しました。"
     }
   },
   "CheckoutForm": {
@@ -3627,6 +3681,10 @@
       "selling": {
         "title": "プロフィールと出品",
         "desc": "@handle プロフィールの編集・デジタル商品の登録と管理。"
+      },
+      "images": {
+        "title": "アップロードした画像",
+        "desc": "OpenPay に保存した画像の一覧と、使っていない画像の削除。"
       }
     },
     "note": "アカウント登録は不要です。履歴はこの端末に保存され、購入や出品の確認にはウォレット接続を使います。",

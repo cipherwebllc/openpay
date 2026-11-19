@@ -178,6 +178,8 @@ function scrubTraceUrlFields(event: Event): void {
 // 署名を第三者 (Sentry) へ波及させない。authorization・cookie も同じ理由で落とす。
 // x-vercel-oidc-token は Vercel が関数への request に付ける OIDC の token (画像のアップロードの Blob の認証に使う・
 // lib/images/blobStore)。持っていればその project として Blob などに書けるので、同じく落とす。
+// x-openpay-wallet は画像の一覧・削除の画面が送る「今つないでいるウォレット」(lib/images/library の IMAGE_LIBRARY_WALLET_HEADER)。
+// 秘密ではないが、画像の route はアドレスをログに出さない方針なので、Sentry にも載せない。
 const SECRET_HEADER_NAMES = new Set([
   'x-store-handoff-token',
   'x-order-token',
@@ -187,6 +189,7 @@ const SECRET_HEADER_NAMES = new Set([
   'proxy-authorization',
   'cookie',
   'x-vercel-oidc-token',
+  'x-openpay-wallet',
 ]);
 // span の属性の形 (http.request.header.<小文字・- は _>)。
 const SECRET_TRACE_HEADER_KEYS = new Set(

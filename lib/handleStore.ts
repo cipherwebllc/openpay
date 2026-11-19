@@ -29,8 +29,9 @@ import {
 import type { StorefrontParts } from '@/lib/mobileOrder';
 import { shopLiveKey } from '@/lib/shopLive';
 
-const handleKey = (handle: string) => `handle:${handle}`;
-const ownerIndexKey = (owner: string) => `wallet:handles:${owner.toLowerCase()}`;
+// 2 つの key は画像の一覧・削除の「使っている所」(lib/images/usage.ts) も読む (同じ key をここだけで決める)。
+export const handleKey = (handle: string) => `handle:${handle}`;
+export const ownerIndexKey = (owner: string) => `wallet:handles:${owner.toLowerCase()}`;
 export const AGENT_SHOP_INDEX_KEY = 'shops:agent-index';
 export const AGENT_SHOP_INDEX_MAX = 500;
 export const agentShopSummaryKey = (handle: string) => `shops:summary:${handle}`;

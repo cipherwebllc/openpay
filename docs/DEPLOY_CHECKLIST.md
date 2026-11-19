@@ -3414,8 +3414,9 @@ route は `POST /api/relay/jpyc/move` (Polygon と Amoy だけ)。画面は /cre
 
 `POST /api/images/upload` が画像 (JPEG / PNG・1 MiB まで) を受けて Vercel Blob の **public** store に置き、その URL を返す。
 使うのは出品フォームの表紙・追加画像と、AI 出品アシスタントの「この画像を表紙に使う」(PR 1)、プロフのアバター・カバー・リンクの
-画像 (PR 2)。保存の形は今と同じ URL の文字列で、お金の動き (relay・settle・fee・order) と購入の snapshot には触れない。env の説明は
-docs/ENV.md。
+画像 (PR 2)。マイページの「アップロードした画像」(`/{locale}/me/images`・PR 3A) で、本人が一覧を見て、使っていない画像を消せる
+(`GET /api/images`・`POST /api/images/delete`)。保存の形は今と同じ URL の文字列で、お金の動き (relay・settle・fee・order) と
+購入の snapshot には触れない。env の説明は docs/ENV.md。
 
 ### 20.1 前提
 - Vercel の Storage で Blob の store を **public** で作る (OpenPay 専用)。Preview でも試すなら store を分ける。
@@ -3445,11 +3446,20 @@ docs/ENV.md。
    画像 (行を並べ替えても選んだ行に入る) の順に入れて公開し、公開ページ (`/@handle`) に出ることを見る (アップロード中は公開の
    ボタンが止まる)。
 4. 写真は JPEG、透過の PNG (ロゴ) は透けたままの PNG になることを見る。
+5. 一覧と削除 (PR 3A): 運営者の wallet でサインインすると、マイページに「アップロードした画像」のカードが出る (ほかの wallet と
+   サインインの前は出ない)。開くと、3 までに置いた画像が並ぶ (24 枚ずつ・「もっと見る」)。商品・プロフ・店舗で使っている画像は
+   「使っている所」が出て、消そうとすると 409 で消えない (強制削除はない・販売停止やライセンスの商品も数える)。使っていない画像を
+   消すと一覧から外れ、Vercel の Storage の Blob の画面からも消える。画像の欄の上限 (200 枚) の文の「アップロードした画像を開く」は
+   新しいタブで一覧を開く (編集中のフォームは残る)。
 
 ### 20.3 見張る
 - Vercel の Usage の Blob: 保存の量・Advanced Operations (成功したアップロード 1 回で put 1 回・list は読んだページの数。
   ふつうは 1 ページ。list は置けなかった要求 = 上限 200 枚・全体の枠・締切でも数える)・Data Transfer。
 - Upstash: 1 回のアップロードで 9 コマンド前後 (セッションの読み取り・IP の分・ウォレットと IP の日・全体の日の INCR と EXPIRE NX)。
+- 一覧と削除: 1 回で 7〜9 コマンド (入口 5 = IP の分の INCR と EXPIRE NX・セッションの読み取り・ウォレットの分の INCR と EXPIRE NX、
+  使っている所 2〜4 = handle と商品の index の LRANGE 2・記録の MGET 0〜2)。画像の無いページと、もう無い画像の削除は入口の 5 だけ。
+  Blob は一覧 1 ページで list 1 回 (Advanced Operations)・削除 1 回で head 1 回 (Simple Operations) と del 1 回 (無料)。
+  枠は 1 分に一覧 IP 60 / ウォレット 30・削除 IP 20 / ウォレット 10 (KV 障害は通す)。
 - ログ (Sentry にも出る) の `images.upload.failed` の `code`: `list_failed`・`list_deadline` (Blob の list・cursor を追う全体で
   5 秒の締切)・`global_count_unavailable` (KV)・`put_failed`・`put_deadline` (Blob の put・10 秒の締切)・`route_deadline`
   (要求を受けてから 15 秒の絶対の期限。関数の上限 20 秒より前に、どの段で待っていても 503 `storage_unavailable` を返す。
@@ -3457,6 +3467,10 @@ docs/ENV.md。
   エラーの応答とログにアドレス・ownerKey・path・URL は出ない。成功の応答の `url` だけは公開の Blob の URL そのもの (path を含む・設計どおりの例外)。
   request の `x-vercel-oidc-token` は Sentry の event と transaction から落とす (lib/telemetryRedaction)。
 - 上限: 1 ウォレット 200 枚 (Blob の list で数える)・1 日 (UTC) にウォレット 30 回・IP 60 回・全体 200 回。
+- 一覧のログ `images.list.failed` の `code`: `list_failed`・`list_deadline` (list 5 秒)・`list_cursor_invalid` (続きがあるのに
+  cursor が無い・前と同じ・形が違う)・`usage_unavailable` (使っている所の KV)・`route_deadline` (15 秒)。削除のログ
+  `images.delete.failed` の `code`: `head_failed`・`head_deadline`・`usage_unavailable`・`delete_failed`・`delete_deadline`・
+  `route_deadline`。どれも 503 `storage_unavailable` で、使っている所が読めないときは消さない。
 - `list_failed` が毎回出るとき (アップロードが 1 回も通らない): route は SDK の例外の文を捨てるので、ログからは原因が分からない。
   次を順に見る: Production の env に `BLOB_STORE_ID` があるか・store が Production の Environment につながっているか・project の
   OIDC (Secure backend access) が有効か・store が public で作られているか。`not_configured` なら `IMAGE_OWNER_KEY_SECRET`・
@@ -3464,7 +3478,8 @@ docs/ENV.md。
 
 ### 20.4 戻し方
 - `IMAGE_UPLOAD_MODE` を空 (または `off`) にして再 deploy する (route は 404・出品者の GET と @handle の持ち主の GET の
-  `imageUpload` は false で、フォームとプロフは今の URL の欄に戻る)。置いた画像と、それを使っている商品・プロフの欄はそのまま
+  `imageUpload` は false で、フォームとプロフは今の URL の欄に戻る。一覧と削除の API も 404 で、`/api/auth/siwe/me` は画像の 2 つの
+  値を返さないので、マイページのカードも出ない)。置いた画像と、それを使っている商品・プロフの欄はそのまま
   残る (消さない)。
 
 ### 20.5 通報のとき
@@ -3476,7 +3491,8 @@ docs/ENV.md。
 - ブラウザなどのキャッシュには残りうる (置くときの cacheControlMaxAge は 1 年)。
 
 ### 20.6 `all` にする前
-- アップロードした画像の一覧と削除 (PR 3) がそろってから (上限 200 枚に届いた人が自分で消せないため)。
+- アップロードした画像の一覧と削除 (PR 3A・`/me/images`) を admin で 20.2 の 5 のとおり確かめてから (上限 200 枚に届いた人が
+  自分で消せる手段)。
 - 規約・プライバシーポリシー・画像 URL のガイド・llms.txt の「画像を預からない」の直し (公開文言・運営者の承認) の後。
 - 外した・替えた画像は、本人が消すまで公開の URL で残る (自動では消さない・運営者の裁定 2026-11-19)。
 
