@@ -723,6 +723,63 @@ describe('images upload: 絶対の期限 (関数の上限より前に必ず固�
   });
 });
 
+describe('images upload: 単調時計の期限 (timer の callback より先に期限をまたいだとき)', () => {
+  let now = 1_000;
+  const failures = () => logger.warn.mock.calls.map(([, detail]) => (detail as { code: string }).code);
+
+  beforeEach(() => {
+    now = 1_000;
+    vi.spyOn(performance, 'now').mockImplementation(() => now);
+  });
+
+  it('list の間に期限をまたいだら、全体の枠を使わず put もせず 503 (route_deadline は 1 回)', async () => {
+    blob.list.mockImplementation(async () => {
+      // 同期の処理・event loop の遅れで、期限の timer が走る前に 15 秒を過ぎた。
+      now += IMAGE_UPLOAD_DEADLINE_MS + 1;
+      return { blobs: [], hasMore: false };
+    });
+    const response = await POST(post());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(kv.kvIncr).not.toHaveBeenCalled();
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(failures()).toEqual(['route_deadline']);
+  });
+
+  it('1 ページ目が続きありで返る間に期限をまたいだら、2 ページ目を読まず、全体の枠も put も使わず 503', async () => {
+    blob.list
+      .mockImplementationOnce(async () => {
+        now += IMAGE_UPLOAD_DEADLINE_MS;
+        return { blobs: [], hasMore: true, cursor: 'next' };
+      })
+      .mockResolvedValue({ blobs: [], hasMore: false });
+    const response = await POST(post());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(blob.list).toHaveBeenCalledTimes(1);
+    expect(kv.kvIncr).not.toHaveBeenCalled();
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(failures()).toEqual(['route_deadline', 'list_deadline']);
+  });
+
+  it('全体の枠を数える間に期限をまたいだら、put をしない', async () => {
+    kv.kvIncr.mockImplementation(async () => {
+      now += IMAGE_UPLOAD_DEADLINE_MS + 1;
+      return { ok: true, value: 1 };
+    });
+    const response = await POST(post());
+    expect(response.status).toBe(503);
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(failures()).toEqual(['route_deadline']);
+  });
+
+  it('期限の内側なら今までどおり置く', async () => {
+    const response = await POST(post());
+    expect(response.status).toBe(200);
+    expect(blob.put).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('出品者の GET: imageUpload', () => {
   async function imageUploadFlag(): Promise<unknown> {
     const response = await getSeller(new Request('https://open-pay.jp/api/store/seller'));
