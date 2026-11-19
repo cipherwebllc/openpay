@@ -1710,7 +1710,8 @@
       "network": "通信できませんでした。電波のよい所でもう一度お試しください。",
       "unknown": "アップロードできませんでした。"
     },
-    "openLibrary": "アップロードした画像を開く (新しいタブ)"
+    "openLibrary": "アップロードした画像を開く (新しいタブ)",
+    "signInToUpload": "サインインすると画像をアップロードできます。"
   },
   "ImageLibrary": {
     "metaTitle": "アップロードした画像 — OpenPay",
@@ -2962,6 +2963,7 @@
     "soldOutToggle": "売り切れ",
     "optionsTitle": "オプション（サイズ/トッピング）",
     "imageLabel": "画像URL(任意)",
+    "imageUploadLabel": "商品の画像 (任意)",
     "imagePlaceholder": "https://",
     "imageHint": "画像はサーバー（例: imgur.com）にアップロードした https:// の URL を貼り付けてください。",
     "imageGuideLink": "画像の用意のしかたを見る",
@@ -3085,9 +3087,13 @@
     "taglinePlaceholder": "例: 自家焙煎の一杯をあなたに",
     "avatarLabel": "店舗アイコン画像（任意）",
     "avatarHint": "画像はサーバー（例: imgur.com）にアップロードした https:// の URL を貼り付けてください。注文ページの先頭に丸く表示されます。",
+    "avatarUrlLabel": "店舗アイコン画像の URL",
+    "avatarImageHint": "注文ページの先頭に丸く表示されます。",
     "imageGuideLink": "画像の用意のしかたを見る",
     "coverLabel": "カバー画像（任意）",
     "coverHint": "横長画像の https:// URL。注文ページのヘッダー背景になります。",
+    "coverUrlLabel": "カバー画像の URL",
+    "coverImageHint": "注文ページのヘッダーの背景になります。",
     "addressLabel": "住所（任意）",
     "addressHint": "公開ページに地図リンク付きで表示されます。",
     "addressPlaceholder": "例: 東京都渋谷区〇〇 1-2-3",
@@ -3139,6 +3145,7 @@
     "barReasonNoHandle": "@handle を取得すると公開できます",
     "barReasonNoMenu": "レジで商品を 1 つ追加すると公開できます",
     "barReasonDiscount": "値引きを直すか「なし」にしてください",
+    "barReasonImageBusy": "アップロードが終わると公開できます",
     "barReceiverWillChange": "受取先が変わります",
     "acceptingApplyNote": "「公開を更新」でお店のページに反映されます。",
     "autoLoaded": "公開中の内容をこの端末に読み込みました。",

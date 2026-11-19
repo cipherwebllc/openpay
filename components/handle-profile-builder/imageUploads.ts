@@ -10,24 +10,12 @@
 //   アップロードの結果を入れない)。入れ替わりでは欄も作り直す (session を key に使う: 送信をやめ「アップロード中」を消す)。
 // - アップロード中の欄が 1 つでもあれば busy (親は公開を止め、別のタブの下書きの取り込みを待たせる)。
 
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { nextImageOperation, type ImageOperationCounter } from '@/hooks/useImageUpload';
 import type { DraftLink } from '@/lib/handleProfileDraft';
 
-/** アップロード中の欄の集まり (key = 'avatar' | 'cover' | `link:<行の id>`)。 */
-export function useImageBusyKeys() {
-  const [keys, setKeys] = useState<ReadonlySet<string>>(() => new Set());
-  const setBusy = useCallback((key: string, busy: boolean) => {
-    setKeys((current) => {
-      if (current.has(key) === busy) return current;
-      const next = new Set(current);
-      if (busy) next.add(key);
-      else next.delete(key);
-      return next;
-    });
-  }, []);
-  return { busy: keys.size > 0, setBusy };
-}
+/** アップロード中の欄の集まり (key = 'avatar' | 'cover' | `link:<行の id>`)。レジ・モバイル注文と同じ hook。 */
+export { useImageBusyKeys } from '@/hooks/useImageUpload';
 
 // リンクの行の id。下書きの行には id が無い (保存と下書きの形を変えない) ので、画面の中だけで振る。
 let linkRowSeq = 0;

@@ -126,7 +126,7 @@ describe('useSiweSession', () => {
     await waitFor(() => expect(result.current.signOutError?.message).toBe(message));
     expect(invalidateSpy).not.toHaveBeenCalled();
     expect(result.current.isSignedIn).toBe(true);
-    expect(client.getQueryData(['siwe', 'me'])).toEqual({ address: wallet.address, imageUpload: false, imageUploadSignIn: false });
+    expect(client.getQueryData(['siwe', 'me'])).toEqual({ address: wallet.address, imageUpload: false, imageUploadSignIn: false, imageUploadOpen: false });
   });
 
   it('画像: imageUpload は今の取得が成功していて、セッションが接続中の wallet と一致するときだけ true', async () => {
@@ -174,13 +174,28 @@ describe('useSiweSession', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('画像: server が送らない (段階 off) ときはどちらも false', async () => {
+  it('画像: server が送らない (段階 off) ときはどれも false', async () => {
     fetchSpy.mockResolvedValue(jsonResponse(true, { ok: true, address: wallet.address }, 200));
     const client = makeClient();
     const { result } = renderHook(() => useSiweSession(), { wrapper: wrapper(client) });
     await waitFor(() => expect(result.current.isSignedIn).toBe(true));
     expect(result.current.imageUpload).toBe(false);
     expect(result.current.imageUploadSignIn).toBe(false);
+    expect(result.current.imageUploadOpen).toBe(false);
+  });
+
+  it('画像: imageUploadOpen (段階 all) は今の取得が成功しているときだけ true (サインインの前でも)', async () => {
+    fetchSpy.mockResolvedValue(jsonResponse(true, { ok: true, address: null, imageUploadSignIn: true, imageUploadOpen: true }, 200));
+    const client = makeClient();
+    const { result } = renderHook(() => useSiweSession(), { wrapper: wrapper(client) });
+    await waitFor(() => expect(result.current.imageUploadOpen).toBe(true));
+    expect(result.current.isSignedIn).toBe(false);
+    fetchSpy.mockResolvedValue(jsonResponse(false, { ok: false, error: 'session_storage_unavailable' }, 503));
+    await act(async () => {
+      await client.refetchQueries({ queryKey: ['siwe', 'me'] });
+    });
+    await waitFor(() => expect(client.getQueryState(['siwe', 'me'])?.status).toBe('error'));
+    expect(result.current.imageUploadOpen).toBe(false);
   });
 
   it('サインアウト成功時にも tip-messages cache を invalidate する', async () => {

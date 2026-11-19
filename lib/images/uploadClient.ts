@@ -58,13 +58,15 @@ export async function postImage(
   return { ok: false, error: code ?? 'unknown' };
 }
 
-/** 選んだ file を用途の大きさに描き直して送る。 */
+/** 選んだ file を用途の大きさ (maxEdge を渡したらその長辺) に描き直して送る。 */
 export async function uploadImageFile(
   file: Blob,
   purpose: ImagePurpose,
   signal?: AbortSignal,
+  maxEdge?: number,
 ): Promise<ImageUploadResult> {
-  const prepared = await prepareUploadImage(file, purpose);
+  const prepared =
+    maxEdge === undefined ? await prepareUploadImage(file, purpose) : await prepareUploadImage(file, purpose, maxEdge);
   if (!prepared.ok) return { ok: false, error: prepared.error };
   return postImage(prepared.image.blob, prepared.image.type, purpose, signal);
 }

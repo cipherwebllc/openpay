@@ -3,16 +3,38 @@
 // 商品プリセットの管理 UI (レジモード内に統合)。状態は親 (RegisterMode) が持つ
 // useProductPresets を props で受け取り、単一 store インスタンスを共有する
 // (同一タブ内で 2 つ hook を持つと storage event が飛ばず state が乖離するため)。
+//
+// 商品の画像 (アップロード): /api/auth/siwe/me の imageUpload (サインイン済みで、セッションが接続中の wallet と一致し、今の
+// 取得が成功しているときだけ) が true で、商品の一覧を読み込んだ後だけ、画像の URL の欄を画像の欄 (components/ImageField・
+// 用途 preset・長辺 800) にする。サインインしていなくて imageUploadOpen (段階 all) が true なら「サインインすると画像を
+// アップロードできます」の 1 行と今の URL の欄。それ以外 (段階 off・設定が無い・取得の失敗) は今の画面のまま。保存の形は今と
+// 同じ (この端末の localStorage の https URL の文字列)・レジと会計と URL の入力はいつも使える。
+// - 欄ごと (商品の id・追加のフォーム) に操作の番号 (hooks/useImageUpload)。送り始め・URL の手入力 (今の URL の欄でも)・外す・
+//   行の削除・追加の後の片づけで進め、送り始めの番号のままのときだけ結果を入れる。本人・段階が替わったら (layout effect)・
+//   シートを閉じたら、全部の欄の番号を進める。
+// - 結果は updatePreset で、最新の一覧の同じ id の行の image だけを変える (描画のときの一覧を書き戻さない・行が消えていたら
+//   入らない)。別のタブの変更は、送っている間は取り込まず (親が holdImport)、書くときに最新の一覧に画像だけを重ねる
+//   (hooks/useProductPresets の rebase)。
+// - 追加のフォームの画像を送っている間は「追加」を止める (届く前の行を作らない)。
 
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 import { ExternalImage } from './ExternalImage';
 import { Field } from './Field';
+import { ImageField } from './ImageField';
 import { ProductOptionEditor } from './ProductOptionEditor';
 import { env } from '@/lib/env';
-import type { ProductPreset } from '@/hooks/useProductPresets';
+import { PRESET_IMAGE_MAX, type ProductPreset } from '@/hooks/useProductPresets';
+import {
+  IMAGE_UPLOAD_OFF,
+  imageUploadScopeOf,
+  useImageBusyKeys,
+  useImageFieldOperations,
+} from '@/hooks/useImageUpload';
+import { useSiweSession } from '@/hooks/useSiweSession';
+import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
 import type { ShopLiveState } from '@/lib/shopLive';
 import { TAX_OPTIONS, defaultRateForCategory, type TaxCategory } from '@/lib/tax';
 import { TOKEN_SYMBOLS, defaultDeploymentForSymbol, type TokenSymbol } from '@/lib/tokens';
@@ -31,7 +53,24 @@ type Props = {
     toggleSoldOut: (itemId: string, value: boolean) => void;
     isPending: boolean;
   };
+  /** 商品の一覧を読み込んだ後か (読み込みで一覧が入れ替わるので、それまでは画像の欄を出さない = アップロードを始めない)。 */
+  hydrated?: boolean;
+  /**
+   * 画像をアップロード中の欄を親へ知らせる (送り始めのイベントの中で同期に・親は別のタブの商品の取り込みを保留する)。key は
+   * 欄を作り直すたびに変わる (作り直す前の欄の後片づけが、作り直した欄の印を消さない)。
+   */
+  onImageBusyChange?: (key: string, busy: boolean) => void;
 };
+
+/**
+ * 画像の欄の key (操作の番号と、親へ知らせる busy の両方に使う)。既存の行は `row:<商品の id>`、追加のフォームは `new`。商品の
+ * id はどんな文字列もありうる (公開中のメニューから読み込んだ id も入る) ので、id をそのまま key にせず、必ず接頭辞を付ける
+ * (追加のフォームの key とぶつかると、片方の結果が捨てられ、送っている間の取り込みの保留も外れる)。
+ */
+const NEW_ROW = 'new';
+const rowKey = (id: string) => `row:${id}`;
+// この部品を作るたびの通し番号 (シートを開き直したときの欄の印を、前に開いていたときの欄の印と分ける)。
+let managerSeq = 0;
 
 const EMPTY_DRAFT = {
   name: '',
@@ -71,18 +110,38 @@ export function ProductPresetManager({
   removePreset,
   movePreset,
   shopLive,
+  hydrated = false,
+  onImageBusyChange,
 }: Props) {
   const t = useTranslations('ProductPresetManager');
+  const tImage = useTranslations('ImageField');
   const locale = useLocale();
   const tTax = useTranslations('Tax');
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   // 追加フォームの欄を見出しと結ぶ id (読み上げで欄の名前が placeholder だけにならないように)。
   const formId = useId();
+  // 画像の欄を出すか (/me の imageUpload)。一覧を読み込むまでは出さない。
+  const session = useSiweSession();
+  const imageScope = hydrated ? imageUploadScopeOf(session) : IMAGE_UPLOAD_OFF;
+  const imageFields = imageScope.access === 'upload';
+  const images = useImageFieldOperations(imageScope.key);
+  const [instance] = useState(() => ++managerSeq);
+  const busyKey = (field: string) => `preset#${instance}:${imageScope.key}:${field}`;
+  // 追加のフォームの画像を送っている (「追加」を止める)。state は無効の表示、ref は押したときの判定 (表示の確定を待たない)。
+  const newRowBusy = useImageBusyKeys();
+  const newRowBusyRef = useRef(new Set<string>());
+  const onNewRowBusyChange = (busy: boolean) => {
+    const key = busyKey(NEW_ROW);
+    if (busy) newRowBusyRef.current.add(key);
+    else newRowBusyRef.current.delete(key);
+    newRowBusy.setBusy(key, busy);
+    onImageBusyChange?.(key, busy);
+  };
 
   const canAdd = draft.name.trim().length > 0 && /^\d+(\.\d+)?$/.test(draft.unitPrice);
 
   function handleAdd() {
-    if (!canAdd) return;
+    if (!canAdd || newRowBusyRef.current.size > 0) return;
     addPreset({
       name: draft.name.trim(),
       unitPrice: draft.unitPrice,
@@ -94,6 +153,8 @@ export function ProductPresetManager({
       image: draft.image.trim() || undefined,
       category: draft.category.trim() || undefined,
     });
+    // 追加のフォームを空にする前に番号を進める (前に始まって届いていない画像を、空にしたフォームに入れない)。
+    images.advance(NEW_ROW);
     setDraft(EMPTY_DRAFT);
   }
 
@@ -176,6 +237,8 @@ export function ProductPresetManager({
                   type="button"
                   onClick={() => {
                     if (window.confirm(t('removeConfirm', { name: p.name }))) {
+                      // 消した行に向けて送っている画像は、届いても入れない (同じ id の行がまたできても)。
+                      images.advance(rowKey(p.id));
                       removePreset(p.id);
                     }
                   }}
@@ -189,6 +252,25 @@ export function ProductPresetManager({
                   チェックボックスを移動 (主行は商品名を広く取る)。カテゴリーは別グループに分離。 */}
               <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-2">
                 {/* 画像 URL は幅が足りないとき縮み切らずに次の行へ回す (表示/おすすめ/カテゴリーに押されて幅 0 にならないように)。 */}
+                {imageFields ? (
+                  // 画像の欄 (アップロード)。本人・段階が替わったら作り直す (前に始まった送信をやめる)。結果は最新の一覧の
+                  // 同じ id の行の image だけに入る (updatePreset・行が消えていたら入らない)。
+                  <div className="w-full">
+                    <ImageField
+                      key={`${imageScope.key}:${rowKey(p.id)}`}
+                      id={`${formId}-image-${i}`}
+                      label={t('imageUploadLabel')}
+                      urlLabel={t('imageLabel')}
+                      value={p.image ?? ''}
+                      onChange={(url) => updatePreset(p.id, { image: url.trim() || undefined })}
+                      purpose="preset"
+                      onBusyChange={(busy) => onImageBusyChange?.(busyKey(rowKey(p.id)), busy)}
+                      operation={images.operation(rowKey(p.id))}
+                      urlMaxLength={PRESET_IMAGE_MAX}
+                      previewClassName="h-16 w-16 rounded-lg"
+                    />
+                  </div>
+                ) : (
                 <div className="flex min-w-[10rem] flex-1 items-center gap-2">
                   {p.image && <PresetThumbnail url={p.image} />}
                   <input
@@ -196,12 +278,15 @@ export function ProductPresetManager({
                     value={p.image ?? ''}
                     aria-label={t('imageLabel')}
                     placeholder={t('imagePlaceholder')}
-                    onChange={(e) =>
-                      updatePreset(p.id, { image: e.target.value.trim() || undefined })
-                    }
+                    onChange={(e) => {
+                      // 手で書いた URL が最後の操作 (画像の欄から切り替わる前に始まった送信の結果で上書きしない)。
+                      images.advance(rowKey(p.id));
+                      updatePreset(p.id, { image: e.target.value.trim() || undefined });
+                    }}
                     className="h-11 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
                   />
                 </div>
+                )}
                 {/* 表示 (有効) + おすすめ (主行から移動・商品名を広く取るため)。 */}
                 <label className="flex min-h-11 shrink-0 items-center gap-1.5 text-xs text-slate-500">
                   <input
@@ -343,25 +428,65 @@ export function ProductPresetManager({
               className="h-11 w-28 rounded-md border border-slate-300 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
             />
           </Field>
+          {imageFields ? (
+            <div className="w-full">
+              <ImageField
+                key={`${imageScope.key}:${NEW_ROW}`}
+                id={`${formId}-image`}
+                label={t('imageUploadLabel')}
+                urlLabel={t('imageLabel')}
+                value={draft.image}
+                onChange={(url) => setDraft((d) => ({ ...d, image: url }))}
+                purpose="preset"
+                onBusyChange={onNewRowBusyChange}
+                operation={images.operation(NEW_ROW)}
+                urlMaxLength={PRESET_IMAGE_MAX}
+                hint={
+                  <p className="text-xs leading-relaxed text-slate-500">
+                    {tImage('hint', { max: IMAGE_MAX_EDGE.preset })}
+                  </p>
+                }
+                urlHint={
+                  <p className="mt-1 text-xs text-slate-500">
+                    {t('imageHint')}{' '}
+                    <Link
+                      href={`/${locale}/guide/image-url`}
+                      prefetch={false}
+                      className="font-medium text-emerald-700 underline underline-offset-2 hover:text-emerald-900"
+                    >
+                      {t('imageGuideLink')}
+                    </Link>
+                  </p>
+                }
+                previewClassName="h-16 w-16 rounded-lg"
+              />
+            </div>
+          ) : (
           <Field label={t('imageLabel')} htmlFor={`${formId}-image`}>
             <input
               id={`${formId}-image`}
               type="url"
               value={draft.image}
-              onChange={(e) => setDraft((d) => ({ ...d, image: e.target.value }))}
+              onChange={(e) => {
+                images.advance(NEW_ROW);
+                setDraft((d) => ({ ...d, image: e.target.value }));
+              }}
               placeholder={t('imagePlaceholder')}
               className="h-11 w-40 rounded-md border border-slate-300 px-2 text-base placeholder:text-slate-500 focus:border-brand focus:outline-none sm:text-sm"
             />
           </Field>
+          )}
           <button
             type="button"
             onClick={handleAdd}
-            disabled={!canAdd}
+            disabled={!canAdd || newRowBusy.busy}
             className="h-11 rounded-lg bg-brand px-4 text-sm font-semibold text-white hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             {t('addButton')}
           </button>
         </div>
+        {/* 画像の欄のときは、この案内を追加のフォームの「URL で指定する ›」の中に出す。 */}
+        {imageFields ? null : (
         <p className="mt-2 text-xs text-slate-500">
           {t('imageHint')}{' '}
           <Link
@@ -372,6 +497,10 @@ export function ProductPresetManager({
             {t('imageGuideLink')}
           </Link>
         </p>
+        )}
+        {imageScope.access === 'signIn' ? (
+          <p className="mt-1 text-xs text-slate-600">{tImage('signInToUpload')}</p>
+        ) : null}
       </div>
     </div>
   );

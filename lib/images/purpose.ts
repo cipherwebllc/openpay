@@ -26,6 +26,12 @@ export const IMAGE_MAX_EDGE: Record<ImagePurpose, number> = {
   preset: 800,
 };
 
+/**
+ * モバイル注文の店のカバー (横長・注文ページのヘッダーの背景) の長辺。店のアイコンとカバーは同じ用途 (storefront・path の 1 段は
+ * 1 つ) で、前処理の長辺だけを変える (アイコンは IMAGE_MAX_EDGE.storefront = 512)。
+ */
+export const STOREFRONT_COVER_MAX_EDGE = 1280;
+
 /** 1 枚の上限 (server が本文をここまでしか読まない・ブラウザはこの内側に収める)。 */
 export const IMAGE_UPLOAD_MAX_BYTES = 1024 * 1024;
 

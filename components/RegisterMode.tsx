@@ -45,6 +45,7 @@ import { switchTokenKeepingPrefs, useQrSettings, withChain } from '@/hooks/useQr
 import { useReceiverAutofill, type ReceiverSource } from '@/hooks/useReceiverAutofill';
 import { useResolveAddress } from '@/hooks/useResolveAddress';
 import { useProductPresets, type ProductPreset } from '@/hooks/useProductPresets';
+import { useImageBusyKeys } from '@/hooks/useImageUpload';
 import { presetsToMenu } from '@/hooks/useMobileOrderDraft';
 import { useShopLive } from '@/hooks/useShopLive';
 import { useSiweSession } from '@/hooks/useSiweSession';
@@ -186,7 +187,10 @@ function RegisterModeContent({
   const { settings, setSettings, hydrated } = useQrSettings({
     holdImport: cart.length > 0 || qrModalOpen || storeQr !== null,
   });
-  const presetStore = useProductPresets();
+  // 商品の画像をアップロード中の欄 (商品の編集のシート)。1 つでもあれば、別のタブの商品の取り込みを保留する (届いた画像の入れ先の
+  // 行が見えないまま入れ替わらないように・終わったら 1 度取り込む)。会計の値 (金額・カート・QR) には関わらない。
+  const presetImages = useImageBusyKeys();
+  const presetStore = useProductPresets({ holdImport: presetImages.busy });
   const origin = useOrigin();
   const { copied, copy } = useCopyToClipboard();
 
@@ -1244,6 +1248,8 @@ function RegisterModeContent({
             removePreset={presetStore.removePreset}
             movePreset={presetStore.movePreset}
             shopLive={shopLive}
+            hydrated={presetStore.hydrated}
+            onImageBusyChange={presetImages.setBusy}
           />
         </div>
       </ShopSettingsSheet>

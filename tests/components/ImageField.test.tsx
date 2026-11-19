@@ -125,6 +125,24 @@ describe('ImageField', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it('長辺 (maxEdge) を渡すと、その長辺で送る (同じ用途で大きさだけ違う欄: 店のアイコン 512・カバー 1280)', async () => {
+    const { container } = renderWithIntl(
+      <ImageField
+        id="cover"
+        label="カバー画像（任意）"
+        urlLabel="カバー画像の URL"
+        value=""
+        onChange={() => undefined}
+        purpose="storefront"
+        maxEdge={1280}
+        urlMaxLength={512}
+      />,
+    );
+    choose(container);
+    expect(uploadImageFile).toHaveBeenCalledWith(expect.any(File), 'storefront', expect.any(AbortSignal), 1280);
+    await act(async () => pending[0].resolve({ ok: true, url: NEW }));
+  });
+
   it('外すと空にする', () => {
     const { container } = renderWithIntl(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: T.remove }));

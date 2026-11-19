@@ -15,6 +15,8 @@
 // - 保存は「最新の保存値を読み直す → このタブで変えた単位だけを重ねる → 書く」。Web Locks があれば key ごとの
 //   ロックの中で行い、別のタブの読み直しと書き込みが交差しない (ほぼ同時に書いても片方の変更が消えない)。
 //   Web Locks が無い・拒否されたときは同じ書き込みをロックなしで行う (設定全体を書いていた従来より悪くならない)。
+//   1 つのキーに一覧が丸ごと入っている設定 (レジの商品) は、各 hook が rules.rebase を宣言すると、別のタブがそのキーを
+//   書き換えていたときに、このタブの変更 (画像だけ) を最新の一覧の同じ行に重ねて書く (別のタブの改名・並べ替え・削除を残す)。
 //   書けたときだけ base を進める (保存に失敗したら、次の変更のときにもう一度書く)。重ねた結果の組み合わせが崩れる
 //   (宣言していない組の片方ずつが混ざり sanitize で直される) なら書かず、このタブの未保存の変更を取り下げて最新の
 //   保存値を取り込む (再読み込みで黙って直される値を保存しない)。
@@ -52,7 +54,55 @@ type Stored = Record<string, unknown>;
 export type SettingsSyncRules<T> = {
   groups?: readonly (readonly (keyof T & string)[])[];
   importable?: { readonly [K in keyof T]?: (value: T[K]) => boolean };
+  /**
+   * 書くときに、このタブが揃えた後で別のタブがそのキーを書き換えていた (土台にした保存値 ≠ base) なら、このタブの変更を最新の
+   * 保存値に重ね直す (キーごと・純関数・組 groups のキーには使わない)。local はこのタブの値、base はこのタブが最後に揃えた値、
+   * latest は最新の保存値 (base と latest は保存の JSON のままの値なので、形を確かめてから使う)。重ね直せないときは null を
+   * 返す (従来どおりこのタブの値で書く)。重ね直した値は保存に書き、書けたら、sanitize を通しても変わらず importable を満たす
+   * ときだけ画面と保存の基準 (base) の両方に入れる (次の書き込みでこのタブの古い値に戻さない)。満たさない (別のタブの打ちかけの
+   * 値・壊れた値を含む) ときは、画面はこのタブの値のまま、base もこのタブの値にする (保存した値は書き戻さない)。
+   * 使うのは、1 つのキーに丸ごと入っている一覧 (レジの商品) の、取り込みを保留している間に届いた変更 (画像のアップロードの
+   * 結果) を、別のタブの改名・並べ替え・行の削除を消さずに書くため。
+   */
+  rebase?: { readonly [K in keyof T]?: (local: T[K], base: unknown, latest: unknown) => T[K] | null };
 };
+
+function isStored(value: unknown): value is Stored {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * 行の一覧 (各行に文字列の id) の rebase (SettingsSyncRules.rebase): このタブの変更が「base と同じ行・同じ順のまま、field だけ」
+ * なら、その変更を最新の一覧の同じ id の行の field だけに重ねる (別のタブの改名・並べ替え・行の削除・追加は残り、消えた行には
+ * 入れない)。別のタブも同じ行の field を変えていた (最新 ≠ base) ら、保存済みの値を残す。field 以外の変更 (名前・並べ替え・
+ * 追加・削除) を含む・形が読めないときは null (従来どおりこのタブの一覧で書く)。
+ */
+export function rebaseRowField<Row extends { id: string }>(field: Exclude<keyof Row, 'id'> & string) {
+  return (local: Row[], base: unknown, latest: unknown): Row[] | null => {
+    if (!Array.isArray(local) || !Array.isArray(base) || !Array.isArray(latest)) return null;
+    if (local.length !== base.length) return null;
+    const changes = new Map<string, { from: unknown; to: unknown }>();
+    for (let index = 0; index < local.length; index += 1) {
+      const mine = local[index] as unknown as Stored;
+      const synced = base[index] as unknown;
+      if (!isStored(mine) || !isStored(synced) || typeof mine.id !== 'string' || synced.id !== mine.id) return null;
+      const { [field]: mineValue, ...mineRest } = mine;
+      const { [field]: syncedValue, ...syncedRest } = synced;
+      if (!sameJson(mineRest, syncedRest)) return null;
+      if (!sameJson(mineValue, syncedValue)) changes.set(mine.id, { from: syncedValue, to: mineValue });
+    }
+    if (changes.size === 0) return null;
+    if (!latest.every((row) => isStored(row) && typeof row.id === 'string')) return null;
+    return (latest as Stored[]).map((row) => {
+      const change = changes.get(row.id as string);
+      if (!change || !sameJson(row[field], change.from)) return row;
+      const next: Stored = { ...row };
+      if (change.to === undefined) delete next[field];
+      else next[field] = change.to;
+      return next;
+    }) as unknown as Row[];
+  };
+}
 
 const NO_RULES: SettingsSyncRules<never> = {};
 
@@ -213,6 +263,8 @@ export function useLocalStorageSettings<T extends object>(
     if (keys.length === 0 && !migrate) return;
     const latest = readStored(storageKey);
     let next: Stored;
+    // rebase で最新の保存値に重ね直したキーと、その値 (書けたら画面と base にも入れる)。
+    const rebased = new Map<string, unknown>();
     if (!latest) {
       // 保存値が無い・壊れているときは設定全体を書く (初めて開いたとき・従来と同じ)。
       next = { ...local };
@@ -225,7 +277,22 @@ export function useLocalStorageSettings<T extends object>(
           ? base
           : (sanitize(latest as Partial<T>) as Stored);
       next = { ...ground };
-      for (const k of keys) assign(next, k, local);
+      const rebaseRules = rules.rebase as
+        | Record<string, ((local: unknown, base: unknown, latest: unknown) => unknown) | undefined>
+        | undefined;
+      for (const k of keys) {
+        // 別のタブがこのキーを書き換えていたら、決まり (rebase) があれば、このタブの変更を最新の保存値に重ね直す。
+        const rebase = rebaseRules?.[k];
+        if (rebase && k in ground && !sameJson(ground[k], base[k])) {
+          const merged = rebase(local[k], base[k], ground[k]);
+          if (merged !== null && merged !== undefined) {
+            next[k] = merged;
+            rebased.set(k, merged);
+            continue;
+          }
+        }
+        assign(next, k, local);
+      }
       // 別のタブの値と混ざった (このタブの値だけではない) ときだけ、重ねた組み合わせが崩れていないかを確かめる。
       if (changedKeys(next, local).length > 0 && mixBreaks(next, local, ground, sanitize)) {
         // 崩れた組み合わせは書かない (再読み込みで sanitize が黙って直し、どちらの変更とも違う値になる)。このタブの
@@ -245,11 +312,34 @@ export function useLocalStorageSettings<T extends object>(
     }
     if (!safeSet(storageKey, next)) return;
     migrateRef.current = false;
+    // 重ね直した値を画面に取り込めるか (保存に重ねることと、画面に出すことを分ける)。重ね直した値には別のタブの保存値がその
+    // まま入っている (打ちかけの空の価格・壊れた値もありうる) ので、別のタブの値の取り込み (mergeRemote) と同じく、sanitize を
+    // 通しても変わらず rules.importable を満たすときだけ画面に出す。
+    const canonicalNext = rebased.size > 0 ? (sanitize(next as Partial<T>) as Stored) : null;
+    const importable = rules.importable as Record<string, ((value: unknown) => boolean) | undefined> | undefined;
+    const screenable = (k: string) =>
+      canonicalNext !== null && sameJson(canonicalNext[k], next[k]) && (importable?.[k]?.(next[k]) ?? true);
     // 書いた単位だけを保存済みにする (それ以外の別のタブの変更は、前面に戻ったときに取り込む)。
     setSynced((cur) => {
       const nextBase: Stored = { ...cur.base };
       for (const k of keys) assign(nextBase, k, next);
-      return { settings: cur.settings, base: nextBase };
+      if (rebased.size === 0) return { settings: cur.settings, base: nextBase };
+      const settings: Stored = { ...(cur.settings as Stored) };
+      for (const [k, value] of rebased) {
+        if (settings[k] !== local[k]) {
+          // 書く値を読んだ後にこのタブで変えていたら (読み直しから確定までの間の変更)、その値を残し、そのキーの base も進めない
+          // (次の書き込みが、書いた値をもう一度「別のタブの変更」として見て重ね直す)。
+          assign(nextBase, k, base);
+        } else if (screenable(k)) {
+          // 画面にも書いた値を出す (別のタブの改名・並べ替え・行の削除を見せ、次の書き込みで古い一覧に戻さない)。
+          settings[k] = value;
+        } else {
+          // 画面には出せない (sanitize で直る行がある): 画面はこのタブの値のまま、base もこのタブの値にする (次の effect で
+          // 保存した値を書き戻さない)。保存値が sanitize を通るようになったら、前面に戻ったときに今までどおり取り込む。
+          assign(nextBase, k, local);
+        }
+      }
+      return { settings: settings as T, base: nextBase };
     });
   }, [storageKey, sanitize, rules]);
 

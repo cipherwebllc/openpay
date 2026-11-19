@@ -7,14 +7,20 @@
 //
 // react-query を使うため、親 (MobileOrderBuilder) は env.enableHandles でこのパネルの**マウント自体**
 // をゲートする (handles OFF の単体テストで QueryClient を要求しないため)。
+//
+// 店のアイコン・カバーの画像の欄 (アップロード): 出すかは /api/auth/siwe/me の imageUpload (この部品が既に読むセッション)。
+// 親 (MobileOrderBuilder) へは描画の確定 (layout) で知らせる (onImageUploadChange)。親が画像を送っている間 (imageUploadBusy・
+// 最後の 1 欄が終わるまで) は、公開のボタン (帯の 2 つ)・公開中の店の自動の読み込み・手動の「読み込む」を止める (押した処理の
+// 中でも確かめる): 届く前に公開すると画像が抜け、読み込むと届いた画像が読み込んだ下書きに入るため。
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocale, useTranslations } from 'next-intl';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '@/lib/env';
 import { MobileOrderPlacardModal } from '@/components/MobileOrderPlacardModal';
 import { useSiweSession } from '@/hooks/useSiweSession';
+import { imageUploadScopeOf, type ImageUploadAccess } from '@/hooks/useImageUpload';
 import { SignInGate } from '@/components/SignInGate';
 import { useOrigin } from '@/hooks/useOrigin';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
@@ -45,6 +51,8 @@ export function StorefrontPublishPanel({
   onToggleAccepting,
   barSlots = [],
   blockedReason,
+  onImageUploadChange,
+  imageUploadBusy = false,
 }: {
   /** 公開する店舗固有部分。メニュー未充足など公開不可なら null (公開ボタンを無効化)。 */
   storefront: StorefrontParts | null;
@@ -68,10 +76,24 @@ export function StorefrontPublishPanel({
   barSlots?: ReadonlyArray<HTMLElement | null>;
   /** 下書きに直すところがあり公開させないときの理由 (例: 値引きが範囲外)。無ければ従来どおり。 */
   blockedReason?: string;
+  /**
+   * 店のアイコン・カバーの画像の欄を出すかを親へ知らせる (/api/auth/siwe/me の imageUpload・imageUploadOpen から
+   * hooks/useImageUpload の imageUploadScopeOf)。key は本人・段階が替わったら変わる (親は旧世代のアップロードを失効させる)。
+   */
+  onImageUploadChange?: (access: ImageUploadAccess, key: string) => void;
+  /** 店の画像をアップロード中 (親の画像の欄・1 欄でも)。その間は公開と読み込みを止める。 */
+  imageUploadBusy?: boolean;
 }) {
   const t = useTranslations('MobileOrder');
   const locale = useLocale();
-  const { isSignedIn, sessionAddress } = useSiweSession();
+  const session = useSiweSession();
+  const { isSignedIn, sessionAddress } = session;
+  const imageScope = imageUploadScopeOf(session);
+  // 描画の確定 (layout) で知らせる: effect まで待つと、off を読んだ描画の後に届いた古いアップロードの結果が、まだ画像の欄のままの
+  // 親に入る (親は同じ確定の中で欄を外し、操作の番号を進める)。
+  useLayoutEffect(() => {
+    onImageUploadChange?.(imageScope.access, imageScope.key);
+  }, [onImageUploadChange, imageScope.access, imageScope.key]);
   const origin = useOrigin();
   const linkCopy = useCopyToClipboard();
   const qc = useQueryClient();
@@ -156,6 +178,8 @@ export function StorefrontPublishPanel({
   useEffect(() => {
     // isSignedIn = セッションと接続中のウォレットが一致 (別のウォレットのセッション・キャッシュから読み込まない)。
     if (!canAutoLoad || !onLoadStorefront || !isSignedIn || !sessionAddress || !mine.isSuccess) return;
+    // 店の画像を送っている間は読み込まない (届いた画像が読み込んだ下書きに入る)。終わってからまだ手付かずなら、そのとき読み込む。
+    if (imageUploadBusy) return;
     if (autoLoadTried.current === sessionAddress) return;
     autoLoadTried.current = sessionAddress;
     const live = handles.filter((hh) => hh.storefront);
@@ -163,7 +187,7 @@ export function StorefrontPublishPanel({
     setSelected(live[0].handle);
     onLoadStorefront(live[0].storefront, live[0].config.to);
     setAutoLoaded(true);
-  }, [canAutoLoad, onLoadStorefront, isSignedIn, sessionAddress, mine.isSuccess, handles]);
+  }, [canAutoLoad, onLoadStorefront, isSignedIn, sessionAddress, mine.isSuccess, handles, imageUploadBusy]);
 
   const publish = useMutation({
     mutationFn: async () => {
@@ -241,7 +265,7 @@ export function StorefrontPublishPanel({
     ? selectedHandle.storefront.acceptingOrders !== false
     : null;
   const canPublish =
-    isSignedIn && !!storefront && !!selectedHandle && !publish.isPending && !blockedReason;
+    isSignedIn && !!storefront && !!selectedHandle && !publish.isPending && !blockedReason && !imageUploadBusy;
   const publishLabel = publish.isPending
     ? t('publishing')
     : selectedHandle?.storefront
@@ -258,7 +282,9 @@ export function StorefrontPublishPanel({
           ? t('barReasonNoHandle')
           : !storefront
             ? t('barReasonNoMenu')
-            : (blockedReason ?? null);
+            : imageUploadBusy
+              ? t('barReasonImageBusy')
+              : (blockedReason ?? null);
   const barStatus = hasUnpublishedChanges
     ? t('publishStatusUnpublishedChanges')
     : selectedHandle?.storefront
@@ -470,8 +496,9 @@ export function StorefrontPublishPanel({
                   <div className="mt-1 flex gap-3">
                     <button
                       type="button"
+                      disabled={imageUploadBusy}
                       onClick={() => {
-                        if (!selectedHandle?.storefront) return;
+                        if (!selectedHandle?.storefront || imageUploadBusy) return;
                         onLoadStorefront(selectedHandle.storefront, selectedHandle.config.to);
                         setConfirmLoad(false);
                       }}
@@ -491,6 +518,7 @@ export function StorefrontPublishPanel({
               ) : (
                 <button
                   type="button"
+                  disabled={imageUploadBusy}
                   onClick={() => setConfirmLoad(true)}
                   className="text-xs font-medium text-slate-500 underline underline-offset-2 hover:text-slate-700"
                 >
@@ -539,7 +567,11 @@ export function StorefrontPublishPanel({
               <button
                 type="button"
                 disabled={!canPublish}
-                onClick={() => publish.mutate()}
+                onClick={() => {
+                  // 押した処理の中でも確かめる (画像を送っている間・読み込み中の公開を止める)。
+                  if (!canPublish) return;
+                  publish.mutate();
+                }}
                 className="inline-flex shrink-0 items-center justify-center rounded-xl bg-brand px-5 py-3 text-base font-bold text-white transition-transform hover:bg-brand-dark active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 {publishLabel}

@@ -326,12 +326,17 @@ const SYNC_RULES: SettingsSyncRules<MobileOrderDraft> = {
   importable: { receiver: isSettledReceiverInput },
 };
 
-export function useMobileOrderDraft() {
+/**
+ * holdImport: 別のタブの下書きの取り込みを保留する (店のアイコン・カバーをアップロードしている間・hooks/useLocalStorageSettings)。
+ * 送っている間に別のタブの値を取り込むと、届いた画像がその値を黙って上書きするため、終わってから 1 度取り込む。
+ */
+export function useMobileOrderDraft(holdImport = false) {
   const { settings, setSettings, hydrated } = useLocalStorageSettings<MobileOrderDraft>(
     STORAGE_KEY,
     DEFAULT_MOBILE_ORDER_DRAFT,
     sanitize,
     SYNC_RULES,
+    holdImport,
   );
 
   // useReceiverAutofill 用: receiver と source をまとめて更新する安定 setter。

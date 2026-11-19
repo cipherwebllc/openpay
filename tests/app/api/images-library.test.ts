@@ -1046,7 +1046,7 @@ describe('images library: 200 枚 → 削除 → アップロードが通る', (
   });
 });
 
-describe('/api/auth/siwe/me の画像の 2 つの値 (env だけ・true のときだけ足す)', () => {
+describe('/api/auth/siwe/me の画像の 3 つの値 (env だけ・true のときだけ足す)', () => {
   async function me() {
     const response = await siweMe();
     return response.json();
@@ -1059,7 +1059,7 @@ describe('/api/auth/siwe/me の画像の 2 つの値 (env だけ・true のと�
     }
   });
 
-  it('admin: 運営者は imageUpload と imageUploadSignIn・運営者でない本人と未サインインは imageUploadSignIn だけ', async () => {
+  it('admin: 運営者は imageUpload と imageUploadSignIn・運営者でない本人と未サインインは imageUploadSignIn だけ (imageUploadOpen は足さない)', async () => {
     expect(await me()).toEqual({ ok: true, address: OWNER, imageUpload: true, imageUploadSignIn: true });
     readSession.mockResolvedValue({ status: 'authenticated', address: OTHER });
     expect(await me()).toEqual({ ok: true, address: OTHER, imageUploadSignIn: true });
@@ -1067,18 +1067,22 @@ describe('/api/auth/siwe/me の画像の 2 つの値 (env だけ・true のと�
     expect(await me()).toEqual({ ok: true, address: null, imageUploadSignIn: true });
   });
 
-  it('all: サインインした誰でも imageUpload', async () => {
+  it('all: サインインした誰でも imageUpload・誰にでも imageUploadOpen (サインインの前の「サインインすると画像をアップロードできます」)', async () => {
     vi.stubEnv('IMAGE_UPLOAD_MODE', 'all');
     readSession.mockResolvedValue({ status: 'authenticated', address: OTHER });
-    expect(await me()).toEqual({ ok: true, address: OTHER, imageUpload: true, imageUploadSignIn: true });
+    expect(await me()).toEqual({ ok: true, address: OTHER, imageUpload: true, imageUploadSignIn: true, imageUploadOpen: true });
+    readSession.mockResolvedValue({ status: 'missing' });
+    expect(await me()).toEqual({ ok: true, address: null, imageUploadSignIn: true, imageUploadOpen: true });
   });
 
   it.each([
     ['秘密が無い', 'IMAGE_OWNER_KEY_SECRET'],
     ['Blob の store が無い', 'BLOB_STORE_ID'],
     ['IP の枠の秘密が無い', 'IP_HASH_SECRET'],
-  ])('%s ときはどちらも足さない (サインインの導線も出さない)', async (_label, key) => {
+  ])('%s ときはどれも足さない (サインインの導線も出さない)', async (_label, key) => {
     vi.stubEnv(key, '');
+    expect(await me()).toEqual({ ok: true, address: OWNER });
+    vi.stubEnv('IMAGE_UPLOAD_MODE', 'all');
     expect(await me()).toEqual({ ok: true, address: OWNER });
   });
 
