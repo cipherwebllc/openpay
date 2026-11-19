@@ -81,6 +81,12 @@ export function HandleProfileBuilder({
     enabled: hydrated && imageUploadAvailable,
     links: draft.links,
     setBusy: setImageBusy,
+    // リンクの行の画像は最新の下書きに重ねる (描画のときの links を丸ごと書き戻さない)。
+    updateLinks: (updateLinksOf) =>
+      setSettings((s) => {
+        const links = updateLinksOf(s.links);
+        return links === s.links ? s : { ...s, links };
+      }),
   });
   const { address: connected } = useAccount();
   const origin = useOrigin();

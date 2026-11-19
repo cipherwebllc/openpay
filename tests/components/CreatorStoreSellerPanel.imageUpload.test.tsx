@@ -492,3 +492,50 @@ describe('imageUpload が true のとき', () => {
     expect(prepare.upload).toHaveBeenCalledWith(expect.objectContaining({ name: 'b.png' }), 'product');
   });
 });
+
+/** act の外で file の欄に画像を選ぶ (React が確定した直後・effect の前の画面を、同じ tick で見るため)。 */
+function pickOutsideAct(input: HTMLInputElement, name = 'photo.jpg') {
+  Object.defineProperty(input, 'files', { configurable: true, value: [new File(['raw'], name, { type: 'image/jpeg' })] });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+describe('確定の順 (プロフの PR のレビュー 1 回目・共通の useImageUpload)', () => {
+  it.each([
+    ['表紙', () => fileInputIn(coverGroup())],
+    ['追加画像', () => fileInputIn(galleryGroup())],
+  ])('%s の画像を選んだ同じ tick で保存のボタンが止まり、Enter の送信でも保存しない', async (_label, inputOf) => {
+    stubApi({ imageUpload: true });
+    renderPanel();
+    await screen.findByRole('heading', { name: '新しい商品' });
+    fireEvent.change(screen.getByLabelText('商品名'), { target: { value: '新しい商品' } });
+    fireEvent.change(screen.getByLabelText(S.priceLabel), { target: { value: '500' } });
+    fireEvent.change(document.getElementById('creator-store-product-content')!, { target: { value: 'https://example.com/file' } });
+    const submit = screen.getByRole('button', { name: S.createProduct });
+    expect(submit).toBeEnabled();
+
+    pickOutsideAct(inputOf());
+    // 同じ tick (effect を待たない): 保存のボタンはもう止まっている。
+    expect(submit).toBeDisabled();
+    screen.getByLabelText('商品名').closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    submit.click();
+    await waitFor(() => expect(uploads).toHaveLength(1));
+    expect(saveCall()).toBeUndefined();
+  });
+
+  it('追加画像: 結果と同じ確定の前に外した画像は、届いた画像を足しても戻らない (最新の値の末尾に足す)', async () => {
+    stubApi({ imageUpload: true });
+    renderPanel();
+    fireEvent.click(await screen.findByRole('button', { name: '編集' }));
+    await screen.findByRole('heading', { name: '商品を編集' });
+    pick(fileInputIn(galleryGroup()), 'g3.jpg');
+    await waitFor(() => expect(uploads).toHaveLength(1));
+    await act(async () => {
+      within(galleryGroup()).getAllByRole('button', { name: I.remove })[0].click();
+      uploads[0].resolve(jsonResponse({ ok: true, url: `${BLOB}/product/g3.jpg` }));
+    });
+    fireEvent.click(within(galleryGroup()).getByRole('button', { name: I.useUrl }));
+    await waitFor(() =>
+      expect(screen.getByLabelText(S.galleryUrlsLabel)).toHaveValue(`https://images.example/g2.png\n${BLOB}/product/g3.jpg`),
+    );
+  });
+});

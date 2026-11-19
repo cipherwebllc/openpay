@@ -8,6 +8,7 @@ import { UserRound } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ImageField } from '@/components/ImageField';
 import { SectionCard } from '@/components/SectionCard';
+import { nextImageOperation } from '@/hooks/useImageUpload';
 import { MAX_AVATAR_URL_LEN, MAX_BIO_LEN } from '@/lib/handle';
 import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
 import { DEFAULT_PROFILE_DRAFT, type HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
@@ -110,13 +111,17 @@ export function ProfileSection({
             previewClassName="h-20 w-20 rounded-full"
           />
         ) : (
-        // images.enabled が false の画面は今のまま (この中は変えない)。
+        // images.enabled が false の画面は今のまま (DOM は変えない)。手入力はアバターの操作の番号を進める (画像の欄から
+        // URL の欄へ切り替わる前に始まったアップロードの結果で、手で入れた値を上書きしない)。
         <Field label={t('avatarLabel')} hint={t('avatarHint')}>
           <input
             type="url"
             value={draft.avatar}
             placeholder="https://"
-            onChange={(e) => update({ avatar: e.target.value })}
+            onChange={(e) => {
+              nextImageOperation(images.avatar.operation);
+              update({ avatar: e.target.value });
+            }}
             className={inputClass}
           />
         </Field>

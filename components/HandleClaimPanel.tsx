@@ -12,7 +12,7 @@
 // (静かに複製が生まれるのが最大の混乱源だったため)。公開/更新は成功メッセージを出す。
 
 import { resolveTipCapability } from '@/lib/url/tip';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -253,9 +253,12 @@ export function HandleClaimPanel({
     queryFn: fetchMyHandles,
   });
 
-  // 画像の欄を出すか。cache に残った別のセッションの値を、サインインしていない画面に使わない。
-  const imageUploadAvailable = isSignedIn && mine.data?.imageUpload === true;
-  useEffect(() => {
+  // 画像の欄を出すか。cache に残った別のセッションの値を、サインインしていない画面に使わない。今の取得が成功しているときだけ
+  // (再取得が 401 などで失敗すると、react-query は前の成功の data も残すので、data だけでは見ない)。
+  const imageUploadAvailable = isSignedIn && mine.isSuccess && mine.data?.imageUpload === true;
+  // 親へは描画の確定 (layout) で知らせる: effect まで待つと、false を読んだ描画の後に届いた古いアップロードの結果が、まだ
+  // 画像の欄のままの親に入る (親は同じ確定の中で欄を外し、操作の番号を進める)。
+  useLayoutEffect(() => {
     onImageUploadChange?.(imageUploadAvailable);
   }, [onImageUploadChange, imageUploadAvailable]);
 

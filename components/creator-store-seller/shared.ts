@@ -3,9 +3,16 @@
 import type { HostedLabel } from '@/lib/x402/hostedStore';
 import type { StoreLicenseProduct } from '@/lib/licenseUi';
 import type { StoreUsageTerms } from '@/lib/store/usageTerms';
+import type { ProductForm } from '@/lib/store/productForm';
 
 // 出品フォームの型の本体は lib/store/productForm.ts (AI 出品アシスタントの許可リストが lib/ から ProductForm を網羅するため)。
 export type { ProductForm } from '@/lib/store/productForm';
+
+/**
+ * フォームの一部の書き換え (updateProduct)。関数なら最新のフォームから作る (画像のアップロードの結果を足すとき、描画のときの
+ * 値で上書きしない)。
+ */
+export type ProductFormPatch = Partial<ProductForm> | ((current: ProductForm) => Partial<ProductForm>);
 
 export type ProductSummary = StoreLicenseProduct & {
   registration?: { status: 'pending' | 'registered' | 'failed' };

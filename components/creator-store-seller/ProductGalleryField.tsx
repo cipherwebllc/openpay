@@ -29,11 +29,16 @@ export function galleryUrlsOf(value: string): string[] {
 type Props = {
   value: string;
   onChange: (value: string) => void;
+  /**
+   * アップロードした画像を、届いたときの最新の値の末尾に足す (親が関数で更新する)。描画のときの value から作った文字列を
+   * onChange で書き戻すと、確定の前に入ったほかの更新 (外した行など) を戻してしまう。
+   */
+  onAppend: (url: string) => void;
   onBusyChange: (busy: boolean) => void;
   isLicense: boolean;
 };
 
-export function ProductGalleryField({ value, onChange, onBusyChange, isLicense }: Props) {
+export function ProductGalleryField({ value, onChange, onAppend, onBusyChange, isLicense }: Props) {
   const t = useTranslations('CreatorStoreSeller');
   const tImage = useTranslations('ImageField');
   const fileInput = useRef<HTMLInputElement>(null);
@@ -41,8 +46,8 @@ export function ProductGalleryField({ value, onChange, onBusyChange, isLicense }
   const urls = galleryUrlsOf(value);
   const { busy, error, cancel, onFileChange } = useImageUpload({
     purpose: 'product',
-    // 届いたときの欄の値の末尾に足す (送っている間に外した・書き換えた行を戻さない)。
-    onUploaded: (url) => onChange([...galleryUrlsOf(value), url].join('\n')),
+    // 届いたときの最新の欄の値の末尾に足す (送っている間に外した・書き換えた行を戻さない)。
+    onUploaded: onAppend,
     onBusyChange,
   });
 

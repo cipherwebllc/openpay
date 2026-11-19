@@ -12,6 +12,7 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { nextImageOperation, type ImageOperationCounter } from '@/hooks/useImageUpload';
+import type { DraftLink } from '@/lib/handleProfileDraft';
 
 /** アップロード中の欄の集まり (key = 'avatar' | 'cover' | `link:<行の id>`)。 */
 export function useImageBusyKeys() {
@@ -69,14 +70,22 @@ export function deriveLinkRowIds(
   });
 }
 
-/** 今の下書きのリンクの行の id (行と同じ長さ)。前の描画と比べて決める (deriveLinkRowIds)。 */
-function useLinkRowIds(links: readonly object[]): readonly string[] {
+/**
+ * 今の下書きのリンクの行の id (行と同じ長さ)。前の描画と比べて決める (deriveLinkRowIds)。行の object から id を引く表
+ * (rowIdOf) にも入れる: アップロードの結果を最新の下書きの行に入れるとき (関数での更新の中・まだ描画していない行の配列) に、
+ * 位置ではなく object から行を探すため。
+ */
+function useLinkRowIds(links: readonly object[]): { ids: readonly string[]; rowIdOf: WeakMap<object, string> } {
+  const [rowIdOf] = useState(() => new WeakMap<object, string>());
   const [state, setState] = useState(() => ({ links, ids: links.map(() => newLinkRowId()) }));
-  if (state.links === links) return state.ids;
-  // 前の描画の情報から今の値を決める (React の「前の描画の情報を保存する」型: 描画の中で 1 度だけ setState し、すぐ描き直す)。
-  const ids = deriveLinkRowIds(state.links, state.ids, links);
-  setState({ links, ids });
-  return ids;
+  let ids = state.ids;
+  if (state.links !== links) {
+    // 前の描画の情報から今の値を決める (React の「前の描画の情報を保存する」型: 描画の中で 1 度だけ setState し、すぐ描き直す)。
+    ids = deriveLinkRowIds(state.links, state.ids, links);
+    setState({ links, ids });
+  }
+  links.forEach((link, index) => rowIdOf.set(link, ids[index]));
+  return { ids, rowIdOf };
 }
 
 function advanceAll(operations: ReadonlyMap<string, ImageOperationCounter>): void {
@@ -98,18 +107,26 @@ export type ProfileImageUploads = {
   /** draft.links と同じ長さ・同じ順の行の id。 */
   linkRowIds: readonly string[];
   link: (rowId: string) => ProfileImageField;
+  /**
+   * その行の画像を入れる (画像の欄の結果・外す・URL の手入力)。最新の下書きの中で行を id から探し、その行の imageUrl だけを
+   * 変える (描画のときの行の配列を丸ごと書き戻さない: 別の行の結果が同じ確定の前に入っていても消さない)。行が消えていたら入れない。
+   */
+  setLinkImage: (rowId: string, imageUrl: string) => void;
 };
 
 export function useProfileImageUploads({
   enabled,
   links,
   setBusy,
+  updateLinks,
 }: {
   enabled: boolean;
-  links: readonly object[];
+  links: readonly DraftLink[];
   setBusy: (key: string, busy: boolean) => void;
+  /** 最新の下書きの links を関数で更新する (親の setSettings の関数の形)。 */
+  updateLinks: (update: (current: DraftLink[]) => DraftLink[]) => void;
 }): ProfileImageUploads & { draftReplaced: () => void } {
-  const linkRowIds = useLinkRowIds(links);
+  const { ids: linkRowIds, rowIdOf } = useLinkRowIds(links);
   const [session, setSession] = useState(0);
   // 欄ごとの操作の番号 (中身を持たない)。enabled が false の間も残す (切り替えで番号を進めるため)。
   const operations = useRef(new Map<string, ImageOperationCounter>());
@@ -142,6 +159,18 @@ export function useProfileImageUploads({
     cover: field('cover'),
     linkRowIds,
     link: (rowId) => field(`link:${rowId}`),
+    setLinkImage: (rowId, imageUrl) =>
+      updateLinks((current) => {
+        const index = current.findIndex((link) => rowIdOf.get(link) === rowId);
+        const link = index < 0 ? undefined : current[index];
+        if (!link || link.kind === 'heading') return current;
+        const updated = { ...link, imageUrl };
+        // 次の描画の前に、同じ行への次の更新がこの行を探せるように (描画では deriveLinkRowIds も同じ id を引き継ぐ)。
+        rowIdOf.set(updated, rowId);
+        const next = [...current];
+        next[index] = updated;
+        return next;
+      }),
     // 下書きを丸ごと入れ替える操作 (編集に入る・やめる) の中で、入れ替える前に同期的に呼ぶ。欄の作り直し (session) は
     // 描画の確定のときなので、それより前に届いた結果 (自動で編集に入る effect・競合の「再読込」の後の編集など、クリックの
     // 外で入れ替えが予約された場合) も、番号で止める。

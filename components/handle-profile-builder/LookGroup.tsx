@@ -10,6 +10,7 @@ import { handleFontClass } from '@/components/handleFonts';
 import { HandleThemePicker } from '@/components/HandleThemePicker';
 import { ImageField } from '@/components/ImageField';
 import { OptionalGroup } from '@/components/OptionalGroup';
+import { nextImageOperation } from '@/hooks/useImageUpload';
 import { HANDLE_FONTS, MAX_COVER_URL_LEN } from '@/lib/handle';
 import { IMAGE_MAX_EDGE } from '@/lib/images/purpose';
 import type { HandleProfileDraft } from '@/hooks/useHandleProfileDraft';
@@ -111,13 +112,17 @@ export function LookGroup({
         />
       ) : (
       <>
-      {/* images.enabled が false の画面は今のまま (この中は変えない)。 */}
+      {/* images.enabled が false の画面は今のまま (DOM は変えない)。手入力はカバーの操作の番号を進める (画像の欄から
+          URL の欄へ切り替わる前に始まったアップロードの結果で、手で入れた値を上書きしない)。 */}
       <Field label={t('coverLabel')} hint={t('coverHint')}>
         <input
           type="url"
           value={draft.cover}
           placeholder="https://"
-          onChange={(e) => update({ cover: e.target.value })}
+          onChange={(e) => {
+            nextImageOperation(images.cover.operation);
+            update({ cover: e.target.value });
+          }}
           className={inputClass}
         />
       </Field>

@@ -7,6 +7,7 @@ import { Link2 } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { ImageField } from '@/components/ImageField';
 import { OptionalGroup } from '@/components/OptionalGroup';
+import { nextImageOperation } from '@/hooks/useImageUpload';
 import { ReorderableRow } from '@/components/ReorderableRow';
 import {
   isHandleEmbedUrl,
@@ -50,17 +51,6 @@ export function LinksGroup({
 }) {
   const t = useTranslations('HandleProfile');
   const tb = useTranslations('HandleProfileBuilder');
-
-  // 行の画像を入れる (画像の欄)。行は位置ではなく id で探す: アップロードの間に行を並べ替え・削除しても、送り始めた行に入れる
-  // (その行が消えていたら入れない)。
-  const setLinkImage = (rowId: string, imageUrl: string) => {
-    const index = images.linkRowIds.indexOf(rowId);
-    const link = index < 0 ? undefined : draft.links[index];
-    if (!link || link.kind === 'heading') return;
-    const next = [...draft.links];
-    next[index] = { ...link, imageUrl };
-    update({ links: next });
-  };
 
   const embedCount = draft.links.reduce(
     (count, link) =>
@@ -153,7 +143,9 @@ export function LinksGroup({
                         label={tb('linkImageLabel')}
                         urlLabel={tb('imageUrlLabel')}
                         value={l.imageUrl ?? ''}
-                        onChange={(imageUrl) => setLinkImage(images.linkRowIds[i], imageUrl)}
+                        // 行は位置ではなく id で探し、最新の下書きのその行だけを変える (並べ替え・削除・ほかの行の結果と重なっても、
+                        // 送り始めた行に入れる・消えた行には入れない)。
+                        onChange={(imageUrl) => images.setLinkImage(images.linkRowIds[i], imageUrl)}
                         purpose="link"
                         onBusyChange={images.link(images.linkRowIds[i]).onBusyChange}
                         operation={images.link(images.linkRowIds[i]).operation}
@@ -180,7 +172,8 @@ export function LinksGroup({
                     />
                   </label>
                   {images.enabled ? null : (
-                  // images.enabled が false の画面は今のまま (この中は変えない)。
+                  // images.enabled が false の画面は今のまま (DOM は変えない)。手入力はこの行の画像の操作の番号を進める
+                  // (画像の欄から URL の欄へ切り替わる前に始まったアップロードの結果で、手で入れた値を上書きしない)。
                   <label className="min-w-[10rem] flex-[2]">
                     <span className={linkFieldLabelClass}>
                       {tb('imageUrlLabel')}
@@ -191,6 +184,7 @@ export function LinksGroup({
                       placeholder="https://"
                       maxLength={MAX_LINK_IMAGE_URL_LEN}
                       onChange={(e) => {
+                        nextImageOperation(images.link(images.linkRowIds[i]).operation);
                         const next = [...draft.links];
                         next[i] = { ...l, imageUrl: e.target.value };
                         update({ links: next });

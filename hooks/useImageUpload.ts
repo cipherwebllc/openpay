@@ -1,13 +1,18 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from 'react';
+import { flushSync } from 'react-dom';
 import type { ImagePurpose } from '@/lib/images/purpose';
 import { uploadImageFile, type ImageUploadFailure } from '@/lib/images/uploadClient';
 
 // 画像の欄 (components/ImageField.tsx) と Store の追加画像の「画像を追加」が共有する、アップロードの状態。
 // - 1 度に 1 枚だけ送る (送っている間の 2 回目は送らない = 二重送信の防ぎ)。
 // - 取消 (cancel)・unmount の後に届いた古い応答は捨てる (フォームの値を上書きしない)。
-// - busy を親へ知らせる (親はアップロード中の保存を止める)。unmount でも false を知らせる。
+// - busy を親へ知らせる (親はアップロード中の保存を止める)。effect を待たず、送り始め・やめる・届いたときに、その場で
+//   (同じイベント・同じ描画の確定で) 知らせる: effect まで待つと「アップロード中」が出た後の次のクリックで保存・公開できて
+//   しまう。unmount でも false を知らせる。
+// - 届いた結果はその場で確定させる (flushSync): 確定を待つ間に来た別の更新 (ほかの欄の結果・手入力) と、描画のときの値を
+//   丸ごと書き戻す更新が重なって、片方が消えないように。入れ先は呼び元が最新の値に重ねる (関数で更新する) のが前提。
 // - 失敗は code を返すだけ: 元の値は呼び元が持ったまま (onUploaded は成功のときだけ呼ぶ)。
 // - operation (操作の番号) を渡すと「最後の操作だけが反映される」: 送り始めに番号を進め、届いたときに番号が進んでいたら
 //   入れない。同じ入れ先 (商品の表紙) を書き換える操作 = 表紙の欄のアップロード・AI の「この画像を表紙に使う」・URL の
@@ -60,10 +65,6 @@ export function useImageUpload({ purpose, onUploaded, onBusyChange, operation }:
     callbacks.current = { onUploaded, onBusyChange };
   });
 
-  useEffect(() => {
-    callbacks.current.onBusyChange?.(busy);
-  }, [busy]);
-
   useEffect(
     () => () => {
       request.current += 1;
@@ -83,6 +84,7 @@ export function useImageUpload({ purpose, onUploaded, onBusyChange, operation }:
     inFlight.current = false;
     setBusy(false);
     setError(null);
+    callbacks.current.onBusyChange?.(false);
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
@@ -98,19 +100,24 @@ export function useImageUpload({ purpose, onUploaded, onBusyChange, operation }:
       const startedAs = operation ? nextImageOperation(operation) : null;
       setBusy(true);
       setError(null);
+      // 親 (保存・公開のボタン) へは同じイベントの中で知らせる (この描画の確定で、ボタンも止まっている)。
+      callbacks.current.onBusyChange?.(true);
       const result = await uploadImageFile(file, purpose, abort.signal);
       if (id !== request.current) return;
       inFlight.current = false;
       controller.current = null;
-      setBusy(false);
-      // 送っている間にほかの操作が番号を進めていたら、その操作を残す (後から届いた画像で上書きしない)。もう最後の操作では
-      // ないので、失敗の文も出さない。
-      if (operation && operation.current !== startedAs) return;
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
-      callbacks.current.onUploaded(result.url);
+      flushSync(() => {
+        setBusy(false);
+        callbacks.current.onBusyChange?.(false);
+        // 送っている間にほかの操作が番号を進めていたら、その操作を残す (後から届いた画像で上書きしない)。もう最後の操作では
+        // ないので、失敗の文も出さない。
+        if (operation && operation.current !== startedAs) return;
+        if (!result.ok) {
+          setError(result.error);
+          return;
+        }
+        callbacks.current.onUploaded(result.url);
+      });
     },
     [purpose, operation],
   );

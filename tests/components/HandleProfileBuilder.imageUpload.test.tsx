@@ -7,7 +7,7 @@
 // 遅れて届いた結果を捨てる: URL の手入力・やめる→外す・リンクの行の削除と並べ替え・imageUpload の切り替え・下書きの入れ替え
 // (編集に入る・やめる) の後に届いたアップロードの結果は入れない。リンクの行は id で結ぶ (並べ替えても送り始めた行に入る)。
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, notifyManager } from '@tanstack/react-query';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import ja from '@/messages/ja.json';
@@ -20,6 +20,8 @@ const BLOB = 'https://teststore.public.blob.vercel-storage.com/v1/k';
 
 const h = vi.hoisted(() => ({
   signedIn: true,
+  /** GET /api/handle の HTTP status (200 以外は本文 { ok: false })。 */
+  mineStatus: 200,
   imageUpload: true as boolean | undefined,
   handles: [] as unknown[],
 }));
@@ -103,6 +105,7 @@ function stubApi() {
         return json({ ok: true, handle: 'alice', status: 'created', updatedAt: 500 }, 201);
       }
       if (url === '/api/handle') {
+        if (h.mineStatus !== 200) return json({ ok: false, error: 'unauthenticated' }, h.mineStatus);
         return json({
           ok: true,
           handles: h.handles,
@@ -202,6 +205,7 @@ async function renderWithImageFields() {
 
 beforeEach(() => {
   h.signedIn = true;
+  h.mineStatus = 200;
   h.imageUpload = true;
   h.handles = [];
   localStorage.clear();
@@ -530,5 +534,124 @@ describe('下書き', () => {
       { label: 'Blog', url: 'https://blog.example' },
       { label: 'Shop', url: 'https://shop.example', imageUrl: `${BLOB}/link/shop.jpg` },
     ]));
+  });
+});
+
+/** act の外で file の欄に画像を選ぶ (React が確定した直後・effect の前の画面を、同じ tick で見るため)。 */
+function pickOutsideAct(group: HTMLElement) {
+  const input = fileInputIn(group);
+  Object.defineProperty(input, 'files', {
+    configurable: true,
+    value: [new File(['raw'], 'photo.jpg', { type: 'image/jpeg' })],
+  });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+/** Response の代わり (json() が microtask だけで返る: 届く順を microtask の順で決めるため)。 */
+function plainResponse(body: unknown, status = 200): Response {
+  return { ok: status >= 200 && status < 300, status, json: async () => body } as unknown as Response;
+}
+
+describe('確定の順 (レビュー 1 回目)', () => {
+  it('画像を選んだ同じ tick で公開のボタン (2 か所) が止まり、押しても公開せず、前面に戻っても別のタブの下書きを取り込まない', async () => {
+    await renderWithImageFields();
+    pickOutsideAct(avatarGroup());
+    // 同じ tick (effect を待たない): 公開のボタンはもう止まっている。
+    expect(publishButtons()).toHaveLength(2);
+    for (const button of publishButtons()) expect(button).toBeDisabled();
+    // 別のタブが名前を変え、このタブが前面に戻った。
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...stored(), name: 'Alice (other tab)' }));
+    window.dispatchEvent(new Event('focus'));
+    publishButtons()[0].click();
+    publishButtons()[1].click();
+    await waitFor(() => expect(uploads).toHaveLength(1));
+    expect(posts).toHaveLength(0);
+    expect(screen.getByLabelText('表示名')).toHaveValue('Alice');
+    // 届いたら公開でき、取り込みも 1 度行う。
+    await answer(0, `${BLOB}/avatar/a.jpg`);
+    await waitFor(() => expect(screen.getByLabelText('表示名')).toHaveValue('Alice (other tab)'));
+    expect(stored().avatar).toBe(`${BLOB}/avatar/a.jpg`);
+  });
+
+  it('別々のリンクの行の結果が同じ確定の前に続けて届いても、両方の画像が残る', async () => {
+    await renderWithImageFields();
+    await pick(linkGroups()[0], 1);
+    await pick(linkGroups()[1], 2);
+    await act(async () => {
+      uploads[0].resolve(json({ ok: true, url: `${BLOB}/link/blog.jpg` }));
+      uploads[1].resolve(json({ ok: true, url: `${BLOB}/link/shop.jpg` }));
+    });
+    await waitFor(() =>
+      expect(storedLinks().map((link) => link.imageUrl)).toEqual([`${BLOB}/link/blog.jpg`, `${BLOB}/link/shop.jpg`]),
+    );
+  });
+
+  it('リンクの行の画像が届いた直後 (確定を待たずに) 同じ行のラベルを打っても、画像は消えない', async () => {
+    await renderWithImageFields();
+    await pick(linkGroups()[0], 1);
+    const label = screen.getAllByRole('textbox', { name: HB.linkLabel })[0];
+    await act(async () => {
+      uploads[0].resolve(plainResponse({ ok: true, url: `${BLOB}/link/blog.jpg` }));
+      // 届いた結果の処理 (microtask) が終わるまで進める。React の描画の確定は待たない。
+      for (let step = 0; step < 20; step += 1) await Promise.resolve();
+      fireEvent.change(label, { target: { value: 'My blog' } });
+    });
+    await waitFor(() =>
+      expect(storedLinks()[0]).toEqual({ label: 'My blog', url: 'https://blog.example', imageUrl: `${BLOB}/link/blog.jpg` }),
+    );
+  });
+
+  it('リンクの行の結果と同じ確定の前に、その行を消しても、ほかの行に入らない', async () => {
+    await renderWithImageFields();
+    await pick(linkGroups()[1], 1);
+    await act(async () => {
+      screen.getAllByRole('button', { name: HP.removeLink })[1].click();
+      uploads[0].resolve(json({ ok: true, url: `${BLOB}/link/late.jpg` }));
+    });
+    await waitFor(() => expect(storedLinks()).toEqual([{ label: 'Blog', url: 'https://blog.example' }]));
+  });
+
+  it('GET の imageUpload が false になった確定の直後に届いた古い応答は入らない (元のアバターのまま)', async () => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...DRAFT, avatar: 'https://images.example/old.png' }));
+    const { qc } = await renderWithImageFields();
+    await pick(avatarGroup(), 1);
+    // react-query の知らせを同期にし、act の外で: GET の取り直しが false を返す → HandleClaimPanel がすぐ描き直す (microtask)。
+    // その後に古い応答が届く (json() まで microtask だけ)。
+    notifyManager.setScheduler((callback) => callback());
+    try {
+      h.imageUpload = false;
+      qc.setQueryData<MineResponse>(myHandlesQueryKey(ADDR), (current) => ({ handles: current?.handles ?? [], max: 3, imageUpload: false }));
+      uploads[0].resolve(plainResponse({ ok: true, url: `${BLOB}/avatar/late.jpg` }));
+      await screen.findByRole('textbox', { name: /^アバター画像 URL/ });
+      await act(async () => {});
+    } finally {
+      notifyManager.setScheduler((callback) => setTimeout(callback, 0));
+    }
+    expect(stored().avatar).toBe('https://images.example/old.png');
+    expect(screen.getByRole('textbox', { name: /^アバター画像 URL/ })).toHaveValue('https://images.example/old.png');
+  });
+
+  it('持ち主の GET が成功 (true) の後の取り直しで 401 になったら、今の URL の欄に戻る (前の成功の値で欄を残さない)', async () => {
+    const { qc } = await renderWithImageFields();
+    h.mineStatus = 401;
+    await act(async () => {
+      await qc.refetchQueries({ queryKey: myHandlesQueryKey(ADDR) });
+    });
+    await screen.findByRole('textbox', { name: /^アバター画像 URL/ });
+    expect(screen.queryByRole('group', { name: HP.avatarImageLabel })).not.toBeInTheDocument();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  it('2 つの欄を同時に送り、片方だけ届いた時点でも公開のボタン (2 か所) は止まったまま', async () => {
+    await renderWithImageFields();
+    await pick(avatarGroup(), 1);
+    await pick(coverGroup(), 2);
+    await answer(0, `${BLOB}/avatar/a.jpg`);
+    expect(stored().avatar).toBe(`${BLOB}/avatar/a.jpg`);
+    for (const button of publishButtons()) expect(button).toBeDisabled();
+    expect(screen.getAllByText(HC.barReasonImageBusy)).toHaveLength(2);
+    await answer(1, `${BLOB}/cover/c.jpg`);
+    await expectPublishNotHeld();
+    for (const button of publishButtons()) expect(button).toBeEnabled();
   });
 });
