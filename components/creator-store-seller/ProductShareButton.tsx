@@ -30,7 +30,8 @@ function copyWithLegacySelection(value: string): boolean {
   }
 }
 
-async function copyProductLink(value: string): Promise<boolean> {
+/** 文字列をコピーする (AI 出品アシスタントの英語の紹介・X の投稿文のコピーも使う)。 */
+export async function copyText(value: string): Promise<boolean> {
   if (navigator.clipboard?.writeText) {
     try {
       await navigator.clipboard.writeText(value);
@@ -62,7 +63,7 @@ export function ProductShareButton({
   }, [copied]);
 
   const copy = async () => {
-    if (await copyProductLink(url)) setCopied(true);
+    if (await copyText(url)) setCopied(true);
   };
 
   return (

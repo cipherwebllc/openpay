@@ -184,6 +184,8 @@ function SignedInSellerPanel({
     [handle, sessionAddress],
   );
   const [productForm, setProductForm] = useState<ProductForm>(emptyForm);
+  // フォームを別の商品・新規に入れ替えた回数。AI 出品アシスタントの key にして、前の商品の案と「元に戻す」の履歴を捨てる。
+  const [formSession, setFormSession] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingProductState, setEditingProductState] =
     useState<EditingProductState | null>(null);
@@ -284,6 +286,7 @@ function SignedInSellerPanel({
         usdcEnabled: product.usdcEnabled === true,
       });
       setProductSaved(false);
+      setFormSession((current) => current + 1);
       setProductForm({
         productKind: product.productKind ?? 'digital',
         supply: String(product.license?.supply ?? 1),
@@ -397,6 +400,7 @@ function SignedInSellerPanel({
       if (refreshed.isSuccess) {
         setEditingId(null);
         setEditingProductState(null);
+        setFormSession((current) => current + 1);
         setProductForm(emptyForm);
         setProductSaved(true);
       }
@@ -430,6 +434,7 @@ function SignedInSellerPanel({
     setEditingId(null);
     setEditingProductState(null);
     setLicenseValidationError(false);
+    setFormSession((current) => current + 1);
     setProductForm(emptyForm);
     loadProduct.reset();
     saveProduct.reset();
@@ -504,6 +509,8 @@ function SignedInSellerPanel({
         cancelEdit={cancelEdit}
         saveProduct={saveProduct}
         loadProduct={loadProduct}
+        listingAssistant={sellerQuery.data?.listingAssistant === true}
+        formSession={formSession}
         onSubmit={(event) => {
           event.preventDefault();
           if (isLicense && !validLicenseForm(productForm, productForm.priceJpyc)) {
