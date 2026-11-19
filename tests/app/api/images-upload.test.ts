@@ -746,6 +746,22 @@ describe('images upload: 単調時計の期限 (timer の callback より先に�
     expect(failures()).toEqual(['route_deadline']);
   });
 
+  it('1 ページ目が続きありで返る間に期限をまたいだら、2 ページ目を読まず、全体の枠も put も使わず 503', async () => {
+    blob.list
+      .mockImplementationOnce(async () => {
+        now += IMAGE_UPLOAD_DEADLINE_MS;
+        return { blobs: [], hasMore: true, cursor: 'next' };
+      })
+      .mockResolvedValue({ blobs: [], hasMore: false });
+    const response = await POST(post());
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ ok: false, error: 'storage_unavailable' });
+    expect(blob.list).toHaveBeenCalledTimes(1);
+    expect(kv.kvIncr).not.toHaveBeenCalled();
+    expect(blob.put).not.toHaveBeenCalled();
+    expect(failures()).toEqual(['route_deadline', 'list_deadline']);
+  });
+
   it('全体の枠を数える間に期限をまたいだら、put をしない', async () => {
     kv.kvIncr.mockImplementation(async () => {
       now += IMAGE_UPLOAD_DEADLINE_MS + 1;

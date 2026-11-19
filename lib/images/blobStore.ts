@@ -98,13 +98,20 @@ export async function withBlobDeadline<T>(
 /**
  * prefix の下の数を、atLeast に届くか最後のページまで数える (同じ prefix で cursor を追う)。atLeast に届いたらそこで止める
  * (上限の判定に足りる)。ページの途中の失敗・締切・cursor の無い続き (同じページを読み続けてしまう) は例外 (route は 503)。
- * 締切はページごとではなく、cursor を追う全体で 1 つ。
+ * 締切はページごとではなく、cursor を追う全体で 1 つ。pastDeadline (route の単調時計の期限) を渡すと、2 ページ目からは読む前に
+ * それも見て、過ぎていたら次のページを読まずに締切として止める (timer の callback より先に期限をまたいだとき)。
  */
-export async function countImagesUnder(prefix: string, atLeast: number, routeDeadline: AbortSignal): Promise<number> {
+export async function countImagesUnder(
+  prefix: string,
+  atLeast: number,
+  routeDeadline: AbortSignal,
+  pastDeadline?: () => boolean,
+): Promise<number> {
   return withBlobDeadline(BLOB_LIST_DEADLINE_MS, routeDeadline, async (signal) => {
     let count = 0;
     let cursor: string | undefined;
     while (count < atLeast) {
+      if (cursor !== undefined && pastDeadline?.()) throw new BlobDeadlineError();
       const page = await list({ prefix, limit: atLeast - count, cursor, abortSignal: signal });
       count += page.blobs.length;
       if (!page.hasMore) break;

@@ -181,7 +181,7 @@ async function upload(
   const ownerKey = imageOwnerKey(session.address, secret);
   let owned: number;
   try {
-    owned = await countImagesUnder(imageOwnerPrefix(ownerKey), IMAGE_OWNER_MAX_IMAGES, deadline);
+    owned = await countImagesUnder(imageOwnerPrefix(ownerKey), IMAGE_OWNER_MAX_IMAGES, deadline, pastDeadline);
   } catch (error) {
     logger.warn('images.upload.failed', { code: error instanceof BlobDeadlineError ? 'list_deadline' : 'list_failed' });
     return fail('storage_unavailable', 503);
