@@ -1,12 +1,14 @@
 // 公開のカードに出す埋め込みコードと X シェアの URL (純関数)。tipUrl は親の TipEmbedGenerator が作り、
 // 空 (未確定) のときは呼ばない。出力の文字列は tests/components/TipEmbedGenerator-pinning.test.tsx が固定している。
 
+import { escapeHtmlAttr } from '@/lib/htmlEscape';
+
 const IFRAME_WIDTH = 380;
 const IFRAME_HEIGHT = 640;
 
 export function iframeSnippetFor(tipUrl: string): string {
   return `<iframe
-  src="${escapeAttr(tipUrl)}"
+  src="${escapeHtmlAttr(tipUrl)}"
   width="${IFRAME_WIDTH}"
   height="${IFRAME_HEIGHT}"
   style="border:0;max-width:100%"
@@ -24,18 +26,8 @@ export function xShareUrlFor(shareText: string, tipUrl: string): string {
 }
 
 // ボタン埋め込み: note / Linktree / ブログに貼れる「チップ」ボタン (styled <a>)。
-// ラベル・URL とも HTML へ実体参照化して注入 (escapeAttr は & " < > を変換)。
+// ラベル・URL とも HTML へ実体参照化して注入 (escapeHtmlAttr は & " < > を変換)。
 export function buttonSnippetFor(tipUrl: string, buttonColor: string, buttonLabel: string): string {
-  return `<a href="${escapeAttr(tipUrl)}" target="_blank" rel="noopener"
-  style="display:inline-block;background:${buttonColor};color:#fff;font-weight:700;padding:12px 22px;border-radius:9999px;text-decoration:none;font-family:system-ui,-apple-system,sans-serif">${escapeAttr(buttonLabel)}</a>`;
-}
-
-function escapeAttr(value: string): string {
-  // iframe src 属性に埋め込むため、ダブルクォートと < > & を実体参照化。
-  // URLSearchParams の出力は既に URL エンコード済みなので、追加の HTML エスケープのみ必要。
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/"/g, '&quot;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return `<a href="${escapeHtmlAttr(tipUrl)}" target="_blank" rel="noopener"
+  style="display:inline-block;background:${buttonColor};color:#fff;font-weight:700;padding:12px 22px;border-radius:9999px;text-decoration:none;font-family:system-ui,-apple-system,sans-serif">${escapeHtmlAttr(buttonLabel)}</a>`;
 }

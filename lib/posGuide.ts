@@ -15,7 +15,8 @@ import { guidePageMetadata } from '@/lib/guideMetadata';
 
 export type GuideLocale = 'ja' | 'en';
 
-export type GuideStep = { readonly n: number; readonly title: string; readonly body: string };
+/** id は、同じページのほかの所からリンクで指す手順だけに付ける (StepList が li に付ける)。 */
+export type GuideStep = { readonly n: number; readonly title: string; readonly body: string; readonly id?: string };
 export type GuideFaq = { readonly q: string; readonly a: string };
 /** public/guide/<file> に置く図版。alt は必須。未配置時はプレースホルダを出す。 */
 export type GuideImage = { readonly file: string; readonly alt: string };

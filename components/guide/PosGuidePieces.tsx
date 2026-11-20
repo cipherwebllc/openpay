@@ -69,7 +69,16 @@ export function Section({
 
 // 箇条書き (できること・確かめること = ✓ (緑) / 事実の列挙 = • (灰))。マーカーの色は記号で決め、ページごとに変えない
 // (以前は • が緑・灰・琥珀でページごとに違った・plans/guide-ux-polish-2.md P5)。
-export function BulletList({ items, marker }: { items: readonly string[]; marker: '✓' | '•' }) {
+// render は行の中身の描き方 (既定は文字のまま・画面の名前を太くする・リンクを入れる等はページが渡す)。
+export function BulletList({
+  items,
+  marker,
+  render,
+}: {
+  items: readonly string[];
+  marker: '✓' | '•';
+  render?: (item: string) => ReactNode;
+}) {
   const markerClassName = marker === '✓' ? 'text-emerald-600' : 'text-slate-400';
   return (
     <ul className="mt-3 space-y-2">
@@ -81,7 +90,7 @@ export function BulletList({ items, marker }: { items: readonly string[]; marker
           <span aria-hidden className={`mt-0.5 ${markerClassName}`}>
             {marker}
           </span>
-          <span>{item}</span>
+          <span>{render ? render(item) : item}</span>
         </li>
       ))}
     </ul>
@@ -115,7 +124,12 @@ export function StepList({
   return (
     <ol className="mt-4 space-y-4">
       {steps.map((step) => (
-        <li key={step.n} className="flex items-start gap-3">
+        // id のある手順はリンクで飛んでくる。上の固定のヘッダーに隠れないよう、見出し (GuideFrame の h2) と同じ余白を取る。
+        <li
+          key={step.n}
+          id={step.id}
+          className={step.id ? 'flex scroll-mt-24 items-start gap-3' : 'flex items-start gap-3'}
+        >
           <span className={badgeClassName}>
             {step.n}
           </span>

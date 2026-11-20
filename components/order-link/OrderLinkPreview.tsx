@@ -11,6 +11,7 @@ import { formatUnits, parseUnits } from 'viem';
 import { groupAmountDigits } from '@/lib/amount';
 import { chainForSlug } from '@/lib/chains';
 import type { OrderLinkPreviewLine, OrderLinkResult } from '@/lib/orderLink';
+import { OrderLinkSiteButton } from './OrderLinkSiteButton';
 
 const TEXT_ACTION = 'h-11 items-center gap-1.5 text-sm font-medium text-brand hover:text-brand-dark';
 const PRIMARY_ACTION =
@@ -228,6 +229,10 @@ export function OrderLinkPreview({
               {t('open')}
             </a>
           </div>
+          {/* 何度でも使えるリンクだけ、自分のサイトの商品ページに置くボタンを作れる (この注文だけのリンクは番号つきで 1 回きり)。 */}
+          {reusable && (
+            <OrderLinkSiteButton url={result.url} receive={result.receive} byChain={result.byChain} canCopy={canCopy} />
+          )}
           <div className="flex gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-amber-600" aria-hidden />
             <div className="min-w-0">
