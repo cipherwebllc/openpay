@@ -59,9 +59,14 @@ export function OrderLinkSiteButton({
   const value = kind === 'wordpress' ? url : html;
   const shown = attempt !== null && attempt.kind === kind && attempt.value === value ? attempt : null;
 
+  // コピーの試行の番号。続けて押したとき、後から届いた前の試行の結果で、最新の試行の結果 (表示・手で写す欄・focus) を上書きしない。
+  const latestCopy = useRef(0);
   const copy = async () => {
+    latestCopy.current += 1;
+    const id = latestCopy.current;
     const copying = { kind, value };
     const ok = await copier.copy(value);
+    if (id !== latestCopy.current) return;
     if (!ok && copying.kind === 'wordpress') setUrlFieldOpen(true);
     setAttempt({ ...copying, ok });
   };

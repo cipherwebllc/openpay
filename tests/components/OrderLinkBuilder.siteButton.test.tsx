@@ -74,7 +74,8 @@ async function openSiteButton(): Promise<HTMLElement> {
   const summary = await screen.findByText(TITLE);
   const details = summary.closest('details') as HTMLDetailsElement;
   if (!details.open) fireEvent.click(summary);
-  details.open = true;
+  // クリックで実際に開いたことを確かめる (代入で開くと、クリックが効かない退行を見逃す)。
+  expect(details.open).toBe(true);
   return details;
 }
 
@@ -282,6 +283,33 @@ describe('注文リンク: サイトにボタンを設置', () => {
     await waitFor(() => expect(htmlField).toHaveFocus());
     expect(anchorOf(htmlField.value).getAttribute('href')).toBe(url);
     expect([htmlField.selectionStart, htmlField.selectionEnd]).toEqual([0, htmlField.value.length]);
+  });
+
+  it('続けて 2 回押し、後の試行が先に成功してから前の試行が失敗しても、最新の「コピーしました」を上書きしない', async () => {
+    const pending: { resolve: () => void; reject: (error: Error) => void }[] = [];
+    stubClipboard(
+      vi.fn(
+        () =>
+          new Promise<void>((resolve, reject) => {
+            pending.push({ resolve, reject });
+          }),
+      ),
+    );
+    await startReusable();
+    fillItem();
+    const panel = await openSiteButton();
+    const button = within(panel).getByRole('button', { name: 'ボタン用URLをコピー' });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(pending).toHaveLength(2));
+    pending[1].resolve();
+    expect(await within(panel).findByText('コピーしました')).toBeInTheDocument();
+    pending[0].reject(new Error('denied'));
+    // 前の試行の失敗は捨てる (表示・手で写す欄・focus を動かさない)。
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(within(panel).getByText('コピーしました')).toBeInTheDocument();
+    expect(within(panel).queryByText('コピーできませんでした')).toBeNull();
+    expect(within(panel).queryByLabelText('ボタン用URL')).toBeNull();
   });
 
   it('コピーできない環境では、コピーのボタンを出さず、URL と HTML を手で写す欄を出す', async () => {
