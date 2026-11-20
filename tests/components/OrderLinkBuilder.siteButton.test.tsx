@@ -324,17 +324,18 @@ describe('注文リンク: サイトにボタンを設置', () => {
     expect(anchorOf((within(panel).getByLabelText('ボタンのHTML') as HTMLTextAreaElement).value).getAttribute('href')).toBe(url);
   });
 
-  it('設置の欄に、作り直しの案内・届いた額・「入金を確かめる」への導線を出す', async () => {
+  it('設置の欄に、作り直しの案内・サイトに置く注意・「入金を確かめる」への導線を出し、すぐ下の注意 (届いた額・金額の書き換え) は繰り返さない', async () => {
     await startReusable();
     fillItem();
     const panel = await openSiteButton();
     expect(
       within(panel).getByText('価格や送料を変更したら、注文リンクを作り直し、サイトに設置したボタンのリンク先も更新してください。'),
     ).toBeInTheDocument();
-    // 届く額は、お店だけに表示の欄の注意と同じ (6,500 − 利用料 65)
-    expect(within(panel).getByText('ウォレットに 6,435 JPYC 届いてから発送')).toBeInTheDocument();
-    expect(screen.getAllByText('ウォレットに 6,435 JPYC 届いてから発送')).toHaveLength(2);
-    expect(within(panel).getByText('お客様は金額を書き換えられます')).toBeInTheDocument();
+    // 届く額と「お客様は金額を書き換えられます」は、この欄のすぐ下の注意に 1 回だけ出す (欄の中で繰り返さない・2026-11-20 運営者の指摘)。
+    expect(within(panel).queryByText('ウォレットに 6,435 JPYC 届いてから発送')).toBeNull();
+    expect(screen.getAllByText('ウォレットに 6,435 JPYC 届いてから発送')).toHaveLength(1);
+    expect(within(panel).queryByText('お客様は金額を書き換えられます')).toBeNull();
+    expect(screen.getAllByText('お客様は金額を書き換えられます')).toHaveLength(1);
     expect(within(panel).getByText('サイトに置いたリンクは、誰でも見られます')).toBeInTheDocument();
     const verify = within(panel).getByRole('link', { name: '入金を確かめる' });
     expect(verify).toHaveAttribute('href', '#order-link-verify-heading');

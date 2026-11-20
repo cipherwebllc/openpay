@@ -7,16 +7,14 @@
 // - HTML: 単一の <a> のボタン (lib/orderLinkSiteButton.ts) をコピーする。見本はコピーする HTML と同じ文字列で描く
 //   (見本と貼ったボタンの見た目をそろえる・自前で作った文字列で、URL と文字は実体参照化済み)。
 // コピーできない環境やコピーに失敗したときも、読み取り専用の欄から手で写せる (欄は focus で全選択)。
-// サイトに置くと誰でもリンクを見られ、お客様は金額を書き換えられるので、届いた額と「入金を確かめる」への導線を欄の中にも出す。
+// 届いた額と「お客様は金額を書き換えられます」は、この欄のすぐ下の注意 (OrderLinkPreview) に出ているので、ここでは繰り返さない。
+// サイトに置くことに特有の 2 行 (誰でもリンクを見られる・「入金を確かめる」への導線) だけを、作り直しの案内の下に出す。
 // ここでのコピーは「リンクを送った」ことにしない (番号の無いリンクで、注文の画面の「コピーしました」とは別)。
 
 import { useEffect, useRef, useState } from 'react';
 import { useTranslations } from 'next-intl';
-import { AlertTriangle, Check, ChevronDown, Copy } from 'lucide-react';
+import { Check, ChevronDown, Copy } from 'lucide-react';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
-import { groupAmountDigits } from '@/lib/amount';
-import { chainForSlug } from '@/lib/chains';
-import type { OrderLinkChainAmount } from '@/lib/orderLink';
 import { orderLinkSiteButtonHtml } from '@/lib/orderLinkSiteButton';
 import { ORDER_LINK_PILL_GROUP, orderLinkPillClass } from './pills';
 
@@ -33,16 +31,10 @@ const HTML_FIELD_ID = 'order-link-site-button-html';
 
 export function OrderLinkSiteButton({
   url,
-  receive,
-  byChain,
   canCopy,
 }: {
   /** 注文リンク (buildOrderLink の url)。 */
   url: string;
-  /** お店に届く額 (主のチェーン)。 */
-  receive: string;
-  /** チェーンごとの届く額 (最低額がチェーンで違うことがある)。 */
-  byChain: readonly OrderLinkChainAmount[];
   canCopy: boolean;
 }) {
   const t = useTranslations('OrderLinkBuilder');
@@ -77,7 +69,6 @@ export function OrderLinkSiteButton({
     (attempt.kind === 'wordpress' ? urlRef.current : htmlRef.current)?.focus();
   }, [attempt]);
 
-  const sameReceive = byChain.every((entry) => entry.receive === receive);
   // コピーのボタンと、その直下の結果 (表示中の値をコピーした結果だけ)。結果の欄は読み上げのため空でも残す (空なら高さを取らない)。
   const copyAction = (text: string) =>
     canCopy && (
@@ -179,47 +170,21 @@ export function OrderLinkSiteButton({
 
         <p className="text-xs leading-relaxed text-slate-600">{t('siteButton.update')}</p>
 
-        <div className="flex gap-2">
-          <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-amber-600" aria-hidden />
-          <div className="min-w-0">
-            {/* 届く額は、お店だけに表示の欄の「届いてから発送」と同じ (チェーンで違えばチェーンごと)。 */}
-            {sameReceive ? (
-              <p className="text-sm font-semibold text-slate-800">
-                {t('cautionTitle', { amount: groupAmountDigits(receive) })}
-              </p>
-            ) : (
-              <>
-                <p className="text-sm font-semibold text-slate-800">{t('cautionTitleVaries')}</p>
-                <ul className="mt-0.5 text-sm font-semibold text-slate-800">
-                  {byChain.map((entry) => (
-                    <li key={entry.chain}>
-                      {t('cautionChainAmount', {
-                        chain: chainForSlug(entry.chain).name,
-                        amount: groupAmountDigits(entry.receive),
-                      })}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-            <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-slate-600">
-              <li>{t('cautionEditable')}</li>
-              <li>{t('siteButton.public')}</li>
-              <li>
-                {t.rich('siteButton.verify', {
-                  link: (chunks) => (
-                    <a
-                      href="#order-link-verify-heading"
-                      className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
-                    >
-                      {chunks}
-                    </a>
-                  ),
-                })}
-              </li>
-            </ul>
-          </div>
-        </div>
+        <ul className="list-disc space-y-0.5 pl-4 text-xs leading-relaxed text-slate-600">
+          <li>{t('siteButton.public')}</li>
+          <li>
+            {t.rich('siteButton.verify', {
+              link: (chunks) => (
+                <a
+                  href="#order-link-verify-heading"
+                  className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+                >
+                  {chunks}
+                </a>
+              ),
+            })}
+          </li>
+        </ul>
       </div>
     </details>
   );
