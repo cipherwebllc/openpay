@@ -38,6 +38,20 @@ export type NewsItem = {
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
   {
+    id: 'order-link-site-button-2026-11-20',
+    date: '2026-11-20',
+    category: 'feature',
+    title: {
+      ja: '注文リンクのボタンを、自分のサイトに置けるようになりました',
+      en: 'You can now put an order link button on your own website',
+    },
+    body: {
+      ja: '「何度でも使える」注文リンクを作ると、「サイトにボタンを設置」から、WordPress 用の URL や「JPYCで支払う」ボタンの HTML をコピーできます。お客様がボタンを押すと、商品と合計の入った支払いの画面が開きます。価格や送料を変えたら、リンクを作り直して、ボタンのリンク先も替えてください。',
+      en: 'When you create a “Reusable” order link, “Add a button to your site” lets you copy a URL for WordPress or the HTML of a “Pay with JPYC” button. When a customer presses the button, the payment screen opens with the items and the total. If you change a price or the shipping fee, create the link again and update the button’s link too.',
+    },
+    link: { href: '/guide/order-link', labelJa: '注文リンクのガイドを見る', labelEn: 'See the order link guide' },
+  },
+  {
     id: 'image-upload-2026-11-20',
     date: '2026-11-20',
     category: 'feature',
