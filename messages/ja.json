@@ -3966,6 +3966,25 @@
     "verifyCheckedLocal": "同じ Tx Hash の使い回しは、この端末で確かめた記録だけで見ています。",
     "verifyCheckedUnavailable": "この端末の記録では、以前にも確かめた支払いかを確かめられません。同じ支払いで 2 つの注文を発送しないよう、注文と照らし合わせてください。",
     "verifyFoundChain": "見つかったチェーン: {chain}",
-    "verifyPaidBlock": "ブロック #{block}"
+    "verifyPaidBlock": "ブロック #{block}",
+    "siteButton": {
+      "title": "サイトにボタンを設置",
+      "kindLabel": "設置のしかた",
+      "kinds": {
+        "wordpress": "WordPress に設置",
+        "html": "HTML で設置"
+      },
+      "label": "JPYCで支払う",
+      "wordpressHint": "例えばブロックエディターなら、商品ページに「ボタン」ブロックを追加し、文字を「{label}」にして、コピーした URL をリンク先に貼り付けます。専用のプラグインや HTML の編集は要りません。",
+      "copyUrl": "ボタン用URLをコピー",
+      "urlLabel": "ボタン用URL",
+      "previewLabel": "見本",
+      "htmlHint": "商品ページの HTML に貼ります。押すと、新しいタブで支払いの画面が開きます。",
+      "copyHtml": "HTMLをコピー",
+      "htmlLabel": "ボタンのHTML",
+      "update": "価格や送料を変更したら、注文リンクを作り直し、サイトに設置したボタンのリンク先も更新してください。",
+      "public": "サイトに置いたリンクは、誰でも見られます",
+      "verify": "注文が届いたら、<link>入金を確かめる</link>に届いた文を貼り、額と署名を確かめてから発送します"
+    }
   }
 }

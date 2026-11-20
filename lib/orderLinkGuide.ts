@@ -12,7 +12,11 @@
 import type { Metadata } from 'next';
 import { guidePageMetadata } from '@/lib/guideMetadata';
 
-export type OrderLinkGuideStep = { readonly title: string; readonly body: string };
+/** id は、このページのほかの節からリンクで指す手順だけに付ける (ja / en で同じ値)。 */
+export type OrderLinkGuideStep = { readonly title: string; readonly body: string; readonly id?: string };
+
+/** 手順「確かめてから発送」の id (「自分のサイトに支払いボタンを置く」の最後の行が、この手順へのリンクになる)。 */
+export const ORDER_LINK_GUIDE_SHIP_STEP_ID = 'check-then-ship';
 
 export type OrderLinkGuideContent = {
   readonly metaTitle: string;
@@ -56,6 +60,13 @@ export type OrderLinkGuideContent = {
   readonly feeGasless: { readonly focal: string; readonly title: string; readonly body: string };
   readonly feeStandard: { readonly focal: string; readonly title: string; readonly body: string };
   readonly feeLimit: string;
+
+  /**
+   * 自分のサイトに支払いボタンを置く (「何度でも使える」リンクの「サイトにボタンを設置」・2026-11-20 運営者の承認の文)。
+   * 最後の行の「…」で引いた手順の名前 (id が ORDER_LINK_GUIDE_SHIP_STEP_ID の手順の題) を、page がその手順へのリンクにする。
+   */
+  readonly siteButtonTitle: string;
+  readonly siteButton: readonly string[];
 
   /** 発送の前の確認: 頭の 1 文 (画面のどこで確かめるか) + 必ず見る 3 つ (✓) + 残りの注意 (•・たたまない)。 */
   readonly checksTitle: string;
@@ -120,6 +131,7 @@ const JA: OrderLinkGuideContent = {
       body: '「お客様の画面」で合計を確かめ、「リンクをコピー」か「送る」で LINE や DM、メールに貼ります。作る画面に出る「ウォレットに … JPYC 届いてから発送」の額は、注文と一緒に控えます (「次の注文へ」で消えます)。リンクに期限はないので、支払い期限は文に書き添えます。',
     },
     {
+      id: ORDER_LINK_GUIDE_SHIP_STEP_ID,
       title: '確かめてから発送',
       body: 'お客様から届いた文を「入金を確かめる」に貼り、下の 3 つを確かめてから発送します。',
     },
@@ -172,6 +184,14 @@ const JA: OrderLinkGuideContent = {
     body: 'OpenPay の利用料はかかりません。',
   },
   feeLimit: 'ガス代不要には 1 回の額の上限があります。超えたときは、作る画面の「この注文だけ通常決済にする」で作れます。',
+
+  siteButtonTitle: '自分のサイトに支払いボタンを置く',
+  siteButton: [
+    '「何度でも使える」リンクを作ると、「サイトにボタンを設置」が出ます。',
+    'WordPress なら、例えばブロックエディターで「ボタン」ブロックを足し、文字を「JPYCで支払う」にして、「ボタン用URLをコピー」で写した URL をリンクに貼ります。ほかのサイトでは、「HTMLをコピー」で写したボタンを商品ページに貼ります。',
+    '価格や送料を変えたら、リンクを作り直し、サイトに置いたボタンのリンク先も替えてください。',
+    '払った後に届く注文と、発送の前の確かめ方は、このページの「確かめてから発送」を見てください。',
+  ],
 
   checksTitle: '発送の前に確かめること',
   checksLead: '「注文リンク」タブの「入金を確かめる」に、お客様から届いた文を貼って「確かめる」を押します。3 つがそろったら発送します。',
@@ -278,6 +298,7 @@ const EN: OrderLinkGuideContent = {
       body: 'Check the total in “What the customer sees”, then paste it into LINE, a DM or an email with “Copy link” or “Send”. Note the “Ship after … JPYC reaches your wallet” amount shown on the screen with the order (“Next order” clears it). Links do not expire, so add your payment deadline to the message.',
     },
     {
+      id: ORDER_LINK_GUIDE_SHIP_STEP_ID,
       title: 'Check, then ship',
       body: 'Paste the message the customer sends into “Check a payment” and ship once the three checks below hold.',
     },
@@ -330,6 +351,14 @@ const EN: OrderLinkGuideContent = {
     body: 'No OpenPay fee.',
   },
   feeLimit: 'No-gas-fee links have a limit per payment. If an order goes over it, use “Use standard payment for this order” where you make the link.',
+
+  siteButtonTitle: 'Put a payment button on your own site',
+  siteButton: [
+    'When you make a “Reusable” link, “Add a button to your site” appears.',
+    'On WordPress, for example, add a “Buttons” block in the block editor, set its text to “Pay with JPYC”, and paste the URL you copied with “Copy button URL” as its link. On other sites, paste the button you copied with “Copy HTML” into your product page.',
+    'If you change a price or shipping, make the link again and also change where the button on your site links to.',
+    'For the order that arrives after payment and how to check before you ship, see “Check, then ship” on this page.',
+  ],
 
   checksTitle: 'Check before you ship',
   checksLead: 'In the “Order link” tab, paste the message the customer sent into “Check a payment” and press “Check”. Ship once all three hold.',

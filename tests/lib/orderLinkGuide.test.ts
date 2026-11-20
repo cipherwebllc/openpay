@@ -11,7 +11,12 @@ import sharp from 'sharp';
 import ja from '../../messages/ja.json';
 import en from '../../messages/en.json';
 import { guideNavFor } from '@/lib/guideNav';
-import { orderLinkGuideContentFor, orderLinkGuideMetadata, type OrderLinkGuideContent } from '@/lib/orderLinkGuide';
+import {
+  ORDER_LINK_GUIDE_SHIP_STEP_ID,
+  orderLinkGuideContentFor,
+  orderLinkGuideMetadata,
+  type OrderLinkGuideContent,
+} from '@/lib/orderLinkGuide';
 
 const MESSAGES = { ja, en } as const;
 
@@ -38,6 +43,8 @@ function allText(c: OrderLinkGuideContent): string[] {
     c.feeStandard.title,
     c.feeStandard.body,
     c.feeLimit,
+    c.siteButtonTitle,
+    ...c.siteButton,
     c.checksLead,
     ...c.checks.flatMap((x) => [x.title, x.body]),
     ...c.checksNotes,
@@ -61,6 +68,16 @@ describe('注文リンクのガイド (content)', () => {
     expect(a.checks).toHaveLength(b.checks.length);
     expect(a.checksNotes).toHaveLength(b.checksNotes.length);
     expect(a.faq).toHaveLength(b.faq.length);
+    expect(a.siteButton).toHaveLength(b.siteButton.length);
+    expect(a.steps.map((s) => s.id)).toEqual(b.steps.map((s) => s.id));
+  });
+
+  it.each(['ja', 'en'] as const)('%s: サイトのボタンの節の最後の行は、手順「確かめてから発送」を名前で引く (page がその手順へのリンクにする)', (locale) => {
+    const c = orderLinkGuideContentFor(locale);
+    const ship = c.steps.filter((s) => s.id === ORDER_LINK_GUIDE_SHIP_STEP_ID);
+    expect(ship).toHaveLength(1);
+    const [open, close] = locale === 'ja' ? ['「', '」'] : ['“', '”'];
+    expect(c.siteButton.at(-1)).toContain(`${open}${ship[0].title}${close}`);
   });
 
   it.each(['ja', 'en'] as const)('%s: 利用料の率と最低額を直書きせず、ガス代不要の欄は開示の値の差し込み口を持つ', (locale) => {
@@ -98,11 +115,29 @@ describe('注文リンクのガイド (content)', () => {
       m.Create.tabs.orderLink,
       m.Nav.sell,
       guideNavFor(locale).items.wallet.label,
+      // 「何度でも使える」リンクの「サイトにボタンを設置」(作る画面の折りたたみ・ボタンの文字・2 つのコピー)。
+      o.siteButton.title,
+      o.siteButton.label,
+      o.siteButton.copyUrl,
+      o.siteButton.copyHtml,
+      // WordPress のブロックの名前 (OpenPay の画面ではない・サイトのボタンの節の例。画面の案内 siteButton.wordpressHint も同じ名前で引く)。
+      locale === 'ja' ? 'ボタン' : 'Buttons',
+      // このページの手順の題 (サイトのボタンの節の最後の行が手順「確かめてから発送」を指す)。
+      ...orderLinkGuideContentFor(locale).steps.map((s) => s.title),
     ]);
     const quote = locale === 'ja' ? /「([^」]+)」/g : /“([^”]+)”/g;
     const quoted = allText(orderLinkGuideContentFor(locale)).flatMap((text) => [...text.matchAll(quote)].map((x) => x[1]));
     expect(quoted.length).toBeGreaterThan(5);
     for (const q of quoted) expect(known.has(q), `${locale}: 画面に無い名前「${q}」`).toBe(true);
+  });
+
+  it.each(['ja', 'en'] as const)('%s: サイトのボタンの節は、作る画面の案内と同じ WordPress のブロックの名前とボタンの文字を使う', (locale) => {
+    const o = MESSAGES[locale].OrderLinkBuilder;
+    const [open, close] = locale === 'ja' ? ['「', '」'] : ['“', '”'];
+    const block = locale === 'ja' ? 'ボタン' : 'Buttons';
+    expect(o.siteButton.wordpressHint).toContain(`${open}${block}${close}`);
+    expect(orderLinkGuideContentFor(locale).siteButton.join('\n')).toContain(`${open}${block}${close}`);
+    expect(orderLinkGuideContentFor(locale).siteButton.join('\n')).toContain(`${open}${o.siteButton.label}${close}`);
   });
 
   it.each(['ja', 'en'] as const)('%s: 手順の横の図は実在し、幅と高さが画像と一致する', async (locale) => {

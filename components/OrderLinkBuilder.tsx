@@ -23,6 +23,7 @@ import { OrderLinkLineRow } from '@/components/order-link/OrderLinkLineRow';
 import { OrderLinkPreview } from '@/components/order-link/OrderLinkPreview';
 import { OrderLinkReceiverFields } from '@/components/order-link/OrderLinkReceiverFields';
 import { OrderLinkVerify } from '@/components/order-link/OrderLinkVerify';
+import { ORDER_LINK_PILL_GROUP, orderLinkPillClass } from '@/components/order-link/pills';
 import { ShopSettingsSection, ShopSettingsSheet } from '@/components/ShopSettingsSheet';
 import { ShopSummaryRow } from '@/components/ShopSummaryRow';
 import { useCopyToClipboard, useHydrationSafeAvailable } from '@/hooks/useCopyToClipboard';
@@ -66,11 +67,6 @@ const CONTACT_KINDS = ['none', 'line', 'mail'] as const;
 // 消費税の設定の選択肢 (null = 指定なし = 税の情報を入れない)。
 const TAX_CHOICES: readonly (OrderLinkTax | null)[] = [null, ...ORDER_LINK_TAX_CATEGORIES];
 const TAX_LABEL_KEY = { taxable_10: 'taxable10', taxable_8: 'taxable8', tax_free: 'taxFree' } as const;
-const PILL_GROUP = 'grid gap-1 rounded-xl bg-slate-100 p-1';
-const pillClass = (active: boolean) =>
-  `min-h-11 rounded-lg px-2 text-sm font-semibold transition-colors ${
-    active ? 'bg-white text-slate-900 shadow-sm ring-1 ring-slate-200' : 'text-slate-600 hover:text-slate-900'
-  }`;
 // 送料の行の分を残す (/checkout の明細は送料を含めて CHECKOUT_MAX_ITEMS 行まで)。
 const MAX_LINES = CHECKOUT_MAX_ITEMS - 1;
 
@@ -382,7 +378,7 @@ export function OrderLinkBuilder() {
           {/* リンクの種類。注文ごとの番号つきか、番号なしで何度でも使えるか (SNS に置いて、払った後に注文を送ってもらう)。 */}
           <fieldset>
             <legend className="sr-only">{t('kindLabel')}</legend>
-            <div className={`${PILL_GROUP} grid-cols-2`}>
+            <div className={`${ORDER_LINK_PILL_GROUP} grid-cols-2`}>
               {LINK_KINDS.map((kind) => (
                 <button
                   key={kind}
@@ -397,7 +393,7 @@ export function OrderLinkBuilder() {
                     setCopyFailedUrl(null);
                     setSettings((current) => ({ ...current, linkKind: kind }));
                   }}
-                  className={pillClass(settings.linkKind === kind)}
+                  className={orderLinkPillClass(settings.linkKind === kind)}
                 >
                   {t(`kinds.${kind}`)}
                 </button>
@@ -640,14 +636,14 @@ export function OrderLinkBuilder() {
         {/* 注文の送り先: お客様の完了画面が、注文の文を入れた状態で開く LINE 公式アカウントかメール。 */}
         <ShopSettingsSection title={t('contactLabel')}>
           <div className="space-y-2">
-            <div className={`${PILL_GROUP} grid-cols-3`}>
+            <div className={`${ORDER_LINK_PILL_GROUP} grid-cols-3`}>
               {CONTACT_KINDS.map((kind) => (
                 <button
                   key={kind}
                   type="button"
                   aria-pressed={settings.contactKind === kind}
                   onClick={() => setSettings((current) => ({ ...current, contactKind: kind }))}
-                  className={pillClass(settings.contactKind === kind)}
+                  className={orderLinkPillClass(settings.contactKind === kind)}
                 >
                   {t(`contactKinds.${kind}`)}
                 </button>
@@ -739,14 +735,14 @@ export function OrderLinkBuilder() {
             お店の履歴には残らない (/checkout の履歴は払った人の端末に残る)。 */}
         <ShopSettingsSection title={t('taxLabel')}>
           <div className="space-y-2">
-            <div className={`${PILL_GROUP} grid-cols-2 sm:grid-cols-4`}>
+            <div className={`${ORDER_LINK_PILL_GROUP} grid-cols-2 sm:grid-cols-4`}>
               {TAX_CHOICES.map((choice) => (
                 <button
                   key={choice ?? 'none'}
                   type="button"
                   aria-pressed={settings.taxCategory === choice}
                   onClick={() => setSettings((current) => ({ ...current, taxCategory: choice }))}
-                  className={pillClass(settings.taxCategory === choice)}
+                  className={orderLinkPillClass(settings.taxCategory === choice)}
                 >
                   {tTax(choice === null ? 'none' : TAX_LABEL_KEY[choice])}
                 </button>

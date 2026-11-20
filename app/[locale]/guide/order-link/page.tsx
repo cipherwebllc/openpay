@@ -6,6 +6,7 @@
 // 掟 3: このファイルは default / generateMetadata 以外を export しない。
 
 import type { Metadata } from 'next';
+import type { ReactNode } from 'react';
 import { getTranslations, setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
 import { GuideCallout } from '@/components/guide/GuideCallout';
@@ -14,7 +15,7 @@ import { GuideCta, GuideRelated } from '@/components/guide/GuideEnd';
 import { GuideFaq } from '@/components/guide/GuideFaq';
 import { GuideFeeList } from '@/components/guide/GuideFee';
 import { GuideFrame } from '@/components/guide/GuideFrame';
-import { GuideMoreLink } from '@/components/guide/GuideLink';
+import { GUIDE_INLINE_LINK, GuideMoreLink } from '@/components/guide/GuideLink';
 import { withUiNames } from '@/components/guide/GuideUiNames';
 import {
   GuideActions,
@@ -30,7 +31,13 @@ import { BulletList, STEP_BADGE_CUSTOMER, Section, StepList } from '@/components
 import { guideNavFor } from '@/lib/guideNav';
 import { HOWTO_VIDEO_UI, howtoVideoFor } from '@/lib/howtoVideos';
 import { LANDING_PAYMENT_FEE_VALUES } from '@/lib/legal';
-import { orderLinkGuideContentFor, orderLinkGuideMetadata, type OrderLinkGuideContent } from '@/lib/orderLinkGuide';
+import {
+  ORDER_LINK_GUIDE_SHIP_STEP_ID,
+  orderLinkGuideContentFor,
+  orderLinkGuideMetadata,
+  type OrderLinkGuideContent,
+  type OrderLinkGuideStep,
+} from '@/lib/orderLinkGuide';
 
 /** content の {recoverPercent}・{recoverFloor} を開示の値で埋める (率を content に直書きしない・掟 14)。 */
 function withFeeValues(text: string): string {
@@ -57,6 +64,25 @@ function PreviewShot({ shot, className }: { shot: OrderLinkGuideContent['preview
   );
 }
 
+/**
+ * 文の中の手順の名前 (「…」/ “…” で引いた題) を、その手順へのリンクにする (同じページの中を飛ぶ)。残りは画面の名前を太くする。
+ * 手順の名前が無い文はそのまま (リンクを作らない)。
+ */
+function withStepLink(text: string, step: OrderLinkGuideStep | undefined): ReactNode {
+  const quoted = step?.id ? [`「${step.title}」`, `“${step.title}”`].find((name) => text.includes(name)) : undefined;
+  if (!step?.id || quoted === undefined) return withUiNames(text);
+  const at = text.indexOf(quoted);
+  return (
+    <>
+      {withUiNames(text.slice(0, at))}
+      <a href={`#${step.id}`} className={GUIDE_INLINE_LINK}>
+        {quoted}
+      </a>
+      {withUiNames(text.slice(at + quoted.length))}
+    </>
+  );
+}
+
 export async function generateMetadata({
   params,
 }: {
@@ -79,6 +105,7 @@ export default async function GuideOrderLinkPage({
   const video = howtoVideoFor(locale, 'orderLink');
   const tLanding = await getTranslations({ locale, namespace: 'Landing' });
   const createHref = `/${locale}/create?tab=orderLink`;
+  const shipStep = c.steps.find((step) => step.id === ORDER_LINK_GUIDE_SHIP_STEP_ID);
 
   return (
     <AppShell wide>
@@ -169,6 +196,11 @@ export default async function GuideOrderLinkPage({
             >
               <p className="mt-3 text-sm leading-relaxed text-slate-700">{withUiNames(c.feeLimit)}</p>
             </GuideFeeList>
+          </Section>
+
+          {/* 何度でも使えるリンクを自分のサイトのボタンにする (流れと利用料の後ろ・作る画面の「サイトにボタンを設置」)。 */}
+          <Section title={c.siteButtonTitle}>
+            <BulletList items={c.siteButton} marker="•" render={(line) => withStepLink(line, shipStep)} />
           </Section>
 
           <Section title={c.faqTitle}>

@@ -107,7 +107,8 @@ export function OrderLinkVerify({
       aria-labelledby="order-link-verify-heading"
       className="min-w-0 rounded-2xl bg-white px-5 py-4 shadow-card ring-1 ring-slate-200/70 lg:col-start-1"
     >
-      <h2 id="order-link-verify-heading" className="text-sm font-semibold text-slate-800">
+      {/* 「サイトにボタンを設置」の欄から #order-link-verify-heading で飛んでくる。上の固定のヘッダーに隠れないよう余白を取る。 */}
+      <h2 id="order-link-verify-heading" className="scroll-mt-24 text-sm font-semibold text-slate-800">
         {t('verifyTitle')}
       </h2>
       <p className="mt-1 text-xs leading-relaxed text-slate-500">{t('verifyLead')}</p>

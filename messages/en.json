@@ -3966,6 +3966,25 @@
     "verifyCheckedLocal": "Reuse of the same Tx Hash is checked only against checks made on this device.",
     "verifyCheckedUnavailable": "This device’s records cannot tell whether this payment was checked before. Make sure you are not shipping two orders for the same payment.",
     "verifyFoundChain": "Found on {chain}",
-    "verifyPaidBlock": "Block #{block}"
+    "verifyPaidBlock": "Block #{block}",
+    "siteButton": {
+      "title": "Add a button to your site",
+      "kindLabel": "How to add it",
+      "kinds": {
+        "wordpress": "On WordPress",
+        "html": "With HTML"
+      },
+      "label": "Pay with JPYC",
+      "wordpressHint": "For example, in the block editor, add a “Buttons” block to your product page, set its text to “{label}” and paste the copied URL as its link. No special plugin or HTML editing is needed.",
+      "copyUrl": "Copy button URL",
+      "urlLabel": "Button URL",
+      "previewLabel": "Preview",
+      "htmlHint": "Paste it into the HTML of your product page. Clicking it opens the payment screen in a new tab.",
+      "copyHtml": "Copy HTML",
+      "htmlLabel": "Button HTML",
+      "update": "If you change a price or shipping, make the order link again and also update where the button on your site links to.",
+      "public": "Anyone can see a link you put on your site",
+      "verify": "When an order arrives, paste the message into <link>Check a payment</link> and check the amount and signature before you ship"
+    }
   }
 }
