@@ -231,7 +231,7 @@ export function OrderLinkPreview({
           </div>
           {/* 何度でも使えるリンクだけ、自分のサイトの商品ページに置くボタンを作れる (この注文だけのリンクは番号つきで 1 回きり)。 */}
           {reusable && (
-            <OrderLinkSiteButton url={result.url} receive={result.receive} byChain={result.byChain} canCopy={canCopy} />
+            <OrderLinkSiteButton url={result.url} canCopy={canCopy} />
           )}
           <div className="flex gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-amber-600" aria-hidden />
