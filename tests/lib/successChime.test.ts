@@ -431,6 +431,33 @@ describe('lib/successChime', () => {
     );
   });
 
+  it('iOS が裏に回して interrupted にした context も、完了のときに resume する', async () => {
+    stubFetch('fail');
+    const resume = vi.fn(() => Promise.resolve());
+    w.AudioContext = makeMockAC({ state: 'interrupted' as AudioContextState, resume });
+    const { playSuccessChime } = await import('@/lib/successChime');
+    playSuccessChime();
+    expect(resume).toHaveBeenCalled();
+    await flush();
+  });
+
+  it('closed の context で resume が reject しても、throw せず処理されない reject も残さない', async () => {
+    stubFetch('fail');
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandled);
+    const resume = vi.fn(() => Promise.reject(new Error('InvalidStateError: closed')));
+    w.AudioContext = makeMockAC({ state: 'closed', resume });
+    const { primeChimeAudio, playSuccessChime } = await import('@/lib/successChime');
+    expect(() => primeChimeAudio()).not.toThrow();
+    expect(() => playSuccessChime()).not.toThrow();
+    await flush();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    process.off('unhandledRejection', onUnhandled);
+    expect(resume).toHaveBeenCalled();
+    expect(unhandled).toEqual([]);
+  });
+
   it('primeChimeAudio は suspended の時に resume を呼ぶ (iOS 解錠)', async () => {
     stubFetch('fail');
     const resume = vi.fn(() => Promise.resolve());
