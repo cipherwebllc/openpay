@@ -310,7 +310,8 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     merchantFee: null,
     integrations: ['ec'],
     posIntegration: null,
-    region: 'Japan',
+    // 自社の EC サイトでの導入で、決済の対象地域は本文に書いていない (本社が東京なのは所在地の記載) ので null。
+    region: null,
     announcedAt: '2026-11-19',
     startedAt: null,
     plannedPeriod: null,

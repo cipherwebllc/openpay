@@ -76,7 +76,7 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(env.changes.some((c) => c.provider === 'Aegis')).toBe(false);
   });
 
-  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 71 件', () => {
+  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 74 件', () => {
     const jpyc = createServiceMonitorEnvelope(
       { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
@@ -555,7 +555,8 @@ describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () =>
     // + 第 7 回の αU wallet + 第 12 回の TISI / CARDNET + 第 15 回の DG SPS (8/10 の開始は 8/26 より前なので、11/10 の
     // Arc 対応で初めて入る) + 第 16 回の日本直販 の 11 社分 (第 8〜11 回・第 13〜14 回のイベントは既存の社なので増えない)
     expect(delta.changes).toHaveLength(65);
-    expect(delta.providers.map((p) => p.region).sort()).toEqual(['Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Osaka', 'Osaka', 'Osaka']);
+    // 日本直販は決済の対象地域を書いていないので region は null (sort では文字列 'null' として末尾に並ぶ)。
+    expect(delta.providers.map((p) => p.region).sort()).toEqual(['Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Osaka', 'Osaka', 'Osaka', null]);
     // 第 2 回週次更新: 現況が変わった社は changelog の diffs と行の値が一致する (同一 PR の掟)。
     const mit = delta.providers.find((p) => p.provider.startsWith('Mi&T'))!;
     expect(mit.merchantFee).toBe('1.0%');

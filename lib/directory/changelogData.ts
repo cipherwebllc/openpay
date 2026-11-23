@@ -1983,9 +1983,11 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     slug: 'jpyc',
     changeType: 'updated',
     changeCategory: 'update',
-    assets: ['JPYC'],
+    // 止まっているのは JPYC Prepaid (前払式支払手段) を使うギフトコードの販売なので、イベントの資産は JPYC Prepaid
+    // (エントリの tokens の jpyc ではない)。
+    assets: ['JPYC Prepaid'],
     summary:
-      'JPYC Inc. said that JPYC Apps remains stopped under unscheduled maintenance: as of 2026-11-18 there is no prospect of resuming the service and the end of the maintenance is undecided, and it will announce how it will proceed once that is decided. The maintenance began at 11:30 JST on 2026-10-29 and suspended new sales of gift codes that use the prepaid payment instrument JPYC Prepaid (announced in the official post https://x.com/jpyc_official/status/2115633899305132245). Services for the funds-transfer type JPYC, including JPYC EX, are operating as usual.',
+      'JPYC Inc. said that JPYC Apps remains stopped under unscheduled maintenance: as of 2026-11-18 there is no prospect of resuming the service and the end of the maintenance is undecided, and it will announce how it will proceed once that is decided. The maintenance began at 11:30 JST on 2026-10-29 and suspended new sales of gift codes that use the prepaid payment instrument JPYC Prepaid (announced in the official post https://x.com/jpyc_official/status/2115633899305132245). JPYC EX, the service for the funds-transfer type JPYC, is operating as usual.',
     summaryJa:
       'JPYC 社が、JPYC Apps の臨時メンテナンスによるサービスの停止が続いていると告知。2026-11-18 の時点でもサービス再開の見通しは立っておらず、メンテナンスの終了時期は未定で、今後の対応は方針が決まりしだい案内するとしている。メンテナンスは 2026-10-29 11:30 に始まり、前払式支払手段「JPYC Prepaid」を利用したギフトコードの新規販売を停止している (公式 X の投稿 https://x.com/jpyc_official/status/2115633899305132245)。資金移動業型の JPYC に関するサービス (JPYC EX) は通常どおり稼働している。',
     sourceUrl: 'https://x.com/jpyc_official/status/2122977638059053408',
@@ -1993,7 +1995,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   {
     // 日本直販の PR TIMES (2026-11-19 15:00)。決済スコープだけに載せる (自社の通販サイトで JPYC を受け取る試験導入)。
     // 本文は「導入しました」だが開始の日付は書いていないので、現況行の startedAt は null。手数料の記載はない。
-    // AYET (子会社の AKBT が発行予定のトークン) の決済の開始を意味するものではない、と本文が明記している。
+    // AYET (子会社の AKBT が発行するトークン・審査と承認を経て流通する予定) の決済の開始を意味するものではない、と本文が明記している。
     date: '2026-11-19',
     collectedAt: '2026-11-24',
     scopes: ['stablecoin-payments'],
@@ -2003,9 +2005,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     assets: ['JPYC'],
     chains: ['polygon'],
     summary:
-      'Nihon Chokuhan, a Japanese mail-order company, said it had introduced, on a trial basis, token payments with JPYC on Polygon on its own e-commerce site. After placing an order and choosing token payment, the customer receives an email with a payment link and approves the JPYC payment in MetaMask; with meta-transactions, customers do not pay network fees. The company describes this as a first step toward possible future payments with AYET, a token its subsidiary AKBT plans to issue, and says it does not mean AYET payments have started.',
+      'Nihon Chokuhan, a Japanese mail-order company, said it had introduced, on a trial basis, token payments with JPYC on Polygon on its own e-commerce site. After placing an order and choosing token payment, the customer receives an email with a payment link and approves the JPYC payment in MetaMask; with meta-transactions, customers do not pay network fees. The company describes this as a first step toward possible future payments with AYET, a token whose issuer is its subsidiary AKBT and which is not yet in circulation, and says it does not mean AYET payments have started.',
     summaryJa:
-      '通販の日本直販が、自社の EC サイトに Polygon の JPYC によるトークン決済を試験導入したと発表。注文の手続きで「トークン決済」を選ぶと決済リンクのメールが届き、MetaMask で JPYC の支払いを承認する。メタトランザクションにより、お客様はネットワーク手数料 (ガス代) を負担しない。子会社の AKBT が発行を予定するトークン「AYET」の将来の決済を見据えた最初の一歩で、AYET による決済の開始を意味するものではないとしている。',
+      '通販の日本直販が、自社の EC サイトに Polygon の JPYC によるトークン決済を試験導入したと発表。注文の手続きで「トークン決済」を選ぶと決済リンクのメールが届き、MetaMask で JPYC の支払いを承認する。メタトランザクションにより、お客様はネットワーク手数料 (ガス代) を負担しない。子会社の AKBT が発行主体のトークン「AYET」(流通前) の将来の決済を見据えた最初の一歩で、AYET による決済の開始を意味するものではないとしている。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000081.000166086.html',
   },
   {
@@ -2019,10 +2021,19 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'update',
     assets: ['JPYC'],
     summary:
-      'JPYC EX was updated on 2026-11-20. After logging in, users can open My Page without entering a one-time code; in that view, registered details such as phone number, email address and bank account number are partly masked, and a one-time code is still required to show them in full or to change or add them. The network name in the deposit and withdrawal history now links to the chain\'s block explorer (such as Polygonscan), each transaction gained a button to copy its transaction ID, and the transaction types (such as redemption deposit and redemption withdrawal) now show an explanation.',
+      'JPYC EX was updated on 2026-11-20. After logging in, users can open My Page without entering a one-time code; in that view, registered details such as phone number, email address and bank account number are partly masked, and a one-time code is still required to show them in full or to change or add them. The network name in the deposit and withdrawal history now links to the chain\'s block explorer (such as Polygonscan), each transaction in the stablecoin transaction history and the deposit and withdrawal history gained a button to copy its transaction ID, and in the deposit and withdrawal history, hovering over the "?" next to a transaction type (such as redemption deposit or redemption withdrawal) shows an explanation.',
     summaryJa:
-      'JPYC EX が 2026-11-20 にアップデート。ログインすれば、ワンタイムコードを入力しなくてもマイページを開けるようになった (この表示では電話番号・メールアドレス・口座番号などの登録情報を一部伏せて表示し、すべて表示するときや変更・追加するときは従来どおりワンタイムコードが必要)。入出金履歴の「ネットワーク/TX」欄のネットワーク名が各チェーンのブロックエクスプローラー (Polygonscan など) へのリンクになり、各取引に取引 ID のコピーボタンが付き、取引の種類 (償還入庫・償還出金など) に説明が表示されるようになった。',
+      'JPYC EX が 2026-11-20 にアップデート。ログインすれば、ワンタイムコードを入力しなくてもマイページを開けるようになった (この表示では電話番号・メールアドレス・口座番号などの登録情報を一部伏せて表示し、すべて表示するときや変更・追加するときは従来どおりワンタイムコードが必要)。入出金履歴の「ネットワーク/TX」欄のネットワーク名が各チェーンのブロックエクスプローラー (Polygonscan など) へのリンクになり、ステーブルコイン取引履歴と入出金履歴の各取引に取引 ID のコピーボタンが付き、入出金履歴の取引の種類 (償還入庫・償還出金など) の横の「?」にカーソルを合わせると説明が表示されるようになった。',
     sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0050',
+    // お知らせが前後の値を明示している変更 (「これまでは、マイページを開くたびにワンタイムコードの入力が必要でした」→
+    // 「ログインすればワンタイムコードを入力しなくてもマイページを開けるように」) だけを値で書く (記入ルール)。
+    diffs: [
+      {
+        field: 'feature',
+        previousValue: 'Opening My Page after login requires a one-time code every time',
+        currentValue: 'My Page opens after login without a one-time code (registered details partly masked)',
+      },
+    ],
   },
   {
     // Mi&T 公式 X (2026-11-23 11:11 JST)。11/16 の提供開始の後の公式の報告 (第 15 回の watchlist)。登録者の数はアプリの
@@ -2036,7 +2047,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'pilot',
     assets: ['JPYC'],
     summary:
-      'Mi&T said on its official X account that more than 50 users had registered for its Matane payment app, named four shops in Nakamozu where Matane can be used, and noted the 0.5% instant cashback.',
+      'Mi&T said on its official X account that more than 50 users had registered for its Matane payment app, listed 新居, 阿呍, 丸徳 and JOUR J as examples of shops in Nakamozu where Matane can be used, and noted the 0.5% instant cashback.',
     summaryJa:
       'Mi&T が公式 X で、決済アプリ「Matane」の登録者が 50 人を超えたと投稿。中百舌鳥で使えるお店として新居・阿呍・丸徳・JOUR J を挙げ、0.5% の即時キャッシュバックが付くとしている。',
     sourceUrl: 'https://x.com/miat_inc/status/2124687167368945967',
@@ -2050,9 +2061,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'verified',
     assets: ['USDC'],
     summary:
-      'Re-verified against the FSA registry of Electronic Payment Instruments Exchange Service Providers (still as of 2026-08-27): two registrants, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC); no new registration.',
+      'Re-verified the FSA register of Electronic Payment Instruments Exchange Service Providers: the published register checked on 2026-11-23 was the version as of 2026-08-27 and listed two providers, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC).',
     summaryJa:
-      '金融庁の電子決済手段等取引業者登録一覧 (令和 8 年 8 月 27 日現在のまま) で再確認: 登録は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社で、新規登録なし。',
+      '金融庁の電子決済手段等取引業者登録一覧で再確認: 2026-11-23 に確認した公表の一覧は令和 8 年 8 月 27 日現在の版で、掲載は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社。',
     sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
   },
   {
@@ -2063,9 +2074,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'verified',
     assets: ['JPYC', 'USDC'],
     summary:
-      'Re-verified on the Osaka Prefecture page (still last updated 2026-11-11; for the awarded projects other than Mi&T, details such as start timing are to be published once decided) and its award list: HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-11-11; for the awarded projects other than Mi&T, details such as start timing are to be published once decided) and its award list (https://www.pref.osaka.lg.jp/documents/132917/senkutekihozyokinichiran.pdf): HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
     summaryJa:
-      '大阪府公式ページ (更新日 2026-11-11 のまま。Mi&T 以外の採択事業は実証開始時期等の詳細が決まりしだい順次公表) と交付決定事業一覧で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
+      '大阪府公式ページ (更新日 2026-11-11 のまま。Mi&T 以外の採択事業は実証開始時期等の詳細が決まりしだい順次公表) と交付決定事業一覧 (https://www.pref.osaka.lg.jp/documents/132917/senkutekihozyokinichiran.pdf) で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
@@ -2077,13 +2088,15 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'verified',
     assets: ['JPYC', 'USDC'],
     summary:
-      'Re-verified on the Osaka Prefecture page (still last updated 2026-11-11; for the awarded projects other than Mi&T, details such as start timing are to be published once decided) and its award list: Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-11-11; for the awarded projects other than Mi&T, details such as start timing are to be published once decided) and its award list (https://www.pref.osaka.lg.jp/documents/132917/senkutekihozyokinichiran.pdf): Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
     summaryJa:
-      '大阪府公式ページ (更新日 2026-11-11 のまま。Mi&T 以外の採択事業は実証開始時期等の詳細が決まりしだい順次公表) と交付決定事業一覧で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
+      '大阪府公式ページ (更新日 2026-11-11 のまま。Mi&T 以外の採択事業は実証開始時期等の詳細が決まりしだい順次公表) と交付決定事業一覧 (https://www.pref.osaka.lg.jp/documents/132917/senkutekihozyokinichiran.pdf) で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
     sourceUrl:
       'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
   },
   {
+    // ニュース一覧 (https://www.netstars.co.jp/news/) は 2026-11-23 に 404 になっていたので、トップページのお知らせ
+    // (最新 8 件) で確かめた。8 件の本文でステーブルコインに触れるのは会社概要・StarPay の紹介の定型文だけ。
     date: '2026-11-23',
     collectedAt: '2026-11-24',
     scopes: ['stablecoin-payments'],
@@ -2091,10 +2104,10 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'verified',
     assets: ['JPYC', 'USDT'],
     summary:
-      "Re-verified on the NetStars news list: no stablecoin announcement after the 2026-09-11 Kaia MOU (the one new item, on 2026-11-18, is about starting cross-border QR payments in Japan with Liquid Group through RoamQR and JPQR Global, not about stablecoins); no launch date, fee or chain change published for Stablecoin Pay.",
+      'Re-verified on the news section of the NetStars website (the eight latest releases, 2026-09-30 to 2026-11-18): none announces a launch date, fee or chain change for Stablecoin Pay. The one release since the last check, on 2026-11-18, is about starting cross-border QR payments in Japan with Liquid Group through RoamQR and JPQR Global, and mentions stablecoins only in the company profile.',
     summaryJa:
-      'ネットスターズ公式ニュース一覧で再確認: 2026-09-11 の Kaia MOU 以降、ステーブルコインの発表なし (新しい 1 件、11/18 の Liquid Group との RoamQR と JPQR Global を通じた日本でのクロスボーダー QR 決済の開始は、ステーブルコインの話ではない)。Stablecoin Pay の稼働日・手数料・対応チェーンの変更は未公表のまま。',
-    sourceUrl: 'https://www.netstars.co.jp/news/',
+      'ネットスターズ公式サイトのお知らせ (最新の 8 件・2026-09-30〜11-18) で再確認: Stablecoin Pay の稼働日・手数料・対応チェーンの変更を伝える発表はない。前回の確認の後の 1 件 (11/18) は Liquid Group との RoamQR と JPQR Global を通じた日本でのクロスボーダー QR 決済の開始で、ステーブルコインには会社概要の中で触れているだけ。',
+    sourceUrl: 'https://www.netstars.co.jp/',
   },
 ];
 
