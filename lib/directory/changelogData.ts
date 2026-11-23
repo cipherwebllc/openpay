@@ -1987,7 +1987,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     // (エントリの tokens の jpyc ではない)。
     assets: ['JPYC Prepaid'],
     summary:
-      'JPYC Inc. said that JPYC Apps remains stopped under unscheduled maintenance: as of 2026-11-18 there is no prospect of resuming the service and the end of the maintenance is undecided, and it will announce how it will proceed once that is decided. The maintenance began at 11:30 JST on 2026-10-29 and suspended new sales of gift codes that use the prepaid payment instrument JPYC Prepaid (announced in the official post https://x.com/jpyc_official/status/2115633899305132245). JPYC EX, the service for the funds-transfer type JPYC, is operating as usual.',
+      'JPYC Inc. said that JPYC Apps remains stopped under unscheduled maintenance: as of 2026-11-18 it still has no timeline for resuming the service and the end of the maintenance is undecided, and it will announce how it will proceed once that is decided. The maintenance began at 11:30 JST on 2026-10-29 and suspended new sales of gift codes that use the prepaid payment instrument JPYC Prepaid (announced in the official post https://x.com/jpyc_official/status/2115633899305132245). JPYC EX, the service for the funds-transfer type JPYC, is operating as usual.',
     summaryJa:
       'JPYC 社が、JPYC Apps の臨時メンテナンスによるサービスの停止が続いていると告知。2026-11-18 の時点でもサービス再開の見通しは立っておらず、メンテナンスの終了時期は未定で、今後の対応は方針が決まりしだい案内するとしている。メンテナンスは 2026-10-29 11:30 に始まり、前払式支払手段「JPYC Prepaid」を利用したギフトコードの新規販売を停止している (公式 X の投稿 https://x.com/jpyc_official/status/2115633899305132245)。資金移動業型の JPYC に関するサービス (JPYC EX) は通常どおり稼働している。',
     sourceUrl: 'https://x.com/jpyc_official/status/2122977638059053408',
@@ -2021,7 +2021,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'update',
     assets: ['JPYC'],
     summary:
-      'JPYC EX was updated on 2026-11-20. After logging in, users can open My Page without entering a one-time code; in that view, registered details such as phone number, email address and bank account number are partly masked, and a one-time code is still required to show them in full or to change or add them. The network name in the deposit and withdrawal history now links to the chain\'s block explorer (such as Polygonscan), each transaction in the stablecoin transaction history and the deposit and withdrawal history gained a button to copy its transaction ID, and in the deposit and withdrawal history, hovering over the "?" next to a transaction type (such as redemption deposit or redemption withdrawal) shows an explanation.',
+      'JPYC EX was updated on 2026-11-20. After logging in, users can open My Page without entering a one-time code; in that view, registered details such as phone number, email address and account number are partly masked, and a one-time code is still required to show them in full or to change or add them. The network name in the deposit and withdrawal history now links to the chain\'s block explorer (such as Polygonscan), each transaction in the stablecoin transaction history and the deposit and withdrawal history gained a button to copy its transaction ID, and in the deposit and withdrawal history, hovering over the "?" next to a transaction type (such as redemption deposit or redemption withdrawal) shows an explanation.',
     summaryJa:
       'JPYC EX が 2026-11-20 にアップデート。ログインすれば、ワンタイムコードを入力しなくてもマイページを開けるようになった (この表示では電話番号・メールアドレス・口座番号などの登録情報を一部伏せて表示し、すべて表示するときや変更・追加するときは従来どおりワンタイムコードが必要)。入出金履歴の「ネットワーク/TX」欄のネットワーク名が各チェーンのブロックエクスプローラー (Polygonscan など) へのリンクになり、ステーブルコイン取引履歴と入出金履歴の各取引に取引 ID のコピーボタンが付き、入出金履歴の取引の種類 (償還入庫・償還出金など) の横の「?」にカーソルを合わせると説明が表示されるようになった。',
     sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0050',
@@ -2049,7 +2049,7 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     summary:
       'Mi&T said on its official X account that more than 50 users had registered for its Matane payment app, listed 新居, 阿呍, 丸徳 and JOUR J as examples of shops in Nakamozu where Matane can be used, and noted the 0.5% instant cashback.',
     summaryJa:
-      'Mi&T が公式 X で、決済アプリ「Matane」の登録者が 50 人を超えたと投稿。中百舌鳥で使えるお店として新居・阿呍・丸徳・JOUR J を挙げ、0.5% の即時キャッシュバックが付くとしている。',
+      'Mi&T が公式 X で、決済アプリ「Matane」の登録者が 50 人を超えたと投稿。中百舌鳥で使えるお店の例として新居・阿呍・丸徳・JOUR J を挙げ、0.5% の即時キャッシュバックが付くとしている。',
     sourceUrl: 'https://x.com/miat_inc/status/2124687167368945967',
   },
   // ── 第 16 回週次更新の verified (2026-11-23) ──
