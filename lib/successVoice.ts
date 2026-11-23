@@ -44,7 +44,8 @@ function decodeVoice(c: AudioContext, data: ArrayBuffer): Promise<AudioBuffer> {
 
 /**
  * 声を読み込んで AudioBuffer にする。読めなかった・VOICE_LOAD_TIMEOUT_MS を過ぎたら null (失敗は覚えず、次の支払いで
- * また読む)。throw しない・reject しない。同じ読み込みの最中に呼ばれたら、その読み込みを返す (fetch は 1 本)。
+ * また読む)。返す Promise は reject しない (同期の例外は呼び出し側 lib/successChime.ts の .catch で受ける)。同じ読み込みの
+ * 最中に呼ばれたら、その読み込みを返す (fetch は 1 本)。
  */
 export function loadVoice(c: AudioContext): Promise<AudioBuffer | null> {
   if (voiceBuffer) return Promise.resolve(voiceBuffer);

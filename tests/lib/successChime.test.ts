@@ -398,15 +398,14 @@ describe('lib/successChime', () => {
     const createOscillator = vi.fn(() => makeNode());
     w.AudioContext = makeMockAC({ state: 'running', createOscillator });
     const { primeChimeAudio, playSuccessChime, VOICE_WAIT_MS } = await import('@/lib/successChime');
-    // 本物の timer で「待ちの 400ms より前に (= timer ではなく失敗の経路で) 鳴る」ことを時刻で確かめる。
-    const startedAt = performance.now();
+    // 待ちの 400ms の timer は fake にして進めない (= timer ではなく失敗の経路で鳴ることを、時刻に頼らず確かめる)。
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     expect(() => primeChimeAudio()).not.toThrow();
     expect(() => playSuccessChime()).not.toThrow();
     await flush();
-    expect(performance.now() - startedAt).toBeLessThan(VOICE_WAIT_MS);
     expect(createOscillator).toHaveBeenCalledTimes(3);
     // 待ちの timer が後から走っても、2 回目は鳴らない。
-    await new Promise((resolve) => setTimeout(resolve, VOICE_WAIT_MS + 50));
+    vi.advanceTimersByTime(VOICE_WAIT_MS);
     expect(createOscillator).toHaveBeenCalledTimes(3);
     expect(fetchMock).not.toHaveBeenCalled();
   });
