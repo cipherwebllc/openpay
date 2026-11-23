@@ -55,7 +55,7 @@ export function SuccessOverlay({
   const dialogRef = useRef<HTMLDivElement>(null);
   const [soundOn, setSoundOn] = useSuccessSoundPref();
 
-  // 決済完了チャイム (PayPay の「ペイペイ！」音 相当)。overlay マウント時に 1 回だけ
+  // 決済完了の音 (声「オープンペイ」・読めないときは合成チャイム・lib/successChime.ts)。overlay マウント時に 1 回だけ
   // 鳴らす。有効判定は永続値を直接読む (toggle state の hydration を待たない)。
   // 各 form の onSubmit で primeChimeAudio() 済なので iOS でも鳴る。
   const chimedRef = useRef(false);
@@ -104,7 +104,7 @@ export function SuccessOverlay({
       tabIndex={-1}
       className="fixed inset-0 z-50 flex flex-col items-center gap-6 overflow-y-auto bg-emerald-700 px-4 py-8 text-white"
     >
-      {/* 完了音 ON/OFF トグル (右上)。PayPay 風チャイムのミュート切替・localStorage 永続。
+      {/* 完了音 ON/OFF トグル (右上)。完了音のミュート切替・localStorage 永続。
           名前は固定 (「完了音」) し、状態は aria-pressed とアイコンだけで伝える。名前まで「オフにする / オンにする」と
           切り替えると「完了音をオフにする・押されている」= 消音中と読まれ、実際と逆に聞こえる (D5)。 */}
       <button

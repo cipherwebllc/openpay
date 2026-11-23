@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 
-// AudioContext mock 用ノード。connect は引数を返して
-// `osc.connect(gain).connect(destination)` のチェーンを成立させる。
+// AudioContext mock 用ノード。connect は引数を返す (今の仕様の形)。古い WebKit の形 (undefined を返す) は個別のテストで
+// 差し替える。実装は connect を 1 段ずつ呼ぶので、どちらでも動く。
 function makeNode() {
   return {
     gain: {
@@ -142,6 +142,8 @@ describe('lib/successChime', () => {
     expect(sources).toHaveLength(1);
     expect(sources[0].buffer).toBe(VOICE_BUFFER);
     expect(sources[0].start).toHaveBeenCalledTimes(1);
+    expect(sources[0].connect).toHaveBeenCalledWith(gains[0]);
+    expect(gains[0].connect).toHaveBeenCalledTimes(1);
     expect(gains[0].gain.value).toBe(0.5);
     expect(createOscillator).not.toHaveBeenCalled();
     // 2 回目の支払いは読み直さない (読み込んだ声を使い回す)。
@@ -368,12 +370,17 @@ describe('lib/successChime', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('声のファイルは public/sounds にあり、小さい (20 KB 未満)', async () => {
-    const { statSync } = await import('node:fs');
+  it('声のファイルは public/sounds にあり、中身は v1 のまま (変えるならファイル名の版を上げる)', async () => {
+    const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');
-    const size = statSync(join(process.cwd(), 'public/sounds/openpay-complete-v1.mp3')).size;
-    expect(size).toBeGreaterThan(1000);
-    expect(size).toBeLessThan(20_000);
+    const { createHash } = await import('node:crypto');
+    const bytes = readFileSync(join(process.cwd(), 'public/sounds/openpay-complete-v1.mp3'));
+    expect(bytes.length).toBe(4460);
+    // 中身を変えたらこの hash を直すのではなく、openpay-complete-v2.mp3 を作って VOICE_URL を変える
+    // (public/ は max-age=0 の再検証なので壊れはしないが、版で分けると古い端末のキャッシュと混ざらない)。
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(
+      'ca8b9ae890278bd33158f512b1a6e5ffd3c215cf48e1915033d218e22e97dd59',
+    );
   });
 
   it('primeChimeAudio は suspended の時に resume を呼ぶ (iOS 解錠)', async () => {

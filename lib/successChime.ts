@@ -1,11 +1,18 @@
 // 決済完了の音 (声「オープンペイ」・読めないときは Web Audio 合成のチャイム) と、新着注文のチャイム。
 //
 // 完了音の声 (2026-11-23 user 裁定「声だけで短く・合成音ぽく」の s4):
-// - public/sounds/openpay-complete-v1.mp3 (約 0.5 秒・mono・約 4.4 KB)。Gemini API の音声生成
-//   (gemini-3.8-flash-tts・voice Kore・language ja-JP・style「一息で速く短く、平板で機械的な読み上げの声。抑揚は少なめ、
-//   語尾をきっぱり」・本文「オープンペイ」) の出力の前後の無音を削り、ffmpeg で
-//   `asetrate=24000*1.15,aresample=24000,afftfilt=real='hypot(re,im)':imag='0':win_size=256:overlap=0.75,loudnorm=I=-16:TP=-1.5`
-//   をかけて 64 kbps の mp3 にした。中身を変えるときはファイル名の版 (-v1) を上げる (古い版をキャッシュした端末と混ざらない)。
+// - public/sounds/openpay-complete-v1.mp3 (約 0.5 秒・mono・48 kHz・64 kbps・4,460 byte)。作り方:
+//   1. Gemini API の音声生成 `gemini-api tts "オープンペイ" --language ja-JP --voice Kore --style "一息で速く短く、平板で
+//      機械的な読み上げの声。抑揚は少なめ、語尾をきっぱり"` (gemini-3.8-flash-tts・24 kHz mono WAV)
+//   2. 前後の無音を削る `ffmpeg -i in.wav -af "silenceremove=start_periods=1:start_threshold=-45dB,areverse,
+//      silenceremove=start_periods=1:start_threshold=-45dB,areverse" -ar 24000 -ac 1 trimmed.wav`
+//   3. 少し高く・ロボット声に・直流と低音を除き・音量を揃え・頭と終わりを短くフェード (終わりの「プツ」を防ぐ)
+//      `ffmpeg -i trimmed.wav -af "asetrate=24000*1.15,aresample=24000,afftfilt=real='hypot(re,im)':imag='0':win_size=256:
+//      overlap=0.75,highpass=f=60,loudnorm=I=-16:TP=-1.5,aresample=48000,afade=t=in:d=0.005,areverse,afade=t=in:d=0.02,
+//      areverse" -ac 1 -ar 48000 -b:a 64k openpay-complete-v1.mp3`
+//   TTS は同じ指定でも毎回少し違う声になるので、元の WAV は運営者の手元 (plans/sound-source/・gitignore) に残してある。
+//   中身を変えるときはファイル名の版 (-v1) を上げる (古い版をキャッシュした端末と混ざらない・tests/lib/successChime.test.ts
+//   が sha256 で中身を固定している)。
 // - Gemini API の規約 (aistudio.google.com/docs/terms・2026-03-23 版) は「Google won't claim ownership over that content」。
 //   アプリは実行時に Gemini を呼ばず、このファイルを配るだけ。他社の決済音の節や声には寄せていない (名前を読むだけ)。
 // - 支払いボタンを押したとき (primeChimeAudio) に読み込んでおき、完了画面で鳴らす。読み込みが済んでいなければ最大
@@ -71,22 +78,13 @@ export function primeChimeAudio(): void {
 
 // ── 完了音の声 ──────────────────────────────────────────────────────────────
 const VOICE_URL = '/sounds/openpay-complete-v1.mp3';
-/** 声の音量。合成チャイム (peak 0.18 の sine 3 音) と同じくらいに聞こえる大きさ (ファイルは -16 LUFS に揃えてある)。 */
+/** 声の音量 (耳で合わせた値・ファイルは -16 LUFS)。計算では合成チャイムより平均で 5〜6 dB 大きい。実機の聞こえ方で直す。 */
 const VOICE_GAIN = 0.5;
 /** 完了画面の時点で声を読み終えていないとき、待つ上限。過ぎたら合成チャイムを鳴らす (完了の合図を遅らせすぎない)。 */
 export const VOICE_WAIT_MS = 400;
 /** 読み込み自体の打ち切り。固まった fetch / decode を待ち続けず、次の支払いで読み直せるようにする。 */
 export const VOICE_LOAD_TIMEOUT_MS = 10_000;
 
-// 待ちの期限は単調な時計で測る (timer の callback は event loop が塞がると遅れて走るので、読み終わった側でも判定する)。
-function nowMs(): number {
-  try {
-    if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
-  } catch {
-    /* noop: performance が使えない環境は Date で測る */
-  }
-  return Date.now();
-}
 
 let voiceBuffer: AudioBuffer | null = null;
 let voiceLoading: Promise<AudioBuffer | null> | null = null;
@@ -111,10 +109,9 @@ function decodeVoice(c: AudioContext, data: ArrayBuffer): Promise<AudioBuffer> {
 function loadVoice(c: AudioContext): Promise<AudioBuffer | null> {
   if (voiceBuffer) return Promise.resolve(voiceBuffer);
   if (voiceLoading) return voiceLoading;
-  if (typeof fetch !== 'function') return Promise.resolve(null);
-  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const controller = new AbortController();
   let giveUp: ReturnType<typeof setTimeout> | undefined;
-  const attempt: Promise<AudioBuffer | null> = fetch(VOICE_URL, controller ? { signal: controller.signal } : undefined)
+  const attempt: Promise<AudioBuffer | null> = fetch(VOICE_URL, { signal: controller.signal })
     .then((response) => {
       if (!response.ok) throw new Error(`voice ${response.status}`);
       return response.arrayBuffer();
@@ -130,7 +127,7 @@ function loadVoice(c: AudioContext): Promise<AudioBuffer | null> {
     .catch(() => null);
   const timedOut = new Promise<null>((resolve) => {
     giveUp = setTimeout(() => {
-      controller?.abort();
+      controller.abort();
       resolve(null);
     }, VOICE_LOAD_TIMEOUT_MS);
   });
@@ -211,7 +208,8 @@ export function playSuccessChime(): void {
       return;
     }
     let settled = false;
-    const deadline = nowMs() + VOICE_WAIT_MS;
+    // 期限は単調な時計で測り、読み終わった側でも判定する (timer の callback は event loop が塞がると遅れて走る)。
+    const deadline = performance.now() + VOICE_WAIT_MS;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -222,7 +220,7 @@ export function playSuccessChime(): void {
       settled = true;
       clearTimeout(timer);
       // timer の callback より先に読み終わりが走っても、期限を過ぎていたら声は鳴らさない (合成チャイムだけ)。
-      if (!buffer || nowMs() > deadline || !playVoice(c, buffer)) playFallbackChime();
+      if (!buffer || performance.now() > deadline || !playVoice(c, buffer)) playFallbackChime();
     });
   } catch {
     /* noop: 完了音の失敗で UI を壊さない */
