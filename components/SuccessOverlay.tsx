@@ -17,6 +17,9 @@ import { CopyableField } from './CopyableField';
 import { NonCustodialNotice } from './NonCustodialNotice';
 import { NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
 
+/** 完了画面が裏で出たとき、表に戻ってから音を鳴らす上限 (ミリ秒)。これより遅く戻ったら鳴らさない。 */
+export const CHIME_ON_RETURN_MAX_MS = 60_000;
+
 function formatTimeHMS(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
@@ -58,11 +61,31 @@ export function SuccessOverlay({
   // 決済完了の音 (声「オープンペイ」・読めないときは合成チャイム・lib/successChime.ts)。overlay マウント時に 1 回だけ
   // 鳴らす。有効判定は永続値を直接読む (toggle state の hydration を待たない)。
   // 各 form の onSubmit で primeChimeAudio() 済なので iOS でも鳴る。
+  // ページが裏にあるとき (ウォレットのアプリで承認している間に決済が確定した等) は iPhone が音を出さないので、表に戻った
+  // ときに 1 回だけ鳴らす (2026-11-24 user「HashPort で承認して戻るのが遅く、完了画面が出ていて鳴らなかった」)。戻るまでが
+  // CHIME_ON_RETURN_MAX_MS を超えたら鳴らさない (時間がたってから急に鳴って驚かせない)。StrictMode の mount → unmount →
+  // mount でも聞き手を付け直せるよう、chimedRef は鳴らしたとき (または鳴らさないと決めたとき) にだけ立てる。
   const chimedRef = useRef(false);
   useEffect(() => {
-    if (chimedRef.current) return;
-    chimedRef.current = true;
-    if (isSuccessSoundEnabled()) playSuccessChime();
+    if (chimedRef.current || !isSuccessSoundEnabled()) return;
+    const play = () => {
+      if (chimedRef.current) return;
+      chimedRef.current = true;
+      playSuccessChime();
+    };
+    if (document.visibilityState !== 'hidden') {
+      play();
+      return;
+    }
+    const shownAt = performance.now();
+    const onVisible = () => {
+      if (document.visibilityState === 'hidden') return;
+      document.removeEventListener('visibilitychange', onVisible);
+      if (performance.now() - shownAt <= CHIME_ON_RETURN_MAX_MS) play();
+      else chimedRef.current = true;
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
 
   // 1 秒ごとに現在時刻を更新 (店主が「今支払った」と判断する時計)

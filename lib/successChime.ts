@@ -42,7 +42,7 @@ function getCtx(): AudioContext | null {
 export function unlockChimeAudio(): AudioContext | null {
   try {
     const c = getCtx();
-    if (c && c.state === 'suspended') void c.resume().catch(() => undefined);
+    if (c && c.state !== 'running') void c.resume().catch(() => undefined);
     return c;
   } catch {
     /* noop: 解錠失敗は無視 (最悪その回は鳴らないだけ) */
@@ -73,8 +73,8 @@ function playTones(notes: ReadonlyArray<Tone>, peak: number, dur: number): void 
   try {
     const c = getCtx();
     if (!c) return;
-    // gesture 外で suspended のままなら resume を試みる (鳴らない環境では no-op)。
-    if (c.state === 'suspended') void c.resume().catch(() => undefined);
+    // running でない (gesture 外の suspended・iOS が裏に回したときの interrupted) なら resume を試みる (鳴らない環境では no-op)。
+    if (c.state !== 'running') void c.resume().catch(() => undefined);
 
     const now = c.currentTime;
     for (const n of notes) {
@@ -106,8 +106,8 @@ export function playSuccessChime(): void {
   try {
     const c = getCtx();
     if (!c) return;
-    // トグルで ON にしたとき (user gesture の中) にも解錠しておく。
-    if (c.state === 'suspended') void c.resume().catch(() => undefined);
+    // トグルで ON にしたとき (user gesture の中) にも解錠しておく。iOS が裏に回して interrupted にした context も戻す。
+    if (c.state !== 'running') void c.resume().catch(() => undefined);
     let settled = false;
     const fallback = () => {
       if (settled) return;

@@ -431,6 +431,16 @@ describe('lib/successChime', () => {
     );
   });
 
+  it('iOS が裏に回して interrupted にした context も、完了のときに resume する', async () => {
+    stubFetch('fail');
+    const resume = vi.fn(() => Promise.resolve());
+    w.AudioContext = makeMockAC({ state: 'interrupted' as AudioContextState, resume });
+    const { playSuccessChime } = await import('@/lib/successChime');
+    playSuccessChime();
+    expect(resume).toHaveBeenCalled();
+    await flush();
+  });
+
   it('primeChimeAudio は suspended の時に resume を呼ぶ (iOS 解錠)', async () => {
     stubFetch('fail');
     const resume = vi.fn(() => Promise.resolve());
