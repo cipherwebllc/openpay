@@ -42,17 +42,30 @@ function getCtx(): AudioContext | null {
 }
 
 /**
- * 支払いボタン押下 (user gesture) 時に呼ぶ。iOS の自動再生ロックを解錠するため、
- * AudioContext を生成し suspended なら resume する。鳴らしはしない。冪等。
+ * user gesture の中で呼ぶ。iOS の自動再生ロックを解錠するため、AudioContext を生成し suspended なら
+ * resume する。鳴らしはしない・声も読まない (厨房や注文状況の画面の新着チャイム用)。冪等。
  */
-export function primeChimeAudio(): void {
+export function unlockChimeAudio(): AudioContext | null {
   try {
     const c = getCtx();
     if (c && c.state === 'suspended') void c.resume().catch(() => undefined);
-    // 完了音の声を先に読んでおく (決済の確定まで数秒あるので、完了画面の時点ではたいてい読み終わっている)。
-    if (c) void loadVoice(c);
+    return c;
   } catch {
     /* noop: 解錠失敗は無視 (最悪その回は鳴らないだけ) */
+    return null;
+  }
+}
+
+/**
+ * 支払いボタン押下 (user gesture) 時に呼ぶ。unlockChimeAudio と同じ解錠に加え、完了音の声を先に読んでおく
+ * (決済の確定まで数秒あるので、完了画面の時点ではたいてい読み終わっている)。鳴らしはしない。冪等。
+ */
+export function primeChimeAudio(): void {
+  try {
+    const c = unlockChimeAudio();
+    if (c) void loadVoice(c);
+  } catch {
+    /* noop: 先読みの失敗は無視 (完了のときに読み直すか合成チャイムになるだけ) */
   }
 }
 
@@ -62,6 +75,18 @@ const VOICE_URL = '/sounds/openpay-complete-v1.mp3';
 const VOICE_GAIN = 0.5;
 /** 完了画面の時点で声を読み終えていないとき、待つ上限。過ぎたら合成チャイムを鳴らす (完了の合図を遅らせすぎない)。 */
 export const VOICE_WAIT_MS = 400;
+/** 読み込み自体の打ち切り。固まった fetch / decode を待ち続けず、次の支払いで読み直せるようにする。 */
+export const VOICE_LOAD_TIMEOUT_MS = 10_000;
+
+// 待ちの期限は単調な時計で測る (timer の callback は event loop が塞がると遅れて走るので、読み終わった側でも判定する)。
+function nowMs(): number {
+  try {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
+  } catch {
+    /* noop: performance が使えない環境は Date で測る */
+  }
+  return Date.now();
+}
 
 let voiceBuffer: AudioBuffer | null = null;
 let voiceLoading: Promise<AudioBuffer | null> | null = null;
@@ -80,14 +105,16 @@ function decodeVoice(c: AudioContext, data: ArrayBuffer): Promise<AudioBuffer> {
 }
 
 /**
- * 声を読み込んで AudioBuffer にする。読めなかったら null (失敗は覚えず、次の支払いでまた読む)。throw しない。
- * 同じ読み込みの最中に呼ばれたら、その読み込みを返す。
+ * 声を読み込んで AudioBuffer にする。読めなかった・VOICE_LOAD_TIMEOUT_MS を過ぎたら null (失敗は覚えず、次の支払いで
+ * また読む)。throw しない・reject しない。同じ読み込みの最中に呼ばれたら、その読み込みを返す (fetch は 1 本)。
  */
 function loadVoice(c: AudioContext): Promise<AudioBuffer | null> {
   if (voiceBuffer) return Promise.resolve(voiceBuffer);
   if (voiceLoading) return voiceLoading;
   if (typeof fetch !== 'function') return Promise.resolve(null);
-  voiceLoading = fetch(VOICE_URL)
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  let giveUp: ReturnType<typeof setTimeout> | undefined;
+  const attempt: Promise<AudioBuffer | null> = fetch(VOICE_URL, controller ? { signal: controller.signal } : undefined)
     .then((response) => {
       if (!response.ok) throw new Error(`voice ${response.status}`);
       return response.arrayBuffer();
@@ -97,12 +124,22 @@ function loadVoice(c: AudioContext): Promise<AudioBuffer | null> {
       voiceBuffer = buffer;
       return buffer;
     })
-    .catch(() => {
-      // 声が読めなくても完了の合図は合成チャイムで出す (決済の画面に波及させない)。次の機会に読み直す。
-      voiceLoading = null;
-      return null;
-    });
-  return voiceLoading;
+    // 声が読めなくても完了の合図は合成チャイムで出す (決済の画面に波及させない)。
+    .catch(() => null);
+  const timedOut = new Promise<null>((resolve) => {
+    giveUp = setTimeout(() => {
+      controller?.abort();
+      resolve(null);
+    }, VOICE_LOAD_TIMEOUT_MS);
+  });
+  const loading: Promise<AudioBuffer | null> = Promise.race([attempt, timedOut]).then((buffer) => {
+    clearTimeout(giveUp);
+    // 読めなかったら次の機会に読み直す (この読み込みがまだ最新のときだけ外す)。
+    if (!buffer && voiceLoading === loading) voiceLoading = null;
+    return buffer;
+  });
+  voiceLoading = loading;
+  return loading;
 }
 
 /** 声を 1 回鳴らす。鳴らせなかったら false (呼び出し側が合成チャイムに切り替える)。 */
@@ -112,7 +149,9 @@ function playVoice(c: AudioContext, buffer: AudioBuffer): boolean {
     const gain = c.createGain();
     source.buffer = buffer;
     gain.gain.value = VOICE_GAIN;
-    source.connect(gain).connect(c.destination);
+    // connect は 1 段ずつ呼ぶ (古い WebKit の connect は接続先を返さないので、つなげて書くと 2 段目で投げる)。
+    source.connect(gain);
+    gain.connect(c.destination);
     source.start();
     return true;
   } catch {
@@ -144,7 +183,9 @@ function playTones(notes: ReadonlyArray<Tone>, peak: number, dur: number): void 
       gain.gain.setValueAtTime(0.0001, start);
       gain.gain.exponentialRampToValueAtTime(peak, start + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
-      osc.connect(gain).connect(c.destination);
+      // connect は 1 段ずつ (古い WebKit の connect は接続先を返さない)。
+      osc.connect(gain);
+      gain.connect(c.destination);
       osc.start(start);
       osc.stop(start + dur + 0.02);
     }
@@ -168,6 +209,7 @@ export function playSuccessChime(): void {
       return;
     }
     let settled = false;
+    const deadline = nowMs() + VOICE_WAIT_MS;
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -177,7 +219,8 @@ export function playSuccessChime(): void {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (!buffer || !playVoice(c, buffer)) playFallbackChime();
+      // timer の callback より先に読み終わりが走っても、期限を過ぎていたら声は鳴らさない (合成チャイムだけ)。
+      if (!buffer || nowMs() > deadline || !playVoice(c, buffer)) playFallbackChime();
     });
   } catch {
     /* noop: 完了音の失敗で UI を壊さない */

@@ -96,7 +96,11 @@ vi.mock('@/hooks/useOrderCalls', () => ({
 const chime = vi.hoisted(() => ({ play: vi.fn(), prime: vi.fn() }));
 vi.mock('@/lib/successChime', () => ({
   playNewOrderChime: () => chime.play(),
-  primeChimeAudio: () => chime.prime(),
+  // 新着チャイムの画面は解錠だけ (決済の声を読む primeChimeAudio は使わない)。
+  unlockChimeAudio: () => chime.prime(),
+  primeChimeAudio: () => {
+    throw new Error('primeChimeAudio は決済の画面だけ');
+  },
 }));
 const soundHold = vi.hoisted(() => ({ enabled: false, set: vi.fn() }));
 vi.mock('@/lib/soundPref', () => ({

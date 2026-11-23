@@ -18,7 +18,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useOrderStatus } from '@/hooks/useOrderStatus';
-import { primeChimeAudio, playNewOrderChime } from '@/lib/successChime';
+import { unlockChimeAudio, playNewOrderChime } from '@/lib/successChime';
 import { tokyoHHMM } from '@/lib/shopTime';
 import type { OrderPickupState } from '@/lib/orderRelay';
 
@@ -98,7 +98,9 @@ export function OrderStatusView({ token }: { token: string | null }) {
   // 自動再生ポリシー (iOS 等) 対策: ナビゲーション直後は gesture が無いため、ページ上での
   // 最初のタップで 1 度だけ AudioContext を解錠する。
   useEffect(() => {
-    const prime = () => primeChimeAudio();
+    const prime = () => {
+      unlockChimeAudio();
+    };
     window.addEventListener('pointerdown', prime, { once: true });
     return () => window.removeEventListener('pointerdown', prime);
   }, []);

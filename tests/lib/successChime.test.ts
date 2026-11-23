@@ -223,6 +223,151 @@ describe('lib/successChime', () => {
     expect(createOscillator).toHaveBeenCalledTimes(3);
   });
 
+  it('unlockChimeAudio は解錠だけで、声のファイルを読まない (厨房・注文状況の画面用)', async () => {
+    const fetchMock = stubFetch('ok');
+    const resume = vi.fn(() => Promise.resolve());
+    w.AudioContext = makeMockAC({ state: 'suspended', resume });
+    const { unlockChimeAudio } = await import('@/lib/successChime');
+    unlockChimeAudio();
+    await flush();
+    expect(resume).toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('古い WebKit (connect が接続先を返さない) でも、声と合成チャイムを鳴らせる', async () => {
+    const oldNode = () => ({ ...makeNode(), connect: vi.fn(() => undefined), buffer: null as unknown });
+    // 声: 読めたら start が 1 回。
+    stubFetch('ok');
+    const voiceSources: Array<ReturnType<typeof oldNode>> = [];
+    w.AudioContext = makeMockAC({
+      state: 'running',
+      createGain: oldNode,
+      createBufferSource: () => {
+        const node = oldNode();
+        voiceSources.push(node);
+        return node;
+      },
+    });
+    let mod = await import('@/lib/successChime');
+    mod.playSuccessChime();
+    await flush();
+    expect(voiceSources).toHaveLength(1);
+    expect(voiceSources[0].start).toHaveBeenCalledTimes(1);
+    // 合成チャイム: 声を読めないとき、3 音とも start する。
+    vi.resetModules();
+    stubFetch('fail');
+    const oscillators: Array<ReturnType<typeof oldNode>> = [];
+    w.AudioContext = makeMockAC({
+      state: 'running',
+      createGain: oldNode,
+      createOscillator: () => {
+        const node = oldNode();
+        oscillators.push(node);
+        return node;
+      },
+    });
+    mod = await import('@/lib/successChime');
+    mod.playSuccessChime();
+    await flush();
+    expect(oscillators).toHaveLength(3);
+    for (const osc of oscillators) expect(osc.start).toHaveBeenCalledTimes(1);
+  });
+
+  it('decode に失敗したら合成チャイムを鳴らし、次の支払いで読み直して声を鳴らす', async () => {
+    const fetchMock = stubFetch('ok');
+    let decodes = 0;
+    const createBufferSource = vi.fn(() => ({ ...makeNode(), buffer: null }));
+    const createOscillator = vi.fn(() => makeNode());
+    w.AudioContext = makeMockAC({
+      state: 'running',
+      createBufferSource,
+      createOscillator,
+      decodeAudioData: () => {
+        decodes += 1;
+        return decodes === 1 ? Promise.reject(new Error('bad mp3')) : Promise.resolve(VOICE_BUFFER);
+      },
+    });
+    const { primeChimeAudio, playSuccessChime } = await import('@/lib/successChime');
+    primeChimeAudio();
+    playSuccessChime();
+    await flush();
+    expect(createOscillator).toHaveBeenCalledTimes(3);
+    expect(createBufferSource).not.toHaveBeenCalled();
+    primeChimeAudio();
+    await flush();
+    playSuccessChime();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(createBufferSource).toHaveBeenCalledTimes(1);
+    expect(createOscillator).toHaveBeenCalledTimes(3);
+  });
+
+  it('読み込み中に支払いボタンと完了が重なっても、fetch は 1 本で声は 1 回', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const createBufferSource = vi.fn(() => ({ ...makeNode(), buffer: null }));
+    const createOscillator = vi.fn(() => makeNode());
+    w.AudioContext = makeMockAC({ state: 'running', createBufferSource, createOscillator });
+    const { primeChimeAudio, playSuccessChime } = await import('@/lib/successChime');
+    primeChimeAudio();
+    primeChimeAudio();
+    playSuccessChime();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    finish({ ok: true, status: 200, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) });
+    await flush();
+    expect(createBufferSource).toHaveBeenCalledTimes(1);
+    expect(createOscillator).not.toHaveBeenCalled();
+  });
+
+  it('読み終わりが timer より先に走っても、VOICE_WAIT_MS を過ぎていたら声ではなく合成チャイム (1 回だけ)', async () => {
+    let finish: (value: unknown) => void = () => undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      ),
+    );
+    let clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const createBufferSource = vi.fn(() => ({ ...makeNode(), buffer: null }));
+    const createOscillator = vi.fn(() => makeNode());
+    w.AudioContext = makeMockAC({ state: 'running', createBufferSource, createOscillator });
+    const { playSuccessChime, VOICE_WAIT_MS } = await import('@/lib/successChime');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    playSuccessChime();
+    clock += VOICE_WAIT_MS + 40; // event loop が塞がって timer がまだ走っていない状態
+    finish({ ok: true, status: 200, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) });
+    await flush();
+    expect(createBufferSource).not.toHaveBeenCalled();
+    expect(createOscillator).toHaveBeenCalledTimes(3);
+    vi.advanceTimersByTime(VOICE_WAIT_MS);
+    expect(createOscillator).toHaveBeenCalledTimes(3);
+    vi.restoreAllMocks();
+  });
+
+  it('読み込みが VOICE_LOAD_TIMEOUT_MS を過ぎて固まったら打ち切り、次の支払いで読み直す', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const fetchMock = vi.fn(() => new Promise(() => undefined));
+    vi.stubGlobal('fetch', fetchMock);
+    w.AudioContext = makeMockAC({ state: 'running' });
+    const { primeChimeAudio, VOICE_LOAD_TIMEOUT_MS } = await import('@/lib/successChime');
+    primeChimeAudio();
+    primeChimeAudio();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(VOICE_LOAD_TIMEOUT_MS);
+    await flush();
+    primeChimeAudio();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('声のファイルは public/sounds にあり、小さい (20 KB 未満)', async () => {
     const { statSync } = await import('node:fs');
     const { join } = await import('node:path');
