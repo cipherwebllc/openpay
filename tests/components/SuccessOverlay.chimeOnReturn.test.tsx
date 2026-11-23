@@ -1,7 +1,7 @@
 // 完了画面が裏で出たとき (ウォレットのアプリで承認している間に決済が確定した等)、iPhone は音を出さないので、
 // 表に戻ったときに 1 回だけ鳴らす (2026-11-24 user)。戻るまでが CHIME_ON_RETURN_MAX_MS を超えたら鳴らさない。
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act } from '@testing-library/react';
+import { act, fireEvent, screen } from '@testing-library/react';
 
 vi.mock('wagmi', () => ({
   useSignMessage: () => ({ signMessageAsync: vi.fn(), isPending: false }),
@@ -9,11 +9,14 @@ vi.mock('wagmi', () => ({
   usePublicClient: () => undefined,
 }));
 const chime = vi.hoisted(() => ({ play: vi.fn() }));
+// 完了音の ON/OFF は localStorage を読む本物の hook (useSuccessSoundPref) が soundPref を経由して読む。
 vi.mock('@/lib/successChime', () => ({ playSuccessChime: () => chime.play() }));
 const pref = vi.hoisted(() => ({ enabled: true }));
 vi.mock('@/lib/soundPref', () => ({
   isSuccessSoundEnabled: () => pref.enabled,
-  setSuccessSoundEnabled: vi.fn(),
+  setSuccessSoundEnabled: (v: boolean) => {
+    pref.enabled = v;
+  },
 }));
 
 import { renderWithIntl as render } from '../_helpers/i18n';
@@ -21,7 +24,7 @@ import { SuccessOverlay, CHIME_ON_RETURN_MAX_MS } from '@/components/SuccessOver
 
 const TX_HASH = `0x${'a'.repeat(64)}`;
 let visibility: DocumentVisibilityState = 'visible';
-let clock = 1000;
+let wall = 1_000_000;
 
 function setVisibility(next: DocumentVisibilityState) {
   visibility = next;
@@ -30,8 +33,8 @@ function setVisibility(next: DocumentVisibilityState) {
   });
 }
 
-function renderOverlay() {
-  return render(<SuccessOverlay amountDisplay="3 JPYC" txHash={TX_HASH} onDismiss={() => undefined} />);
+function renderOverlay(opts?: { reactStrictMode?: boolean }) {
+  return render(<SuccessOverlay amountDisplay="3 JPYC" txHash={TX_HASH} onDismiss={() => undefined} />, opts);
 }
 
 describe('SuccessOverlay の完了音 (裏で出たときは戻ってから鳴らす)', () => {
@@ -39,9 +42,11 @@ describe('SuccessOverlay の完了音 (裏で出たときは戻ってから鳴�
     chime.play.mockReset();
     pref.enabled = true;
     visibility = 'visible';
-    clock = 1000;
+    wall = 1_000_000;
     vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
-    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    vi.spyOn(Date, 'now').mockImplementation(() => wall);
+    // performance.now は端末のスリープ中に進まない (WebKit) ので、テストでは止めておく。
+    vi.spyOn(performance, 'now').mockImplementation(() => 5_000);
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -59,7 +64,7 @@ describe('SuccessOverlay の完了音 (裏で出たときは戻ってから鳴�
     visibility = 'hidden';
     renderOverlay();
     expect(chime.play).not.toHaveBeenCalled();
-    clock += 20_000;
+    wall += 20_000;
     setVisibility('visible');
     expect(chime.play).toHaveBeenCalledTimes(1);
     setVisibility('hidden');
@@ -70,12 +75,36 @@ describe('SuccessOverlay の完了音 (裏で出たときは戻ってから鳴�
   it('戻るまでが CHIME_ON_RETURN_MAX_MS を超えたら鳴らさない (時間がたってから急に鳴らさない)', () => {
     visibility = 'hidden';
     renderOverlay();
-    clock += CHIME_ON_RETURN_MAX_MS + 1;
+    wall += CHIME_ON_RETURN_MAX_MS + 1; // スリープを挟んで実時刻だけ進んだ (performance.now は止まったまま)
     setVisibility('visible');
     expect(chime.play).not.toHaveBeenCalled();
     setVisibility('hidden');
     setVisibility('visible');
     expect(chime.play).not.toHaveBeenCalled();
+  });
+
+  it('React StrictMode (mount → unmount → mount) でも、裏で出たら戻ったときに 1 回だけ鳴らす', () => {
+    visibility = 'hidden';
+    renderOverlay({ reactStrictMode: true });
+    expect(chime.play).not.toHaveBeenCalled();
+    setVisibility('visible');
+    expect(chime.play).toHaveBeenCalledTimes(1);
+  });
+
+  it('戻るのを待っている間に完了音を OFF にしたら、戻っても鳴らさない', () => {
+    visibility = 'hidden';
+    renderOverlay();
+    pref.enabled = false; // 別のタブの完了画面で OFF にした
+    setVisibility('visible');
+    expect(chime.play).not.toHaveBeenCalled();
+  });
+
+  it('完了音 OFF で表に出たら鳴らさず、ON に切り替えた瞬間に確認の音を 1 回だけ鳴らす', () => {
+    pref.enabled = false;
+    renderOverlay();
+    expect(chime.play).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /完了音/ }));
+    expect(chime.play).toHaveBeenCalledTimes(1);
   });
 
   it('戻る前に完了画面を閉じたら、戻っても鳴らさない (聞き手を外す)', () => {

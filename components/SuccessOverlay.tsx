@@ -77,11 +77,14 @@ export function SuccessOverlay({
       play();
       return;
     }
-    const shownAt = performance.now();
+    // 戻るまでの時間はふだんの時刻 (Date.now) で測る。WebKit の performance.now は端末のスリープ中に進まないので、
+    // スリープを挟むと 60 秒を過ぎても「60 秒以内」に見えてしまう。
+    const shownAt = Date.now();
     const onVisible = () => {
       if (document.visibilityState === 'hidden') return;
       document.removeEventListener('visibilitychange', onVisible);
-      if (performance.now() - shownAt <= CHIME_ON_RETURN_MAX_MS) play();
+      // 待っている間に (別のタブの完了画面などで) 完了音を OFF にしていたら鳴らさない。
+      if (Date.now() - shownAt <= CHIME_ON_RETURN_MAX_MS && isSuccessSoundEnabled()) play();
       else chimedRef.current = true;
     };
     document.addEventListener('visibilitychange', onVisible);
