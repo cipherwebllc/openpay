@@ -2096,7 +2096,8 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
   },
   {
     // ニュース一覧 (https://www.netstars.co.jp/news/) は 2026-11-23 に 404 になっていたので、トップページのお知らせ
-    // (最新 8 件) で確かめた。8 件の本文でステーブルコインに触れるのは会社概要・StarPay の紹介の定型文だけ。
+    // (最新 8 件) で確かめた。8 件の本文でステーブルコインに触れるのは、ネットスターズと Stripe の会社紹介・StarPay の紹介の
+    // 定型文だけ (文は見出しで確かめられる範囲に絞る)。
     date: '2026-11-23',
     collectedAt: '2026-11-24',
     scopes: ['stablecoin-payments'],
@@ -2104,9 +2105,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'verified',
     assets: ['JPYC', 'USDT'],
     summary:
-      'Re-verified on the news section of the NetStars website (the eight latest releases, 2026-09-30 to 2026-11-18): none announces a launch date, fee or chain change for Stablecoin Pay. The one release since the last check, on 2026-11-18, is about starting cross-border QR payments in Japan with Liquid Group through RoamQR and JPQR Global, and mentions stablecoins only in the company profile.',
+      'Re-verified on the news section of the NetStars website: none of the eight news headlines dated 2026-09-30 through 2026-11-18 reports a change to the launch date, fees or supported chains of Stablecoin Pay. The 2026-11-18 headline announces the launch of cross-border QR payments in Japan with Liquid Group through RoamQR and JPQR Global.',
     summaryJa:
-      'ネットスターズ公式サイトのお知らせ (最新の 8 件・2026-09-30〜11-18) で再確認: Stablecoin Pay の稼働日・手数料・対応チェーンの変更を伝える発表はない。前回の確認の後の 1 件 (11/18) は Liquid Group との RoamQR と JPQR Global を通じた日本でのクロスボーダー QR 決済の開始で、ステーブルコインには会社概要の中で触れているだけ。',
+      'ネットスターズ公式サイトのお知らせで再確認: 2026-09-30〜11-18 の 8 件の見出しに、Stablecoin Pay の稼働日・手数料・対応チェーンの変更を伝えるものはない。11/18 の発表は、Liquid Group との RoamQR と JPQR Global を通じた日本でのクロスボーダー QR 決済の開始を伝えている。',
     sourceUrl: 'https://www.netstars.co.jp/',
   },
 ];
