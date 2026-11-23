@@ -19,7 +19,7 @@ import { useOrderCalls } from '@/hooks/useOrderCalls';
 import { useNewOrderFlash } from '@/hooks/useNewOrderFlash';
 import { OrderCard } from '@/components/OrderCard';
 import { isOrderAlertSoundEnabled, setOrderAlertSoundEnabled } from '@/lib/soundPref';
-import { primeChimeAudio, playNewOrderChime } from '@/lib/successChime';
+import { unlockChimeAudio, playNewOrderChime } from '@/lib/successChime';
 import { getStoredOrderToken, setStoredOrderToken, clearStoredOrderToken } from '@/lib/orderTokenClient';
 import { orderDeadlineKey, type StoredOrder, uncookedItemTotals } from '@/lib/orderRelay';
 import { OrderCallSection } from '@/components/OrderCallSection';
@@ -111,7 +111,7 @@ export function OrderFulfillmentBoard({
     const next = !soundOnRef.current;
     setOrderAlertSoundEnabled(next);
     if (next) {
-      primeChimeAudio(); // user gesture 中に解錠
+      unlockChimeAudio(); // user gesture 中に解錠 (決済の声は読まない)
       playNewOrderChime(); // 有効化を音で確認
     }
     setSoundOn(next);
@@ -120,7 +120,9 @@ export function OrderFulfillmentBoard({
   // 「ON 表示なのに鳴らない」を避けるため、ON のときは最初の任意タップで一度だけ解錠する。
   useEffect(() => {
     if (!soundOn) return; // useEffect は client のみ → window 存在は自明 (prime も内部でガード)
-    const prime = () => primeChimeAudio();
+    const prime = () => {
+      unlockChimeAudio();
+    };
     window.addEventListener('pointerdown', prime, { once: true });
     return () => window.removeEventListener('pointerdown', prime);
   }, [soundOn]);
