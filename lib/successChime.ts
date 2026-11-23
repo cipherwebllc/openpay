@@ -121,6 +121,8 @@ function loadVoice(c: AudioContext): Promise<AudioBuffer | null> {
     })
     .then((data) => decodeVoice(c, data))
     .then((buffer) => {
+      // 打ち切り (VOICE_LOAD_TIMEOUT_MS) の後に遅れて読み終わった声も使う。正しく読めた声なので、次の支払いで
+      // 読み直すより早く鳴らせる (打ち切りは「固まったまま待ち続けない」ためで、声を捨てるためではない)。
       voiceBuffer = buffer;
       return buffer;
     })
