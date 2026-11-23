@@ -42,8 +42,9 @@ export const DIRECTORY_ENTRIES = [
     // 2026-11-09 (第 14 回): 11/10 の臨時メンテナンスの告知 (11/06) は changelog のみ (エントリの事実は不変)
     // 2026-11-18 (第 15 回): 11/10 のメンテナンスの完了と、11/10〜11 の臨時メンテナンス 2 回 (GMO あおぞらネット銀行の
     //   銀行 API サービスの一時停止に伴う) は changelog のみ (エントリの事実は不変)
+    // 2026-11-24 (第 16 回): 11/20 のアップデート (マイページを開く手順・取引履歴) は changelog のみ (エントリの事実は不変)
     ...provenance('https://jpyc.co.jp/', 'JPYC株式会社', 'official', {
-      verifiedAt: '2026-11-18',
+      verifiedAt: '2026-11-23',
       updatedAt: '2026-10-06',
     }),
     facts: {
@@ -120,7 +121,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-11-18',
+      verifiedAt: '2026-11-23',
       updatedAt: '2026-09-04',
     }),
     facts: {
@@ -237,11 +238,13 @@ export const DIRECTORY_ENTRIES = [
     // 2026-10-13 (第 8 回): 公取委への情報提供 (10/09) と、補充 2 件 (5/26 ダイナースのポイント交換・7/22 AZ-COM 丸和) も changelog のみ
     // 2026-10-27 (第 11 回): SBJ 銀行・LINE NEXT との覚書 (10/21 発表) は changelog のみ (エントリの事実は不変)
     // 2026-11-02 (第 12 回): 1 周年の公表値 (10/27)・日本免税の還付 (10/29) も changelog のみ
+    // 2026-11-24 (第 16 回): JPYC Apps (JPYC Prepaid のギフトコード販売) の臨時メンテナンスの継続 (11/18) は changelog のみ
+    //   (資金移動業型の JPYC と JPYC EX は通常どおり = エントリの事実は不変)
     ...provenance(
       'https://corporate.jpyc.co.jp/news/posts/jpyc-ex-launch',
       'JPYC株式会社',
       'official',
-      { verifiedAt: '2026-11-02', updatedAt: '2026-08-27' },
+      { verifiedAt: '2026-11-23', updatedAt: '2026-08-27' },
     ),
     facts: {
       description: '日本円と連動するよう設計された電子決済手段のステーブルコイン。',

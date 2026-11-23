@@ -142,7 +142,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2027-01..2027-03',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-11-18',
+    verifiedAt: '2026-11-23',
   },
   {
     provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
@@ -159,7 +159,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2026-10..2027-02',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-11-18',
+    verifiedAt: '2026-11-23',
   },
   {
     provider: 'Mi&T (Osaka Pref. subsidy)',
@@ -181,7 +181,8 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: '2026-11-16',
     plannedPeriod: '2026-11..2027-03',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000005.000187870.html',
-    verifiedAt: '2026-11-18',
+    // 2026-11-23 (第 16 回): Mi&T 公式 X (11/23) の報告 (登録者 50 人超・中百舌鳥のお店) で、項目の値は変わらない。
+    verifiedAt: '2026-11-23',
   },
   {
     // 2026-09-04 の第 2 回週次更新で追跡開始 (発表は 2026-07-13・backfill)。
@@ -199,7 +200,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: '2026-07-13',
     plannedPeriod: null,
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
-    verifiedAt: '2026-11-18',
+    verifiedAt: '2026-11-23',
   },
   {
     // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-01-28 の PR TIMES・backfill)。
@@ -296,5 +297,25 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     plannedPeriod: null,
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000001991.000011650.html',
     verifiedAt: '2026-11-02',
+  },
+  {
+    // 2026-11-24 の第 16 回週次更新で追跡開始 (発表は 2026-11-19 の PR TIMES)。自社の EC サイトでの試験導入。
+    // 本文は「導入しました」だが開始の日付は書いていないので startedAt は null。手数料・精算の記載はない (null)。
+    provider: 'Nihon Chokuhan (EC pilot)',
+    eventKeys: ['Nihon Chokuhan (EC pilot)'],
+    stage: 'pilot',
+    assets: ['JPYC'],
+    chains: ['polygon'],
+    settlementCurrency: null,
+    merchantFee: null,
+    integrations: ['ec'],
+    posIntegration: null,
+    // 自社の EC サイトでの導入で、決済の対象地域は本文に書いていない (本社が東京なのは所在地の記載) ので null。
+    region: null,
+    announcedAt: '2026-11-19',
+    startedAt: null,
+    plannedPeriod: null,
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000081.000166086.html',
+    verifiedAt: '2026-11-23',
   },
 ];

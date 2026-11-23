@@ -76,7 +76,7 @@ describe('createPaymentMonitorEnvelope', () => {
     expect(env.changes.some((c) => c.provider === 'Aegis')).toBe(false);
   });
 
-  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 71 件', () => {
+  it('スコープ分離 (逆): 決済専用イベントは JPYC Service Monitor に載らない — 8/01 以降の delta は 74 件', () => {
     const jpyc = createServiceMonitorEnvelope(
       { changedSince: '2026-08-01', limit: SERVICE_MONITOR_MAX_LIMIT },
       {},
@@ -104,10 +104,12 @@ describe('createPaymentMonitorEnvelope', () => {
     //   8/01 以降の数には入らない) = 63 件
     // + 第 14 回 (11/09 記録) の 2 件 (11/06 jpyc-ex の 11/10 の臨時メンテナンスの告知・11/09 coincheck verified) = 65 件
     // + 第 15 回 (11/18 記録) の 6 件 (8/17 myna-wallet の Kaia 対応の backfill・11/10 と 11/11 の jpyc-ex のメンテナンス 2 件・
-    //   11/13 jpysc × カンボジア国立銀行の MOU・11/17 hashport-wallet の国外からの利用の再開・11/18 coincheck verified) = 71 件。
+    //   11/13 jpysc × カンボジア国立銀行の MOU・11/17 hashport-wallet の国外からの利用の再開・11/18 coincheck verified) = 71 件
+    // + 第 16 回 (11/24 記録) の 3 件 (11/18 jpyc の JPYC Apps のメンテナンスの継続・11/20 jpyc-ex のアップデート・
+    //   11/23 coincheck verified) = 74 件。
     // 決済スコープ専用のイベント (8/10 DG SPS launch・大阪府採択・Mi&T・各回の verified・backfill など) が混ざれば
     // この件数より増え、slug の無いイベントも入る = スコープ分離の証明 (下の slug の検査と合わせて見る)。
-    expect(jpyc.changes).toHaveLength(71);
+    expect(jpyc.changes).toHaveLength(74);
     expect(jpyc.changes.every((c) => c.slug !== undefined)).toBe(true);
     // 応答に内部ルーティング用 scopes を漏らさない。
     expect(jpyc.changes[0]).not.toHaveProperty('scopes');
@@ -134,8 +136,10 @@ describe('createPaymentMonitorEnvelope', () => {
     // + 第 14 回 (11/09 記録) の verified 4 件 (大阪府 3 社・NetStars) = 56 件
     // + 第 15 回 (11/18 記録) の 5 件 (11/10 DG SPS の Arc 対応・11/11 Mi&T の Matane の開始の発表・verified 3 件 (大阪府 2 社・
     //   NetStars)) = 61 件
+    // + 第 16 回 (11/24 記録) の 5 件 (11/19 日本直販の EC の試験導入・11/23 Mi&T の登録者の報告・verified 3 件 (大阪府 2 社・
+    //   NetStars)) = 66 件
     // (以前の backfill 3 件 = TIS/DG 実証/JCB は collectedAt が無く date < 8/10 なので含まない)
-    expect(delta.changes).toHaveLength(61);
+    expect(delta.changes).toHaveLength(66);
     expect(delta.changes[0].date).toBe('2026-08-10');
     // 並びは実効日順なので、date が cursor より古い backfill が混ざる (collectedAt は必ず cursor 以降)。
     expect(delta.changes.every((c) => (c.collectedAt ?? c.date) >= '2026-08-10')).toBe(true);
@@ -545,12 +549,14 @@ describe('createPaymentMonitorEnvelope.providers (事業者の現況行)', () =>
     // + 第 12 回 (11/02 記録) の 5 件 (TISI / CARDNET・verified 4 件) = 47 イベント
     // + 第 13 回 (11/05 記録) の verified 4 件 (大阪府 3 社・NetStars) = 51 イベント
     // + 第 14 回 (11/09 記録) の verified 4 件 (大阪府 3 社・NetStars) = 55 イベント
-    // + 第 15 回 (11/18 記録) の 5 件 (DG SPS の Arc 対応・Mi&T の Matane の開始の発表・verified 3 件) = 60 イベント。
+    // + 第 15 回 (11/18 記録) の 5 件 (DG SPS の Arc 対応・Mi&T の Matane の開始の発表・verified 3 件) = 60 イベント
+    // + 第 16 回 (11/24 記録) の 5 件 (日本直販の追加・Mi&T の登録者の報告・verified 3 件) = 65 イベント。
     // 現況行は大阪 3 社 + NetStars + 第 6 回の 3 社 (HashPort Wallet for Biz・MisePay・ローソン)
     // + 第 7 回の αU wallet + 第 12 回の TISI / CARDNET + 第 15 回の DG SPS (8/10 の開始は 8/26 より前なので、11/10 の
-    // Arc 対応で初めて入る) の 10 社分 (第 8〜11 回・第 13〜14 回のイベントは既存の社なので増えない)
-    expect(delta.changes).toHaveLength(60);
-    expect(delta.providers.map((p) => p.region).sort()).toEqual(['Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Osaka', 'Osaka', 'Osaka']);
+    // Arc 対応で初めて入る) + 第 16 回の日本直販 の 11 社分 (第 8〜11 回・第 13〜14 回のイベントは既存の社なので増えない)
+    expect(delta.changes).toHaveLength(65);
+    // 日本直販は決済の対象地域を書いていないので region は null (sort では文字列 'null' として末尾に並ぶ)。
+    expect(delta.providers.map((p) => p.region).sort()).toEqual(['Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Japan', 'Osaka', 'Osaka', 'Osaka', null]);
     // 第 2 回週次更新: 現況が変わった社は changelog の diffs と行の値が一致する (同一 PR の掟)。
     const mit = delta.providers.find((p) => p.provider.startsWith('Mi&T'))!;
     expect(mit.merchantFee).toBe('1.0%');
