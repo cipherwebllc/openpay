@@ -12,7 +12,7 @@
 //   そのままだと iOS で鳴らない。対策として支払いボタン押下 (= user gesture) の
 //   瞬間に primeChimeAudio() で AudioContext を生成/解錠 (resume) しておき、
 //   成功時に playSuccessChime() を鳴らす (POS/決済系 Web アプリの定番パターン)。
-// - チャイムは決済 UI の本筋ではないので、何があっても throw しない (全 try/catch)。
+// - チャイムは決済 UI の本筋ではないので、何があっても throw しない (同期の処理は try/catch・動的 import と読み込みは Promise の .catch で受ける)。
 // - AudioContext 非対応 (SSR / jsdom / 旧ブラウザ) では静かに no-op。
 // - iOS の物理ミュートスイッチ ON 時はブラウザ仕様で鳴らない (許容)。
 

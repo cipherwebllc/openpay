@@ -438,6 +438,8 @@ describe('lib/successChime', () => {
     const { primeChimeAudio } = await import('@/lib/successChime');
     primeChimeAudio();
     expect(resume).toHaveBeenCalled();
+    // 声の先読み (動的 import) を流し切り、次のテストへ持ち越さない。
+    await flush();
   });
 
   it('内部で例外が出ても throw しない (createOscillator が投げても握る)', async () => {
