@@ -202,7 +202,14 @@ describe('sendPushToWallet', () => {
     expect(store.remove).toHaveBeenCalledTimes(2);
     expect(store.remove).toHaveBeenCalledWith(WALLET, { endpointHash: 'b'.repeat(64) });
     expect(store.remove).toHaveBeenCalledWith(WALLET, { endpointHash: 'c'.repeat(64) });
-    expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_pruned', { endpointHash: 'b'.repeat(64) });
+    // 原因を調べられるよう、鍵そのものでなく push service の host と長さを記録する。
+    expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_pruned', {
+      endpointHash: 'b'.repeat(64), endpointHost: 'fcm.googleapis.com', p256dhBytes: 64, authBytes: 16,
+    });
+    expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_pruned', {
+      endpointHash: 'c'.repeat(64), endpointHost: 'fcm.googleapis.com', p256dhBytes: 65, authBytes: 15,
+    });
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain('A'.repeat(86));
     expect(logger.warn).not.toHaveBeenCalledWith('push.send_failed', expect.anything());
   });
 
@@ -218,6 +225,9 @@ describe('sendPushToWallet', () => {
     expect(webPush.sendNotification).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_prune_failed', {
       endpointHash: 'a'.repeat(64),
+      endpointHost: 'fcm.googleapis.com',
+      p256dhBytes: 64,
+      authBytes: 16,
       reason: 'kv_error',
     });
     expect(logger.warn).not.toHaveBeenCalledWith('push.invalid_keys_pruned', expect.anything());

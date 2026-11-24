@@ -12,7 +12,7 @@ import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { isPrivateHost } from '@/lib/net/privateHost';
 import { isAllowedPushEndpoint } from '@/lib/push/endpoints';
-import { hasSendablePushKeys } from '@/lib/push/subscriptionKeys';
+import { hasSendablePushKeys, pushKeyByteLengths } from '@/lib/push/subscriptionKeys';
 import {
   listPushSubscriptions,
   refreshPushSubscriptionsTtl,
@@ -176,13 +176,15 @@ async function sendOne(
     if (!hasSendablePushKeys(sub.keys)) {
       // 鍵の長さが違う購読は web-push が送る前に投げ、送るたびに失敗して残り続ける。届かない購読 (404/410) と同じく消す
       // (登録のときにも断る・lib/push/subscriptionKeys.ts)。
+      // 原因 (どの push service・どの長さ) を後から調べられるよう、鍵そのものでなく host と長さを記録する。
+      const evidence = { endpointHash: sub.endpointHash, endpointHost: endpoint.hostname, ...pushKeyByteLengths(sub.keys) };
       const removed = await removePushSubscription(wallet, { endpointHash: sub.endpointHash });
       if (!removed.ok) {
         // 消せたと確かめられなければ「消した」と数えず failed にする (残っていれば次の送信でまた消す)。
-        logger.warn('push.invalid_keys_prune_failed', { endpointHash: sub.endpointHash, reason: removed.reason });
+        logger.warn('push.invalid_keys_prune_failed', { ...evidence, reason: removed.reason });
         return 'failed';
       }
-      logger.warn('push.invalid_keys_pruned', { endpointHash: sub.endpointHash });
+      logger.warn('push.invalid_keys_pruned', evidence);
       return 'pruned';
     }
     const payload = resolvePushPayload(payloadInput, sub);
