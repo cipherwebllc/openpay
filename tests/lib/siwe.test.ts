@@ -417,6 +417,16 @@ describe('isZeroDataVerificationError', () => {
       cause: new ContractFunctionZeroDataError({ functionName: 'isValidSignature' }),
     });
     expect(isZeroDataVerificationError(wrapped)).toBe(true);
+
+    // 外側が標準の Error でも cause をたどる。
+    expect(isZeroDataVerificationError(new Error('verify', { cause: new AbiDecodingZeroDataError() }))).toBe(true);
+  });
+
+  it('循環した cause でも止まる (false)', () => {
+    const a = new Error('a');
+    const b = new Error('b', { cause: a });
+    Object.assign(a, { cause: b });
+    expect(isZeroDataVerificationError(a)).toBe(false);
   });
 
   it('通信の失敗やほかの error は false (route は 503 のまま)', () => {

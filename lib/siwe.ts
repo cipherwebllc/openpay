@@ -11,7 +11,6 @@
 
 import {
   AbiDecodingZeroDataError,
-  BaseError,
   ContractFunctionZeroDataError,
   getAddress,
   isAddress,
@@ -152,11 +151,16 @@ export type SiweVerifyDeps = {
  * のどちらでも、送り直しても同じ結果になる。通信の失敗 (HTTP・timeout・RPC の error) はここに入らない。
  */
 export function isZeroDataVerificationError(error: unknown): boolean {
-  return (
-    error instanceof BaseError &&
-    error.walk((e) => e instanceof AbiDecodingZeroDataError || e instanceof ContractFunctionZeroDataError) !== null
-  );
+  // 外側の型 (viem の BaseError か標準の Error か) によらず cause をたどる。循環した cause でも止まるよう深さに上限を置く。
+  let current: unknown = error;
+  for (let depth = 0; depth < ZERO_DATA_CAUSE_MAX_DEPTH && current; depth += 1) {
+    if (current instanceof AbiDecodingZeroDataError || current instanceof ContractFunctionZeroDataError) return true;
+    current = typeof current === 'object' && 'cause' in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
 }
+
+const ZERO_DATA_CAUSE_MAX_DEPTH = 16;
 
 /**
  * SIWE ログインの検証フロー (純粋コア)。
