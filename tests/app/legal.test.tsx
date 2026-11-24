@@ -65,7 +65,7 @@ describe('Legal pages', () => {
       expect(screen.getByText((_, element) => element?.tagName === 'P' && !!element.textContent?.includes('(18)'))).toHaveTextContent(clause);
       expect(LEGAL_ENTITY.termsEffectiveDate).toBe('2026-11-20');
       expect(messages.Privacy.section3.body).toContain(locale === 'ja' ? '購入歴のないライセンス保有者' : 'license holders without a purchase history');
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-20');
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-25');
     });
 
     it('第13条: license の政策値・売り手・権利・返金・公開情報を同じ namespace 内で固定する', async () => {
@@ -848,7 +848,8 @@ describe('Legal pages', () => {
       // 2026-11-07 改定案: 「売上をほかのウォレットへ移す」の濫用の集計 (1-(11)・2-(13)・4.) と、2-(9) のエラー監視のただし書き
       //   (ウォレットアドレスを含む警告を送ることがある) を足す (施行日は仮置き・点灯日で確定する)。
       // 2026-11-20 改定: 画像のアップロード (1-(12)・2-(14)・委託先の Vercel Blob・3-3 の画像の配信元・4. の保管) を足す。
-      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-20');
+      // 2026-11-25 改定案: 1-(4) のお問い合わせで取得する情報に、LINE・Discord・X 等のアカウント名・表示名を足す (Privacy のみ)。
+      expect(LEGAL_ENTITY.privacyEffectiveDate).toBe('2026-11-25');
     });
   });
 

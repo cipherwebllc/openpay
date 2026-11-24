@@ -1,6 +1,6 @@
 // 全 page 共通の footer。app/[locale]/layout.tsx から 1 度だけ render される。
 // 役割は (1) legal page (/terms /privacy /disclaimer) への導線、(2) 事業者表記
-// + copyright、(3) お問い合わせ (Discord)・スポンサー・広告の募集 (/sponsors) と SNS 行。技術スタックの羅列はここに置かない
+// + copyright、(3) お問い合わせ (LINE)・スポンサー・広告の募集 (/sponsors) と SNS 行。技術スタックの羅列はここに置かない
 // (技術は運用透明性ページと GitHub にある・2026-10-25 user 裁定)。
 //
 // QR ポスター印刷時は不要なので `print:hidden` で全体を非表示にする。
@@ -13,17 +13,19 @@ import { useTranslations } from 'next-intl';
 import { env } from '@/lib/env';
 import { isHandlePagePath } from '@/lib/handlePath';
 import { LEGAL_ENTITY } from '@/lib/legal';
-import { OPENPAY_DISCORD_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
+import { OPENPAY_DISCORD_URL, OPENPAY_LINE_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
 import {
   DISCORD_ICON_PATH,
   GITHUB_ICON_PATH,
+  LINE_ICON_PATH,
   NOTE_ICON_PATH,
   X_ICON_PATH,
   YOUTUBE_ICON_PATH,
 } from '@/lib/socialIconPaths';
 
-// 公開のメールアドレスは載せず、お問い合わせの行き先は Discord (2026-10-25 user 裁定)。SNS 行の Discord と同じ URL を共有する。
-// Discord と X の URL は lib/officialLinks.ts (スポンサー・広告掲載のご案内の問い合わせのボタンと同じ値・二重に持たない)。
+// 公開のメールアドレスは載せず、お問い合わせの行き先は LINE 公式アカウント (2026-11-25 user 裁定・前は Discord = 2026-10-25)。
+// SNS 行の LINE と同じ URL を共有する。Discord は SNS 行に残る。
+// LINE・Discord・X の URL は lib/officialLinks.ts (スポンサー・広告掲載のご案内の問い合わせのボタンと同じ値・二重に持たない)。
 //
 // 最下段の SNS・ソースのアイコン行。アイコンは @handle の SNS 行と同じ simple-icons (lib/socialIconPaths.ts)。
 // 文字が無いので a11y 名は aria-label (= title のツールチップと同じ文言) で付ける。
@@ -32,6 +34,7 @@ const SOCIAL_LINKS = [
   { href: OPENPAY_X_URL, labelKey: 'xLink', path: X_ICON_PATH, size: 14 },
   { href: 'https://www.youtube.com/@openpay_jp?sub_confirmation=1', labelKey: 'youtubeLink', path: YOUTUBE_ICON_PATH, size: 18 },
   { href: 'https://note.com/masia02/m/mf28261a21eb1', labelKey: 'noteLink', path: NOTE_ICON_PATH, size: 13 },
+  { href: OPENPAY_LINE_URL, labelKey: 'lineLink', path: LINE_ICON_PATH, size: 16 },
   { href: OPENPAY_DISCORD_URL, labelKey: 'discordLink', path: DISCORD_ICON_PATH, size: 16 },
   { href: 'https://github.com/cipherwebllc/openpay', labelKey: 'sourceLink', path: GITHUB_ICON_PATH, size: 16 },
 ] as const;
@@ -133,10 +136,11 @@ export function SiteFooter() {
             {t('links.sponsors')}
           </Link>
         )}
-        {/* お問い合わせ (Discord)。@handle ページでは SNS 行と同じく OpenPay 側の導線なので出さない。 */}
+        {/* お問い合わせ (LINE)。2026-11-25 user 裁定で Discord から LINE 公式アカウントへ (Discord は下の SNS 行に残る)。
+            @handle ページでは SNS 行と同じく OpenPay 側の導線なので出さない。 */}
         {!onHandlePage && (
           <a
-            href={OPENPAY_DISCORD_URL}
+            href={OPENPAY_LINE_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-slate-700 hover:underline"

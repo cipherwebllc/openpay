@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import SponsorsPage, { generateMetadata } from '@/app/[locale]/sponsors/page';
 import sitemap from '@/app/sitemap';
-import { OPENPAY_DISCORD_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
+import { OPENPAY_DISCORD_URL, OPENPAY_LINE_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
 import { SPONSOR_ANNUAL_PLAN, SPONSOR_BANNER_SPEC, SPONSOR_PLANS } from '@/lib/sponsorPlans';
 import { SPONSORS } from '@/lib/sponsors';
 
@@ -86,13 +86,21 @@ describe.each(['ja', 'en'] as const)('%s /sponsors', (locale) => {
     expect(plain(annual)).toContain(SPONSOR_ANNUAL_PLAN.priceYen.toLocaleString('en-US'));
   });
 
-  it('問い合わせのボタン: Discord と X だけ (頭と流れの後の 2 か所)・フッターと同じ URL と rel・名前は見えている文字', async () => {
+  it('問い合わせのボタン: LINE・Discord・X だけ (頭と流れの後の 2 か所・LINE が先頭)・フッターと同じ URL と rel・名前は見えている文字', async () => {
     const { container } = await renderPage();
+    const line = screen.getAllByRole('link', { name: c.contactLine });
     const discord = screen.getAllByRole('link', { name: c.contactDiscord });
     const x = screen.getAllByRole('link', { name: c.contactX });
+    expect(line).toHaveLength(2);
     expect(discord).toHaveLength(2);
     expect(x).toHaveLength(2);
+    // どちらの場所でも LINE が先頭 (日本の企業・お店の担当者がいちばん使い慣れた窓口)。
+    for (const [i, first] of line.entries()) {
+      const row = Array.from(first.parentElement!.querySelectorAll('a'));
+      expect(row).toEqual([first, discord[i], x[i]]);
+    }
     for (const [links, href] of [
+      [line, OPENPAY_LINE_URL],
       [discord, OPENPAY_DISCORD_URL],
       [x, OPENPAY_X_URL],
     ] as const) {
@@ -102,13 +110,14 @@ describe.each(['ja', 'en'] as const)('%s /sponsors', (locale) => {
         expect(link).toHaveAttribute('rel', 'noopener noreferrer');
       }
     }
-    // 外のリンクは Discord と X だけ (フォーム・メールアドレスを出さない)。
+    // 外のリンクは LINE・Discord・X だけ (フォーム・メールアドレスを出さない)。
     const external = [...container.querySelectorAll('a')].map((a) => a.getAttribute('href') ?? '').filter((href) => !href.startsWith('/'));
-    expect([...new Set(external)].sort()).toEqual([OPENPAY_DISCORD_URL, OPENPAY_X_URL].sort());
+    expect([...new Set(external)].sort()).toEqual([OPENPAY_LINE_URL, OPENPAY_DISCORD_URL, OPENPAY_X_URL].sort());
     expect(container.querySelector('a[href^="mailto:"]')).toBeNull();
     // 流れの節の中にもボタンがある (① の行き先)。
     const flow = container.querySelector<HTMLElement>('section[aria-labelledby="flow"]');
     if (!flow) throw new Error('flow section');
+    expect(within(flow).getByRole('link', { name: c.contactLine })).toBeInTheDocument();
     expect(within(flow).getByRole('link', { name: c.contactDiscord })).toBeInTheDocument();
   });
 
