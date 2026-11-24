@@ -32,6 +32,8 @@ describe('SENTRY_SERVER_IGNORE_ERRORS', () => {
 
   it('似た文言・ほかの error には当たらない', () => {
     expect(ignored('The router state header was sent but could not be parsed. (extra)')).toBe(false);
+    // 末尾の . は文字どおり (正規表現の任意の 1 文字にしない)。
+    expect(ignored('The router state header was sent but could not be parsed!')).toBe(false);
     expect(ignored('Prefix: The router state header was sent but could not be parsed.')).toBe(false);
     expect(ignored('Failed to fetch')).toBe(false);
   });
