@@ -15,6 +15,8 @@ const validate = ajv.compile(JPYC_PAYMENT_ATTESTATION_RESPONSE_SCHEMA);
 const SELLER = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
 const PAYER = SELLER.toLowerCase();
 const TX = `0x${'ab'.repeat(32)}` as Hex;
+// receipt のブロックの hash は tx の hash と別の値にする (比べる先を取り違えたら落ちる・Codex)。
+const BLOCK_HASH = `0x${'bc'.repeat(32)}` as Hex;
 const PATH = '/api/paid/usdc/jpyc/attest';
 const FAC = 'https://facilitator.payai.network';
 let route: { GET: (request: Request) => Promise<Response> };
@@ -36,10 +38,10 @@ function request(query = `?chain=polygon&tx=${TX}`, version: 0 | 1 | 2 = 1) {
 function log(value: bigint, index: number, address = token) {
   return { address, topics: encodeEventTopics({ abi: [event], eventName: 'Transfer', args: { from: zeroAddress, to: SELLER } }),
     data: encodeAbiParameters([{ type: 'uint256' }], [value]), logIndex: index,
-    blockNumber: 100n, blockHash: TX, transactionHash: TX, transactionIndex: 0, removed: false };
+    blockNumber: 100n, blockHash: BLOCK_HASH, transactionHash: TX, transactionIndex: 0, removed: false };
 }
 function receipt(status = 'success', logs = [log(10n ** 18n, 2), log(5n * 10n ** 17n, 4), log(99n, 5, zeroAddress)]) {
-  return { status, logs, blockNumber: 100n, blockHash: TX, transactionHash: TX, from: PAYER, to: token };
+  return { status, logs, blockNumber: 100n, blockHash: BLOCK_HASH, transactionHash: TX, from: PAYER, to: token };
 }
 function onlyVerify() {
   expect(mocks.fetch.mock.calls.map(([url]) => String(url))).toEqual([FAC + '/verify']);
@@ -59,8 +61,8 @@ beforeEach(async () => {
   token = live.deploymentFor('polygon').address; event = live.TRANSFER_EVENT;
   route = await import('@/app/api/paid/usdc/jpyc/attest/route') as unknown as typeof route;
   mocks.receipt.mockResolvedValue(receipt()); mocks.latest.mockResolvedValue(110n);
-  // 同じ高さの今の正規のブロックの hash は receipt のブロックと同じ (TX)。
-  mocks.block.mockImplementation(async ({ blockTag }) => ({ number: blockTag ? 105n : 100n, hash: TX, timestamp: 1_750_000_000n }));
+  // 同じ高さの今の正規のブロックの hash は receipt のブロックと同じ (BLOCK_HASH)。
+  mocks.block.mockImplementation(async ({ blockTag }) => ({ number: blockTag ? 105n : 100n, hash: BLOCK_HASH, timestamp: 1_750_000_000n }));
   mocks.fetch.mockImplementation(async (url) => {
     if (String(url).endsWith('/verify')) return Response.json({ isValid: true, payer: PAYER });
     if (String(url).endsWith('/settle')) return Response.json({ success: true, transaction: TX, network: 'base', payer: PAYER });
@@ -188,13 +190,32 @@ describe('JPYC attestation gate and RPC record', () => {
     expect(validate(body), JSON.stringify(validate.errors)).toBe(true);
     expect(body.finality).toEqual({ finalized: false, method: 'finalized-tag', finalizedBlock: '105' });
   });
-  it('今の正規のブロックを読めなければ finalized: null (確定とも未確定とも言わない)', async () => {
+  it.each([
+    ['読めない', () => { throw new Error('block not found'); }],
+    ['hash が 32 byte の形でない', () => ({ number: 100n, hash: '0x', timestamp: 1_750_000_000n })],
+    ['hash が無い', () => ({ number: 100n, timestamp: 1_750_000_000n })],
+  ])('今の正規のブロックが %s なら finalized: null (確定とも未確定とも言わない)', async (_label, canonicalBlock) => {
     mocks.block.mockImplementation(async ({ blockTag, blockNumber }) => {
-      if (blockNumber === 100n) throw new Error('block not found');
-      return { number: blockTag ? 105n : 100n, hash: TX, timestamp: 1_750_000_000n };
+      if (blockNumber === 100n) return canonicalBlock();
+      return { number: blockTag ? 105n : 100n, hash: BLOCK_HASH, timestamp: 1_750_000_000n };
     });
     const body = await (await route.GET(request())).json();
     expect(body.finality).toEqual({ finalized: null, method: 'finalized-tag', finalizedBlock: '105' });
+  });
+  it('正規のブロックは確定の高さと同時に読む (settle の前の待ちを足さない・Codex)', async () => {
+    let releaseFinalized!: () => void;
+    const finalizedGate = new Promise<void>((resolve) => { releaseFinalized = resolve; });
+    mocks.block.mockImplementation(async ({ blockTag }) => {
+      if (blockTag) await finalizedGate;
+      return { number: blockTag ? 105n : 100n, hash: BLOCK_HASH, timestamp: 1_750_000_000n };
+    });
+    const { readJpycPaymentRecord } = await import('@/lib/jpyc/paymentRecord');
+    const pending = readJpycPaymentRecord('polygon', TX);
+    // 確定の高さの応答を待っている間に、同じ高さの正規のブロックの読み取りが始まっている。
+    await vi.waitFor(() => expect(mocks.block).toHaveBeenCalledWith({ blockNumber: 100n }));
+    releaseFinalized();
+    const result = await pending;
+    expect(result.kind === 'ok' && result.record.finality).toEqual({ finalized: true, method: 'finalized-tag', finalizedBlock: '105' });
   });
   it('finalized block behind receipt reports false', async () => {
     mocks.block.mockResolvedValue({ number: 99n, timestamp: 1_750_000_000n });
