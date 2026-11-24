@@ -261,6 +261,13 @@ describe('/api/push/subscribe', () => {
     expect(storeSpy.upsert).not.toHaveBeenCalled();
   });
 
+  it('auth は 16 byte を超えてもよい (17 byte の鍵を保存する)', async () => {
+    const keys = { p256dh: 'A'.repeat(87), auth: 'B'.repeat(23) };
+    const res = await POST(req('POST', { subscription: { endpoint: subscription.endpoint, keys }, locale: 'ja' }));
+    expect(res.status).toBe(200);
+    expect(storeSpy.upsert).toHaveBeenCalledWith(SESSION_ADDR, expect.objectContaining({ keys }));
+  });
+
   it('includeAmount:true を透過して upsert する', async () => {
     const res = await POST(
       req('POST', { subscription, locale: 'ja', includeAmount: true }),

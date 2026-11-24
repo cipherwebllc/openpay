@@ -176,7 +176,12 @@ async function sendOne(
     if (!hasSendablePushKeys(sub.keys)) {
       // 鍵の長さが違う購読は web-push が送る前に投げ、送るたびに失敗して残り続ける。届かない購読 (404/410) と同じく消す
       // (登録のときにも断る・lib/push/subscriptionKeys.ts)。
-      await removePushSubscription(wallet, { endpointHash: sub.endpointHash });
+      const removed = await removePushSubscription(wallet, { endpointHash: sub.endpointHash });
+      if (!removed.ok) {
+        // 消せなかった購読は残るので「消した」と数えない (次の送信でまた消す)。
+        logger.warn('push.invalid_keys_prune_failed', { endpointHash: sub.endpointHash, reason: removed.reason });
+        return 'failed';
+      }
       logger.warn('push.invalid_keys_pruned', { endpointHash: sub.endpointHash });
       return 'pruned';
     }

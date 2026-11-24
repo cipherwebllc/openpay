@@ -66,8 +66,8 @@ vi.mock('@/lib/push/store', () => ({
     return Promise.resolve(true);
   },
   removePushSubscription: (...args: unknown[]) => {
-    store.remove(...args);
-    return Promise.resolve({ ok: true, value: [] });
+    const result: unknown = store.remove(...args);
+    return Promise.resolve(result ?? { ok: true, value: [] });
   },
 }));
 
@@ -204,6 +204,23 @@ describe('sendPushToWallet', () => {
     expect(store.remove).toHaveBeenCalledWith(WALLET, { endpointHash: 'c'.repeat(64) });
     expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_pruned', { endpointHash: 'b'.repeat(64) });
     expect(logger.warn).not.toHaveBeenCalledWith('push.send_failed', expect.anything());
+  });
+
+  it('鍵の長さが違う購読を消せなかったときは pruned と数えず failed にする', async () => {
+    hold.subscriptions = [{ ...hold.subscriptions[0], keys: { p256dh: 'A'.repeat(86), auth: 'B'.repeat(22) } }];
+    store.remove.mockReturnValueOnce({ ok: false, reason: 'kv_error' });
+    vi.mocked(logger.warn).mockClear();
+
+    await expect(sendPushToWallet(WALLET, { title: '着金がありました' })).resolves.toEqual({
+      attempted: 1, sent: 0, pruned: 0, failed: 1,
+    });
+
+    expect(webPush.sendNotification).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_prune_failed', {
+      endpointHash: 'a'.repeat(64),
+      reason: 'kv_error',
+    });
+    expect(logger.warn).not.toHaveBeenCalledWith('push.invalid_keys_pruned', expect.anything());
   });
 
   it('関数 resolver は (locale, sub) を受け購読ごとに payload を出し分ける', async () => {
