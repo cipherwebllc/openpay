@@ -66,8 +66,8 @@ vi.mock('@/lib/push/store', () => ({
     return Promise.resolve(true);
   },
   removePushSubscription: (...args: unknown[]) => {
-    store.remove(...args);
-    return Promise.resolve({ ok: true, value: [] });
+    const result: unknown = store.remove(...args);
+    return Promise.resolve(result ?? { ok: true, value: [] });
   },
 }));
 
@@ -183,6 +183,54 @@ describe('sendPushToWallet', () => {
     expect(store.remove).toHaveBeenCalledWith(WALLET, {
       endpointHash: 'b'.repeat(64),
     });
+  });
+
+  it('鍵の長さが違う保存済みの購読は送らずに消し、ほかの購読へは送る', async () => {
+    // web-push は p256dh 65 byte・auth 16 byte 以上でないと送る前に投げる (status なし)。残すと送るたびに失敗する
+    // (2026-11-24 Sentry push.send_failed) ので、届かない購読 (404/410) と同じく消す。
+    hold.subscriptions[1] = { ...hold.subscriptions[1], keys: { p256dh: 'A'.repeat(86), auth: 'B'.repeat(22) } };
+    hold.subscriptions[2] = { ...hold.subscriptions[2], keys: { p256dh: 'A'.repeat(87), auth: 'B'.repeat(20) } };
+    webPush.sendNotification.mockResolvedValue(undefined);
+    vi.mocked(logger.warn).mockClear();
+
+    await expect(sendPushToWallet(WALLET, { title: '着金がありました' })).resolves.toEqual({
+      attempted: 3, sent: 1, pruned: 2, failed: 0,
+    });
+
+    expect(webPush.sendNotification).toHaveBeenCalledTimes(1);
+    expect(webPush.sendNotification.mock.calls[0][0]).toMatchObject({ endpoint: 'https://fcm.googleapis.com/sub/a' });
+    expect(store.remove).toHaveBeenCalledTimes(2);
+    expect(store.remove).toHaveBeenCalledWith(WALLET, { endpointHash: 'b'.repeat(64) });
+    expect(store.remove).toHaveBeenCalledWith(WALLET, { endpointHash: 'c'.repeat(64) });
+    // 原因を調べられるよう、鍵そのものでなく push service の host と長さを記録する。
+    expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_pruned', {
+      endpointHash: 'b'.repeat(64), endpointHost: 'fcm.googleapis.com', p256dhBytes: 64, authBytes: 16,
+    });
+    expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_pruned', {
+      endpointHash: 'c'.repeat(64), endpointHost: 'fcm.googleapis.com', p256dhBytes: 65, authBytes: 15,
+    });
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain('A'.repeat(86));
+    expect(logger.warn).not.toHaveBeenCalledWith('push.send_failed', expect.anything());
+  });
+
+  it('鍵の長さが違う購読を消せなかったときは pruned と数えず failed にする', async () => {
+    hold.subscriptions = [{ ...hold.subscriptions[0], keys: { p256dh: 'A'.repeat(86), auth: 'B'.repeat(22) } }];
+    store.remove.mockReturnValueOnce({ ok: false, reason: 'kv_error' });
+    vi.mocked(logger.warn).mockClear();
+
+    await expect(sendPushToWallet(WALLET, { title: '着金がありました' })).resolves.toEqual({
+      attempted: 1, sent: 0, pruned: 0, failed: 1,
+    });
+
+    expect(webPush.sendNotification).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_prune_failed', {
+      endpointHash: 'a'.repeat(64),
+      endpointHost: 'fcm.googleapis.com',
+      p256dhBytes: 64,
+      authBytes: 16,
+      reason: 'kv_error',
+    });
+    expect(logger.warn).not.toHaveBeenCalledWith('push.invalid_keys_pruned', expect.anything());
   });
 
   it('関数 resolver は (locale, sub) を受け購読ごとに payload を出し分ける', async () => {
