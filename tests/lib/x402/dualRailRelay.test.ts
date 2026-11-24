@@ -63,6 +63,7 @@ import {
   handleDualRailRequirements,
 } from '@/lib/x402/dualRailRelay';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
+import { logger } from '@/lib/logger';
 import { getResource } from '@/lib/x402/registry';
 
 const SELLER = getAddress('0x1111111111111111111111111111111111111111');
@@ -379,6 +380,176 @@ describe('dualRailRelay verify/settle', () => {
     expect(res.headers.has('PAYMENT-RESPONSE')).toBe(false);
     expect(res.headers.has('X-PAYMENT-RESPONSE')).toBe(false);
     expect(ledger.record).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-24 Sentry: CDP が判定の形でない 400 (要求そのものを断った) を返したとき、「使えない」(503) として理由なしで
+  // 記録していた。断られたとして理由を記録し、verify はお金を動かさないので判定の形で返す。
+  const CDP_REJECT = { errorType: 'invalid_request', errorMessage: 'paymentPayload.payload is invalid', correlationId: 'c-1' };
+
+  it('verify: CDP が判定の形でない 400 で断ったら、200 + isValid:false で返し、理由を記録する', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    facilitatorReplies(400, CDP_REJECT);
+    const res = await handleDualRailRelay(
+      post('verify', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'verify',
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ isValid: false, invalidReason: 'unexpected_verify_error' });
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(warn).toHaveBeenCalledWith('x402.dualrail.facilitator_rejected', {
+      action: 'verify',
+      resourceId: 'res-1',
+      status: 400,
+      reason: 'errorType=invalid_request correlationId=c-1 errorMessage=paymentPayload.payload is invalid',
+    });
+    expect(warn).not.toHaveBeenCalledWith('x402.dualrail.facilitator_unavailable', expect.anything());
+  });
+
+  it('settle: CDP が判定の形でない 400 で断っても、応答は従来どおり 503 (送金前と言い切れない)・理由は記録する', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    facilitatorReplies(400, CDP_REJECT);
+    const res = await handleDualRailRelay(
+      post('settle', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'settle',
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'facilitator_unavailable' });
+    expect(res.headers.has('PAYMENT-RESPONSE')).toBe(false);
+    expect(res.headers.has('X-PAYMENT-RESPONSE')).toBe(false);
+    expect(ledger.record).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      'x402.dualrail.facilitator_rejected',
+      expect.objectContaining({ action: 'settle', status: 400 }),
+    );
+  });
+
+  async function rejectedReason(body: unknown): Promise<string> {
+    const warn = vi.spyOn(logger, 'warn');
+    warn.mockClear();
+    facilitatorReplies(422, body);
+    await handleDualRailRelay(
+      post('verify', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'verify',
+    );
+    const call = warn.mock.calls.find(([msg]) => msg === 'x402.dualrail.facilitator_rejected');
+    return (call?.[1] as { reason: string }).reason;
+  }
+
+  it('断った理由は語の項目と文の項目だけを短く記録し、body の残りは記録しない', async () => {
+    const address = `0x${'cd'.repeat(20)}`;
+    const reason = await rejectedReason({
+      errorType: 'invalid_request',
+      error: 'bad\nsignature', // 語の形でない → 記録しない
+      errorMessage: `payer ${address} ${'x'.repeat(400)}`,
+      paymentPayload: { signature: `0x${'ab'.repeat(65)}` },
+    });
+    expect(reason.startsWith(`errorType=invalid_request errorMessage=payer ${address} xxx`)).toBe(true);
+    expect(reason).not.toContain('bad');
+    expect(reason).not.toContain('paymentPayload');
+    expect(reason.length).toBe(200);
+  });
+
+  it.each([
+    ['0x の付いた署名', `0x${'ab'.repeat(65)}`],
+    ['0x の無い長い 16 進', 'ab'.repeat(48)],
+    ['0X と大文字', `0X${'CD'.repeat(40)}`],
+  ])('65 桁以上の 16 進は伏せる (%s)', async (_label, hex) => {
+    const reason = await rejectedReason({ errorMessage: `bad value ${hex} end` });
+    expect(reason).toBe('errorMessage=bad value [redacted] end');
+  });
+
+  it.each([
+    ['JSON の値', 'invalid paymentPayload: {"payload":{"reference":"order-17"}}', 'errorMessage=invalid paymentPayload:'],
+    ['配列', 'unexpected fields [reference, memo]', 'errorMessage=unexpected fields'],
+    ['値の引用', 'bad reference "order-17" in payload', 'errorMessage=bad reference [quoted] in payload'],
+    ['バッククォートの値', 'got `0.5 USDC` expected more', 'errorMessage=got [quoted] expected more'],
+    ['名前の形の値の引用', 'unknown network "base" here', 'errorMessage=unknown network [quoted] here'],
+    ['一重引用符の値 (そこで止める)', "bad value 'order 17' here", 'errorMessage=bad value'],
+    ['一重引用符の中の語の途中の アポストロフィ', "bad value 'don't retry' here", 'errorMessage=bad value'],
+    ['閉じていない引用', 'bad value "order-17 and more', 'errorMessage=bad value'],
+    ['引用の中のエスケープ', 'bad value "a\\"b" more', 'errorMessage=bad value'],
+    ['エスケープ', 'bad value \\u0041 more', 'errorMessage=bad value'],
+    ['制御文字', 'bad value order\u0001 17 more', 'errorMessage=bad value order'],
+    ['引用の中の制御文字', 'bad value "/order\u000117" more', 'errorMessage=bad value'],
+    ['引用で包んだ JSON', 'bad value "{"reference":"order-17"}" more', 'errorMessage=bad value'],
+    ['引用の中の角かっこ', 'bad value `[1, 2]` more', 'errorMessage=bad value'],
+    ['引用の無い説明', 'paymentPayload.payload is invalid', 'errorMessage=paymentPayload.payload is invalid'],
+    [
+      'CDP の形式の拒否 (語の途中の アポストロフィと項目の path)',
+      'request body has an error: doesn\'t match schema (oneOf): Error at "/paymentPayload/resource/description": too long',
+      'errorMessage=request body has an error: doesn\'t match schema (oneOf): Error at "/paymentPayload/resource/description": too long',
+    ],
+  ])('文の項目は値の引用を残さず、項目の path は残す (%s)', async (_label, message, expected) => {
+    expect(await rejectedReason({ errorMessage: message })).toBe(expected);
+  });
+
+  it('200 字の切れ目にまたがる署名も、切る前に伏せる (先頭だけが残らない)', async () => {
+    const hex = 'ab'.repeat(65);
+    const reason = await rejectedReason({ errorMessage: `${'x'.repeat(170)} ${hex} tail` });
+    expect(reason).toBe(`errorMessage=${'x'.repeat(170)} [redacted] tail`);
+    expect(reason).not.toContain('abab');
+  });
+
+  it.each([401, 403, 404, 408, 425, 429])('CDP の %s (こちらの障害・一時的) は「断られた」とせず、従来どおり 503 と facilitator_unavailable', async (status) => {
+    const warn = vi.spyOn(logger, 'warn');
+    warn.mockClear();
+    facilitatorReplies(status, { errorType: 'rate_limit_exceeded' });
+    const res = await handleDualRailRelay(
+      post('verify', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'verify',
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'facilitator_unavailable' });
+    expect(warn).toHaveBeenCalledWith('x402.dualrail.facilitator_unavailable', {
+      action: 'verify',
+      resourceId: 'res-1',
+      error: `facilitator /verify HTTP ${status}`,
+    });
+    expect(warn).not.toHaveBeenCalledWith('x402.dualrail.facilitator_rejected', expect.anything());
+  });
+
+  it('記録できる理由が無ければ no_reason', async () => {
+    expect(await rejectedReason({ errorType: 'has space', errorMessage: '{"only":"quoted"}' })).toBe('no_reason');
+  });
+
+  it('verify: 否定と肯定が混ざった 4xx は判定として素通しせず、固定の isValid:false で返す', async () => {
+    facilitatorReplies(409, { isValid: false, success: true });
+    const res = await handleDualRailRelay(
+      post('verify', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'verify',
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ isValid: false, invalidReason: 'unexpected_verify_error' });
+  });
+
+  it('settle: 否定と肯定が混ざった 4xx は 503 で、台帳にも支払いの応答ヘッダにも進まない', async () => {
+    facilitatorReplies(409, { success: false, isValid: true, transaction: '0xtx' });
+    const res = await handleDualRailRelay(
+      post('settle', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'settle',
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'facilitator_unavailable' });
+    expect(res.headers.has('PAYMENT-RESPONSE')).toBe(false);
+    expect(res.headers.has('X-PAYMENT-RESPONSE')).toBe(false);
+    expect(ledger.record).not.toHaveBeenCalled();
+  });
+
+  it('facilitator 5xx は従来どおり「使えない」として記録する (断られたとは記録しない)', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    facilitatorReplies(502, { errorType: 'bad_gateway' });
+    const res = await handleDualRailRelay(
+      post('verify', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'verify',
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'facilitator_unavailable' });
+    expect(warn).toHaveBeenCalledWith('x402.dualrail.facilitator_unavailable', {
+      action: 'verify',
+      resourceId: 'res-1',
+      error: 'facilitator /verify HTTP 502',
+    });
+    expect(warn).not.toHaveBeenCalledWith('x402.dualrail.facilitator_rejected', expect.anything());
   });
 
   it('facilitator 5xx → 503 (判定なしを成功にも失敗にも見せない)', async () => {

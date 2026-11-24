@@ -76,7 +76,12 @@ vi.mock('@/lib/kv', async () => {
 });
 
 import { logger } from '@/lib/logger';
-import { handleVanillaPaidGet } from '@/lib/x402/vanillaGate';
+import {
+  FacilitatorRejectedError,
+  handleVanillaPaidGet,
+  postFacilitatorWithStatus,
+} from '@/lib/x402/vanillaGate';
+import type { FacilitatorV1Body } from '@/lib/x402/v2';
 
 function ed25519Secret(): string {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
@@ -481,6 +486,63 @@ describe('vanillaGate facilitator 切替', () => {
     );
     expect(res.status).toBe(503);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+// 2026-11-24: CDP が判定の形でない 4xx で断ったときだけ FacilitatorRejectedError (Error の派生・message は従来どおり) を
+// 投げる。payai と 5xx は従来どおりの Error (呼び出し側の応答もログも変わらない)。
+describe('postFacilitatorWithStatus の断られた 4xx', () => {
+  const body = { paymentPayload: { payload: {} } } as unknown as FacilitatorV1Body;
+  const wire = {
+    accept: { scheme: 'exact', network: 'eip155:8453' },
+    resource: { resourceUrl: 'https://seller.example/api', description: 'd' },
+  } as unknown as Parameters<typeof postFacilitatorWithStatus>[2];
+  const reply = (status: number, json: unknown) =>
+    fetchMock.mockResolvedValueOnce({ ok: false, status, json: async () => json });
+  const useCdp = () => {
+    configHold.vanillaFacilitator = {
+      url: 'https://api.cdp.coinbase.com/platform/v2/x402',
+      cdpAuth: { keyId: 'org/key-1', keySecret: ed25519Secret() },
+    };
+  };
+
+  it('CDP の判定でない 400 は FacilitatorRejectedError (status と理由・message は従来どおり)', async () => {
+    useCdp();
+    reply(400, { errorType: 'invalid_request', errorMessage: 'paymentPayload.payload is invalid' });
+    const error = await postFacilitatorWithStatus('/verify', body, wire).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(FacilitatorRejectedError);
+    expect(error).toMatchObject({
+      message: 'facilitator /verify HTTP 400',
+      status: 400,
+      reason: 'errorType=invalid_request errorMessage=paymentPayload.payload is invalid',
+    });
+  });
+
+  it.each([
+    ['判定の形の 400', 400, { isValid: false, invalidReason: 'x' }],
+    ['判定でない 400', 400, { errorType: 'invalid_request' }],
+  ])('payai の %s は従来どおりの Error', async (_label, status, json) => {
+    reply(status, json);
+    const error = await postFacilitatorWithStatus('/verify', body, wire).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(FacilitatorRejectedError);
+    expect((error as Error).message).toBe(`facilitator /verify HTTP ${status}`);
+  });
+
+  it.each([401, 403, 404, 408, 425, 429])('CDP の %s (こちらの障害・一時的) は従来どおりの Error (支払いを判定していない)', async (status) => {
+    useCdp();
+    reply(status, { errorType: 'rate_limit_exceeded' });
+    const error = await postFacilitatorWithStatus('/verify', body, wire).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(FacilitatorRejectedError);
+    expect((error as Error).message).toBe(`facilitator /verify HTTP ${status}`);
+  });
+
+  it('CDP の 5xx は従来どおりの Error', async () => {
+    useCdp();
+    reply(502, { errorType: 'bad_gateway' });
+    const error = await postFacilitatorWithStatus('/settle', body, wire).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(FacilitatorRejectedError);
+    expect((error as Error).message).toBe('facilitator /settle HTTP 502');
   });
 });
 

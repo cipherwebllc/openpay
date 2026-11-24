@@ -41,6 +41,7 @@ import {
 import {
   buildRelayAccepts,
   decodeVanillaPaymentHeaderWithRail,
+  FacilitatorRejectedError,
   postFacilitator,
   postFacilitatorWithStatus,
   type FacilitatorRail,
@@ -358,6 +359,7 @@ async function relayArc(
  * facilitator の判定 body (isValid / success …) を 200 で素通しする。判定の解釈
  * (true 以外は解錠しない fail-closed) は出品者サーバーの責任で、リレーは真実を写すだけ。
  * facilitator 障害 (5xx / timeout) は 503 — 判定が出ていない状態を成功にも失敗にも見せない。
+ * CDP が判定の形でない 4xx で要求を断ったとき (FacilitatorRejectedError) は、verify は 200 + isValid:false、settle は 503。
  */
 export async function handleDualRailRelay(
   req: Request,
@@ -446,6 +448,23 @@ export async function handleDualRailRelay(
     }
     return noStore(NextResponse.json(judgment));
   } catch (e) {
+    if (e instanceof FacilitatorRejectedError) {
+      // facilitator が要求を断った (判定の形でない 4xx)。障害ではないので「使えない」とは記録せず、示した理由を残す。
+      logger.warn('x402.dualrail.facilitator_rejected', {
+        action,
+        resourceId: resource.id,
+        status: e.status,
+        reason: e.reason,
+      });
+      if (action === 'verify') {
+        // verify はお金を動かさない。facilitator の判定の形 (200 + isValid:false) で返し、「あとでやり直して」(503) を
+        // 繰り返させない。理由は x402 の決まった語 (strict な client は一覧にない語を受け取れない) から中立のものを使う。
+        return noStore(NextResponse.json({ isValid: false, invalidReason: 'unexpected_verify_error' }));
+      }
+      // settle は送金の前に断られたと言い切れない (未知の理由は送信済み側に倒す・paymentRedelivery の
+      // isFacilitatorPreBroadcastRejection と同じ考え) ので、応答は従来どおり 503。
+      return jsonError(503, 'facilitator_unavailable');
+    }
     logger.warn('x402.dualrail.facilitator_unavailable', {
       action,
       resourceId: resource.id,

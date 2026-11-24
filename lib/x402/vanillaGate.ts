@@ -414,6 +414,96 @@ type FacilitatorCdpWire = {
 };
 
 /**
+ * CDP が、判定の形でない 4xx で要求を断ったとき (例: 400 `invalid_request`) に投げる (payai と、こちらの障害の 401・403・404・
+ * 一時的な 408・425・429 は従来どおり Error)。
+ * message は従来の `facilitator /verify HTTP 400` のまま (Error の派生なので、これまでどおり Error として受ける呼び出し側の
+ * 応答とログは変わらない)。status と reason (facilitator が示した理由・署名は伏せる) を足し、呼び出し側が「使えない」(障害) と
+ * 「断られた」を分けて記録できるようにする (2026-11-24 Sentry: CDP の 400 を facilitator_unavailable として理由なしで記録)。
+ */
+export class FacilitatorRejectedError extends Error {
+  readonly status: number;
+  readonly reason: string;
+  constructor(path: '/verify' | '/settle', status: number, reason: string) {
+    super(`facilitator ${path} HTTP ${status}`);
+    this.name = 'FacilitatorRejectedError';
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
+/** 記録する理由の長さの上限 (facilitator の文面をそのまま長く残さない)。 */
+const FACILITATOR_REJECT_REASON_MAX = 200;
+/**
+ * 「断られた」としない 4xx。支払いを判定していないので、従来どおり障害 (Error → 呼び出し側の 503) として扱う。
+ * - 401・403・404: こちらの鍵・JWT・URL の障害 (払う側の誤りではない・「verify 不達」の警報に残す)。
+ * - 408・425・429: 一時的 (時間切れ・早すぎる・呼び出しが多すぎる・払う側があとでやり直せる)。
+ */
+const FACILITATOR_4XX_NOT_REJECTION: ReadonlySet<number> = new Set([401, 403, 404, 408, 425, 429]);
+
+/** 引用の中で残してよい形: 項目の path (JSON pointer `/a/b`・96 字まで)。それ以外の引用 (値) は残さない。 */
+const QUOTED_FIELD_PATH_RE = /^(?:\/[A-Za-z0-9_~.-]*)+$/;
+const QUOTED_FIELD_PATH_MAX = 96;
+const WORD_CHAR_RE = /[A-Za-z0-9]/;
+
+/**
+ * 文の項目を、1 文字ずつ読んで記録できる形にする。facilitator が入力の値を引用した部分は残さず、どの項目で断られたかは残す。
+ * - 次の文字から後ろは記録しない: { [ (JSON の値)・\ (エスケープ)・制御文字・語の途中でない '・閉じていない引用。
+ * - 二重引用符とバッククォートの引用は、中身が項目の path (JSON pointer) なら残し、それ以外は [quoted] にする
+ *   (中身に { [ \ ・制御文字があればそこで止める)。
+ * - 語の途中の ' (doesn't) はそのまま残す。
+ */
+function messageForLog(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '{' || c === '[' || c === '\\' || c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f) break;
+    if (c === '"' || c === '`') {
+      const close = text.indexOf(c, i + 1);
+      if (close === -1) break;
+      const inner = text.slice(i + 1, close);
+      // 引用の中に止める文字 ({ [ \ ・制御文字) があれば、引用の外と同じくそこで止める (引用で包んだ JSON を地の文にしない)。
+      if (/[{[\\\u0000-\u001f\u007f]/.test(inner)) break;
+      out += inner.length <= QUOTED_FIELD_PATH_MAX && QUOTED_FIELD_PATH_RE.test(inner) ? `${c}${inner}${c}` : '[quoted]';
+      i = close + 1;
+      continue;
+    }
+    if (c === "'" && !(WORD_CHAR_RE.test(text[i - 1] ?? '') && WORD_CHAR_RE.test(text[i + 1] ?? ''))) break;
+    out += c;
+    i += 1;
+  }
+  return out.trim();
+}
+
+/**
+ * 断った 4xx の body から、記録してよい理由だけを取り出す (body 全体は記録しない)。
+ * - 語の項目 (errorType・error・errorReason・invalidReason・correlationId) は、語の形 (英数字と _ . : -・64 字まで) のときだけ。
+ *   correlationId は CDP へ問い合わせるときの手がかり。
+ * - 文の項目 (errorMessage・message) は messageForLog を通した形 (値の引用は残さず、項目の path (JSON pointer) は残す)。
+ * - 65 桁以上の 16 進 (署名など) は 0x の有無・大小によらず伏せる (アドレスと 32 byte の値はそのまま)。
+ */
+function facilitatorRejectReason(parsed: unknown): string {
+  if (!isRecord(parsed)) return 'unparsed_body';
+  const parts: string[] = [];
+  for (const key of ['errorType', 'error', 'errorReason', 'invalidReason', 'correlationId']) {
+    const value = parsed[key];
+    if (typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(value)) parts.push(`${key}=${value}`);
+  }
+  for (const key of ['errorMessage', 'message']) {
+    const value = parsed[key];
+    if (typeof value !== 'string') continue;
+    const text = messageForLog(value);
+    if (text.length > 0) parts.push(`${key}=${text}`);
+  }
+  if (parts.length === 0) return 'no_reason';
+  return parts
+    .join(' ')
+    .replace(/(?:0x)?[0-9a-f]{65,}/gi, '[redacted]')
+    .replace(/\s+/g, ' ')
+    .slice(0, FACILITATOR_REJECT_REASON_MAX);
+}
+
+/**
  * 既存の呼び出し規約 (判定 body だけを返す) をそのまま保つ薄いラッパ。dualRailRelay /
  * hostedUsdcPaidRoute はこちらを使い続ける (掟 12: 既存 money-path の署名を変えない)。
  */
@@ -508,6 +598,9 @@ export async function postFacilitatorWithStatus(
     parsed.success !== true
   ) {
     return { status: res.status, body: parsed };
+  }
+  if (cdpAuth && res.status >= 400 && res.status < 500 && !FACILITATOR_4XX_NOT_REJECTION.has(res.status)) {
+    throw new FacilitatorRejectedError(path, res.status, facilitatorRejectReason(parsed));
   }
   throw new Error(`facilitator ${path} HTTP ${res.status}`);
 }
