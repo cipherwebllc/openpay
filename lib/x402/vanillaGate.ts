@@ -414,7 +414,7 @@ type FacilitatorCdpWire = {
 };
 
 /**
- * Base の facilitator (CDP/payai) が、判定の形でない 4xx で要求を断ったとき (例: CDP の 400 `invalid_request`) に投げる。
+ * CDP が、判定の形でない 4xx で要求を断ったとき (例: 400 `invalid_request`) に投げる (payai は従来どおり Error)。
  * message は従来の `facilitator /verify HTTP 400` のまま (Error の派生なので、これまでどおり Error として受ける呼び出し側の
  * 応答とログは変わらない)。status と reason (facilitator が示した理由・署名は伏せる) を足し、呼び出し側が「使えない」(障害) と
  * 「断られた」を分けて記録できるようにする (2026-11-24 Sentry: CDP の 400 を facilitator_unavailable として理由なしで記録)。
@@ -434,20 +434,28 @@ export class FacilitatorRejectedError extends Error {
 const FACILITATOR_REJECT_REASON_MAX = 200;
 
 /**
- * 断った 4xx の body から、記録してよい理由だけを取り出す (body 全体は記録しない)。署名 (65 byte = 130 桁) のような
- * 64 桁を超える 16 進は伏せる (署名をログに出さない・アドレスと 32 byte の値はそのまま)。
+ * 断った 4xx の body から、記録してよい理由だけを取り出す (body 全体は記録しない)。
+ * - 語の項目 (errorType・error・errorReason・invalidReason) は、語の形 (英数字と _ . : -・64 字まで) のときだけ。
+ * - 文の項目 (errorMessage・message) は、最初の引用 ({ [ " ' `) より前だけ (facilitator が入力の値を引用した部分を残さない)。
+ * - 65 桁以上の 16 進 (署名など) は 0x の有無・大小によらず伏せる (アドレスと 32 byte の値はそのまま)。
  */
 function facilitatorRejectReason(parsed: unknown): string {
   if (!isRecord(parsed)) return 'unparsed_body';
   const parts: string[] = [];
-  for (const key of ['errorType', 'error', 'errorReason', 'invalidReason', 'errorMessage', 'message']) {
+  for (const key of ['errorType', 'error', 'errorReason', 'invalidReason']) {
     const value = parsed[key];
-    if (typeof value === 'string' && value.length > 0) parts.push(`${key}=${value}`);
+    if (typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,64}$/.test(value)) parts.push(`${key}=${value}`);
+  }
+  for (const key of ['errorMessage', 'message']) {
+    const value = parsed[key];
+    if (typeof value !== 'string') continue;
+    const text = value.split(/[{["'`]/, 1)[0].trim();
+    if (text.length > 0) parts.push(`${key}=${text}`);
   }
   if (parts.length === 0) return 'no_reason';
   return parts
     .join(' ')
-    .replace(/0x[0-9a-fA-F]{65,}/g, '0x[redacted]')
+    .replace(/(?:0x)?[0-9a-f]{65,}/gi, '[redacted]')
     .replace(/\s+/g, ' ')
     .slice(0, FACILITATOR_REJECT_REASON_MAX);
 }
@@ -548,7 +556,7 @@ export async function postFacilitatorWithStatus(
   ) {
     return { status: res.status, body: parsed };
   }
-  if (res.status >= 400 && res.status < 500) {
+  if (cdpAuth && res.status >= 400 && res.status < 500) {
     throw new FacilitatorRejectedError(path, res.status, facilitatorRejectReason(parsed));
   }
   throw new Error(`facilitator ${path} HTTP ${res.status}`);
