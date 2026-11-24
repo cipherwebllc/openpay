@@ -17,6 +17,15 @@ describe('escapeCsvCell', () => {
     expect(escapeCsvCell('-1')).toBe("'-1");
     expect(escapeCsvCell('@x')).toBe("'@x");
   });
+  it('先頭の改行と全角の ＝＋－＠ も数式とみなす (2026-11-25 外部レビュー)', () => {
+    expect(escapeCsvCell('\n=1+1')).toBe('"\'\n=1+1"');
+    expect(escapeCsvCell('＝SUM(A1)')).toBe("'＝SUM(A1)");
+    expect(escapeCsvCell('＋1')).toBe("'＋1");
+    expect(escapeCsvCell('－1')).toBe("'－1");
+    expect(escapeCsvCell('＠x')).toBe("'＠x");
+    // 先頭以外の全角の記号は触らない。
+    expect(escapeCsvCell('A＝B')).toBe('A＝B');
+  });
   it('injection prefix かつ特殊文字 → defang 後に quote', () => {
     expect(escapeCsvCell('=a,b')).toBe('"\'=a,b"');
   });
