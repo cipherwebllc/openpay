@@ -332,6 +332,9 @@ describe('出品者の GET: listingAssistant', () => {
     ['アシスタントのフラグ OFF', () => { vi.stubEnv('ENABLE_STORE_LISTING_ASSISTANT', ''); }],
     ['運営者でない', () => { vi.stubEnv('ADMIN_WALLETS', OTHER); }],
     ['ADMIN_WALLETS が空', () => { vi.stubEnv('ADMIN_WALLETS', ''); }],
+    // 入口の表示も運営の API と同じく、鍵の署名 (EOA) のセッションだけ (2026-11-25・Codex)。
+    ['スマートウォレットの署名 (contract) のセッション', () => { requireSession.mockResolvedValue({ ok: true, address: OWNER, signer: 'contract' }); }],
+    ['署名の種類の無い古いセッション', () => { requireSession.mockResolvedValue({ ok: true, address: OWNER }); }],
   ])('%s なら false', async (_label, setup) => {
     setup();
     const response = await getSeller(new Request('https://open-pay.jp/api/store/seller'));

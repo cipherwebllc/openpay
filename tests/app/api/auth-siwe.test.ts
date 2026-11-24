@@ -502,6 +502,20 @@ describe('SIWE routes', () => {
         expect(validatorCalls()).toHaveLength(1);
       });
 
+      // 包んだ中身の署名が SIWE のアドレス本人の鍵でも、6492 の形なら contract (包みを外して復元する変更が入っても気づく・Codex)。
+      it('ERC-6492 で包んだ本人の鍵の署名も contract', async () => {
+        const self = privateKeyToAccount(`0x${'55'.repeat(32)}`);
+        fakeChain({}, { [self.address.toLowerCase()]: self.address });
+
+        const res = await siweLogin(self.address, async (message) => serializeErc6492Signature({
+          address: FACTORY,
+          data: '0xdeadbeef',
+          signature: await self.signMessage({ message }),
+        }));
+
+        await expectSessionCreated(res, self.address);
+      });
+
       it('ERC-6492 (未デプロイの wallet・factory で wrap した署名)', async () => {
         fakeChain({}, { [COUNTERFACTUAL_WALLET]: owner.address });
 
