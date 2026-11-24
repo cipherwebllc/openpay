@@ -1,4 +1,5 @@
 import { sentryEnvironment } from '@/lib/sentryEnvironment';
+import { SENTRY_SERVER_IGNORE_ERRORS } from '@/lib/sentryServerIgnoreErrors';
 import {
   scrubSentryServerEvent,
   scrubSentryServerTransaction,
@@ -10,6 +11,11 @@ const sentryPrivacyOptions = {
   dataCollection: { urlQueryParams: false },
   beforeSend: scrubSentryServerEvent,
   beforeSendTransaction: scrubSentryServerTransaction,
+};
+
+// こちらの不具合でない server の error を Sentry に送らない (一覧と理由は lib/sentryServerIgnoreErrors.ts)。
+const sentryServerFilterOptions = {
+  ignoreErrors: [...SENTRY_SERVER_IGNORE_ERRORS],
 };
 
 // Next.js のサーバーサイド instrumentation エントリ。
@@ -38,6 +44,7 @@ export async function register(): Promise<void> {
       environment: sentryEnvironment(process.env.NEXT_PUBLIC_NETWORK_ENV, !process.env.VERCEL),
       tracesSampleRate: 1.0,
       ...sentryPrivacyOptions,
+      ...sentryServerFilterOptions,
       // 受けた request の本文を event に採らない (既定の 'medium' は約 10 KB まで採る)。出品の有料の本文・納品 URL・
       // 署名などを第三者 (Sentry) へ波及させない。lib/telemetryRedaction.ts でも request.data を消す (二段構え)。
       // disableIncomingRequestSpans は @sentry/nextjs の既定の Http の設定 (受けた request は Next.js が計測する・二重にしない)。
@@ -53,6 +60,7 @@ export async function register(): Promise<void> {
       environment: process.env.NEXT_PUBLIC_NETWORK_ENV ?? 'unknown',
       tracesSampleRate: 1.0,
       ...sentryPrivacyOptions,
+      ...sentryServerFilterOptions,
     });
   }
 }
