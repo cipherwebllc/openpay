@@ -529,7 +529,7 @@ describe('postFacilitatorWithStatus の断られた 4xx', () => {
     expect((error as Error).message).toBe(`facilitator /verify HTTP ${status}`);
   });
 
-  it.each([408, 425, 429])('CDP の一時的な %s は従来どおりの Error (支払いを判定していない)', async (status) => {
+  it.each([401, 403, 404, 408, 425, 429])('CDP の %s (こちらの障害・一時的) は従来どおりの Error (支払いを判定していない)', async (status) => {
     useCdp();
     reply(status, { errorType: 'rate_limit_exceeded' });
     const error = await postFacilitatorWithStatus('/verify', body, wire).catch((e: unknown) => e);

@@ -359,6 +359,7 @@ async function relayArc(
  * facilitator の判定 body (isValid / success …) を 200 で素通しする。判定の解釈
  * (true 以外は解錠しない fail-closed) は出品者サーバーの責任で、リレーは真実を写すだけ。
  * facilitator 障害 (5xx / timeout) は 503 — 判定が出ていない状態を成功にも失敗にも見せない。
+ * CDP が判定の形でない 4xx で要求を断ったとき (FacilitatorRejectedError) は、verify は 200 + isValid:false、settle は 503。
  */
 export async function handleDualRailRelay(
   req: Request,

@@ -400,7 +400,7 @@ describe('dualRailRelay verify/settle', () => {
       action: 'verify',
       resourceId: 'res-1',
       status: 400,
-      reason: 'errorType=invalid_request errorMessage=paymentPayload.payload is invalid',
+      reason: 'errorType=invalid_request correlationId=c-1 errorMessage=paymentPayload.payload is invalid',
     });
     expect(warn).not.toHaveBeenCalledWith('x402.dualrail.facilitator_unavailable', expect.anything());
   });
@@ -459,11 +459,21 @@ describe('dualRailRelay verify/settle', () => {
   });
 
   it.each([
-    ['JSON の引用', 'invalid paymentPayload: {"payload":{"reference":"order-17"}}', 'errorMessage=invalid paymentPayload:'],
-    ['配列の引用', 'unexpected fields [reference, memo]', 'errorMessage=unexpected fields'],
-    ['引用符', 'bad reference "order-17" in payload', 'errorMessage=bad reference'],
+    ['JSON の値', 'invalid paymentPayload: {"payload":{"reference":"order-17"}}', 'errorMessage=invalid paymentPayload:'],
+    ['配列', 'unexpected fields [reference, memo]', 'errorMessage=unexpected fields'],
+    ['値の引用', 'bad reference "order-17" in payload', 'errorMessage=bad reference [quoted] in payload'],
+    ['空白を含む値の引用', "bad value 'order 17' here", 'errorMessage=bad value [quoted] here'],
+    ['バッククォートの値', 'got `0.5 USDC` expected more', 'errorMessage=got [quoted] expected more'],
+    ['閉じていない引用', 'bad value "order-17 and more', 'errorMessage=bad value'],
     ['引用の無い説明', 'paymentPayload.payload is invalid', 'errorMessage=paymentPayload.payload is invalid'],
-  ])('文の項目は最初の引用より前だけを記録する (%s)', async (_label, message, expected) => {
+    [
+      'CDP の形式の拒否 (語の途中の アポストロフィと項目の path)',
+      'request body has an error: doesn\'t match schema (oneOf): Error at "/paymentPayload/resource/description": too long',
+      'errorMessage=request body has an error: doesn\'t match schema (oneOf): Error at "/paymentPayload/resource/description": too long',
+    ],
+    ['項目の名前の引用', "missing field 'payTo' in requirements", "errorMessage=missing field 'payTo' in requirements"],
+    ['語の途中の アポストロフィの後の項目の名前', "can't parse 'payTo' value", "errorMessage=can't parse 'payTo' value"],
+  ])('文の項目は値の引用を残さず、項目の path は残す (%s)', async (_label, message, expected) => {
     expect(await rejectedReason({ errorMessage: message })).toBe(expected);
   });
 
@@ -474,7 +484,7 @@ describe('dualRailRelay verify/settle', () => {
     expect(reason).not.toContain('abab');
   });
 
-  it.each([408, 425, 429])('CDP の一時的な %s は「断られた」とせず、従来どおり 503 (あとでやり直せる)', async (status) => {
+  it.each([401, 403, 404, 408, 425, 429])('CDP の %s (こちらの障害・一時的) は「断られた」とせず、従来どおり 503 と facilitator_unavailable', async (status) => {
     const warn = vi.spyOn(logger, 'warn');
     warn.mockClear();
     facilitatorReplies(status, { errorType: 'rate_limit_exceeded' });
