@@ -239,6 +239,46 @@ describe('R1 real hosted challenge → client authorization → server validatio
             ...forwarded, paymentRequirements: { ...forwarded.paymentRequirements, resource },
           }, now: NOW })).toEqual({ ok: false, reason: 'intent_mismatch' });
         }
+        // 2026-11-24 外部の接続元が 78 桁の数を試した: validAfter が uint256 に入らないと、見積もりと比べる前の
+        // nonce の符号化で投げ、GET の try の外で 500 になっていた。形の違う支払い (409 invalid_payload) にする。
+        const withValidAfter = (validAfter: string, validBefore?: string) => ({
+          ...forwarded,
+          paymentPayload: { ...forwarded.paymentPayload, payload: { ...forwarded.paymentPayload.payload,
+            authorization: {
+              ...forwarded.paymentPayload.payload.authorization, validAfter,
+              ...(validBefore === undefined ? {} : { validBefore }),
+            } } },
+        });
+        for (const validAfter of [(2n ** 256n).toString(), '9'.repeat(78)]) {
+          expect(buildPurchaseAuthorizationClaim({
+            intent, paymentPayload: payload, facilitatorBody: withValidAfter(validAfter), now: NOW,
+          })).toEqual({ ok: false, reason: 'invalid_payload' });
+        }
+        expect(buildPurchaseAuthorizationClaim({
+          intent, paymentPayload: payload, facilitatorBody: withValidAfter((2n ** 256n - 1n).toString()), now: NOW,
+        }).ok).toBe(true);
+        // 期限の上限・期限切れの確かめは今までどおり先 (理由は変わらない)。
+        const over = (2n ** 256n).toString();
+        expect(buildPurchaseAuthorizationClaim({
+          intent, paymentPayload: payload, now: NOW,
+          facilitatorBody: withValidAfter(over, (BigInt(intent.authorizationValidBeforeMax) + 1n).toString()),
+        })).toEqual({ ok: false, reason: 'authorization_too_late' });
+        expect(buildPurchaseAuthorizationClaim({
+          intent, paymentPayload: payload, now: NOW,
+          facilitatorBody: withValidAfter(over, String(Math.floor(NOW / 1000))),
+        })).toEqual({ ok: false, reason: 'authorization_expired' });
+        const oversized = { ...payload, payload: { ...payload.payload,
+          authorization: { ...payload.payload.authorization, validAfter: '9'.repeat(78) } } };
+        const oversizedWire = version === 1 ? oversized : {
+          x402Version: 2, resource: v2.resource, accepted: v2.accepts[0], payload: oversized.payload,
+        };
+        const verifyCalls = h.verify.mock.calls.length;
+        const rejected = await GET(new Request(url, { headers: {
+          [version === 1 ? 'X-PAYMENT' : 'PAYMENT-SIGNATURE']: jp.encodeHostedPaymentHeader(oversizedWire),
+        } }), { params: Promise.resolve({ id: RESOURCE }) });
+        expect(rejected.status, await rejected.clone().text()).toBe(409);
+        expect((await rejected.json()).error).toBe('invalid_payload');
+        expect(h.verify.mock.calls.length).toBe(verifyCalls);
       } else {
         expect((await submitted.json()).error).toBe('fixture_stop');
         const [endpoint, forwarded, cdp] = h.postFacilitator.mock.calls.at(-1)!;
