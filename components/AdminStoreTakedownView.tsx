@@ -20,22 +20,57 @@ type Listing = {
   handle: string;
 };
 
-type ItemResult = 'stopped' | 'alreadyStopped' | 'signIn' | 'forbidden' | 'rateLimited' | 'notFound' | 'failed';
+type ItemResult =
+  | 'stopped'
+  | 'alreadyStopped'
+  | 'unknown'
+  | 'signIn'
+  | 'forbidden'
+  | 'rateLimited'
+  | 'notFound'
+  | 'failed';
 
-// 店のページの URL (https://open-pay.jp/ja/@name?product=…)・@name・name のどれからでも @ の後ろの名前を取る。
-// 形の確かめは公開の API (/api/store/listings の handle) に任せる。
+// 店のページの URL (https://open-pay.jp/ja/@name?product=…)・@name・name のどれからでも店の名前を取る。
+// URL はパスの @ で始まる区切りだけを見る (クエリの @ は拾わない・%40 は戻す)。
+// 形の確かめと正規化の本体は公開の API (/api/store/listings の handle = normalizeHandle) に任せる。
+// lib/handle の facade は読み込まない (この画面の client の bundle が 240 → 283 kB に増えた・2026-11-25)。
+// ここで行うのは decodeHandleSegment・normalizeHandle (lib/handle/normalize.ts) と同じ数行だけ。
+function decodeSegment(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function normalizeName(raw: string): string {
+  return raw.trim().replace(/^@+/, '').toLowerCase();
+}
+
 export function handleFromInput(raw: string): string {
   const s = raw.trim();
-  const at = s.match(/@([^/?#\s]+)/);
-  if (at) return at[1];
-  return s.replace(/^@/, '');
+  if (/^https?:\/\//i.test(s)) {
+    let path: string;
+    try {
+      path = new URL(s).pathname;
+    } catch {
+      return '';
+    }
+    const segment = path
+      .split('/')
+      .map(decodeSegment)
+      .find((part) => part.startsWith('@'));
+    return segment ? normalizeName(segment) : '';
+  }
+  return normalizeName(s);
 }
 
 function resultForStatus(status: number, body: unknown): ItemResult {
   if (status === 200) {
-    return typeof body === 'object' && body !== null && (body as { alreadyPurged?: unknown }).alreadyPurged === true
-      ? 'alreadyStopped'
-      : 'stopped';
+    // 止めたと言えるのは、API の成功の本文 (ok: true) を読めたときだけ。本文を読めなかった 200 は、止まったか
+    // 分からない (止める API は同じ ID で何度送っても同じ結果なので、押し直してもらえばよい)。
+    if (typeof body !== 'object' || body === null || (body as { ok?: unknown }).ok !== true) return 'unknown';
+    return (body as { alreadyPurged?: unknown }).alreadyPurged === true ? 'alreadyStopped' : 'stopped';
   }
   if (status === 401) return 'signIn';
   if (status === 403) return 'forbidden';
@@ -47,7 +82,7 @@ function resultForStatus(status: number, body: unknown): ItemResult {
 export function AdminStoreTakedownView() {
   const t = useTranslations('AdminStore');
   const { isConnected } = useAccount();
-  const { isSignedIn, isSigningIn, mismatch, signIn, signInError } = useSiweSession();
+  const { isSignedIn, isSigningIn, mismatch, signIn, signInError, refreshSession } = useSiweSession();
 
   const [shopInput, setShopInput] = useState('');
   const [listings, setListings] = useState<Listing[] | null>(null);
@@ -116,13 +151,18 @@ export function AdminStoreTakedownView() {
   async function show() {
     const handle = handleFromInput(shopInput);
     if (!handle) return;
+    // 前の店の一覧は読み込みの前に消す (読み込み中に前の店の商品を選んで止められないように)。
+    setListings(null);
+    setShownHandle('');
     setSelected(new Set());
     setResults({});
     setConfirming(false);
     await load(handle);
   }
 
+  // 選び直したら確かめを閉じる (確かめで見せた件数と、止める商品をずらさない)。
   function toggle(id: string) {
+    setConfirming(false);
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -131,8 +171,14 @@ export function AdminStoreTakedownView() {
     });
   }
 
+  // この画面で止めたと分かった商品。公開の一覧は CDN に少し残ることがあるので、読み直しても並ぶことがある。
+  // もう一度選べないようにする。
+  const isDone = (id: string) => results[id] === 'stopped' || results[id] === 'alreadyStopped';
+  // 止める対象は、いま表示している店の一覧の中で選ばれているものだけ。
+  const targets = (listings ?? []).filter((item) => selected.has(item.id) && !isDone(item.id));
+
   async function stopSelected() {
-    const ids = [...selected];
+    const ids = targets.map((item) => item.id);
     setConfirming(false);
     setRunning(true);
     const next: Record<string, ItemResult> = {};
@@ -149,7 +195,9 @@ export function AdminStoreTakedownView() {
         result = 'failed';
       }
       next[id] = result;
-      setResults({ ...next });
+      setResults((prev) => ({ ...prev, ...next }));
+      // サインインが切れたら、画面のサインインの状態を読み直して、サインインのボタンを出す。
+      if (result === 'signIn') void refreshSession();
       // サインイン切れ・権限なし・上限は、残りを送っても同じ答えなので止める (押し直してもらう)。
       if (result === 'signIn' || result === 'forbidden' || result === 'rateLimited') break;
     }
@@ -232,9 +280,9 @@ export function AdminStoreTakedownView() {
                       <input
                         type="checkbox"
                         className="mt-1 h-5 w-5"
-                        checked={selected.has(item.id)}
+                        checked={selected.has(item.id) && !isDone(item.id)}
                         onChange={() => toggle(item.id)}
-                        disabled={running}
+                        disabled={running || isDone(item.id)}
                       />
                       <span className="min-w-0 flex-1 text-sm">
                         <span className="block font-semibold text-slate-900">{item.title}</span>
@@ -258,7 +306,10 @@ export function AdminStoreTakedownView() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => setSelected(new Set(listings.map((item) => item.id)))}
+                  onClick={() => {
+                    setConfirming(false);
+                    setSelected(new Set(listings.filter((item) => !isDone(item.id)).map((item) => item.id)));
+                  }}
                   disabled={running}
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
                 >
@@ -267,15 +318,15 @@ export function AdminStoreTakedownView() {
                 <button
                   type="button"
                   onClick={() => setConfirming(true)}
-                  disabled={running || selected.size === 0}
+                  disabled={running || targets.length === 0}
                   className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 >
-                  {running ? t('stopping') : t('stopSelected', { count: selected.size })}
+                  {running ? t('stopping') : t('stopSelected', { count: targets.length })}
                 </button>
               </div>
               {confirming && (
                 <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
-                  <p className="text-sm text-red-800">{t('confirmText', { count: selected.size })}</p>
+                  <p className="text-sm text-red-800">{t('confirmText', { count: targets.length })}</p>
                   <div className="mt-2 flex gap-2">
                     <button
                       type="button"

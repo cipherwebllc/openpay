@@ -2461,6 +2461,7 @@
     "result": {
       "stopped": "Stopped",
       "alreadyStopped": "Already stopped",
+      "unknown": "Could not confirm whether it stopped. Press the button again (it shows \"Already stopped\" if it did).",
       "signIn": "Your sign-in has expired. Sign in again, then press the button again.",
       "forbidden": "This wallet does not have operator access.",
       "rateLimited": "Too many requests. Wait one minute, then press the button again.",
