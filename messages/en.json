@@ -2448,7 +2448,7 @@
     "loading": "Loading…",
     "loadError": "Could not load the products. Check the URL or @name.",
     "listingsTitle": "Public products of @{handle} ({count})",
-    "noListings": "No public products.",
+    "noListings": "No public products found. This searches the newest 200 products in the Store, so older products do not appear.",
     "price": "Price {total} JPYC (including the fee)",
     "imageUrl": "Image URL: {url}",
     "selectAll": "Select all",
@@ -2461,7 +2461,7 @@
     "result": {
       "stopped": "Stopped",
       "alreadyStopped": "Already stopped",
-      "unknown": "Could not confirm whether it stopped. Press the button again (it shows \"Already stopped\" if it did).",
+      "unknown": "Could not confirm whether it stopped. Press \"Show products\". If it is gone from the list, it stopped. If it is still there, stop it again.",
       "signIn": "Your sign-in has expired. Sign in again, then press the button again.",
       "forbidden": "This wallet does not have operator access.",
       "rateLimited": "Too many requests. Wait one minute, then press the button again.",

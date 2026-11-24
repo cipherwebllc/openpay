@@ -232,6 +232,46 @@ describe('AdminStoreTakedownView', () => {
     ]);
   });
 
+  it('止めたあとの読み直しが終わるまで、次の操作 (別の店の表示・止める) はできない', async () => {
+    let releaseReload!: (value: unknown) => void;
+    listingResponses = [
+      { ok: true, items: [item(ID_A, 'SSRFProd A'), item(ID_B, 'SSRFProd B')] },
+      new Promise((resolve) => {
+        releaseReload = resolve;
+      }),
+    ];
+    const user = await showShop('@pssrf30ed2f66');
+    await screen.findByText('@pssrf30ed2f66 の公開中の商品（2 件）');
+    await user.click(screen.getAllByRole('checkbox')[0]);
+    await user.click(screen.getByRole('button', { name: '選んだ 1 件の販売を止める' }));
+    await user.click(screen.getByRole('button', { name: '止める' }));
+    await screen.findByText('止めました');
+    expect(screen.getByRole('button', { name: '読み込み中…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'すべて選ぶ' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '止めています…' })).toBeDisabled();
+    releaseReload({ ok: true, items: [item(ID_B, 'SSRFProd B')] });
+    expect(await screen.findByText('@pssrf30ed2f66 の公開中の商品（1 件）')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '商品を表示' })).toBeEnabled();
+  });
+
+  it('同じ店を表示し直しても、止めた商品は選べないまま (止めた記録は消さない)', async () => {
+    const one = { ok: true, items: [item(ID_A, 'SSRFProd A')] };
+    listingResponses = [one, one, one];
+    const user = await showShop('@pssrf30ed2f66');
+    await screen.findByText('@pssrf30ed2f66 の公開中の商品（1 件）');
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: '選んだ 1 件の販売を止める' }));
+    await user.click(screen.getByRole('button', { name: '止める' }));
+    await screen.findByText('止めました');
+    await waitFor(() => expect(screen.getByRole('button', { name: '商品を表示' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: '商品を表示' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET')).toHaveLength(3));
+    expect(await screen.findByText('@pssrf30ed2f66 の公開中の商品（1 件）')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'すべて選ぶ' })).toBeDisabled();
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+
   it('200 でも本文を読めなければ「止めました」と言わない', async () => {
     listingResponses = [{ ok: true, items: [item(ID_A, 'SSRFProd A')] }];
     takedownStatus[ID_A] = { status: 200, body: 'unreadable' };

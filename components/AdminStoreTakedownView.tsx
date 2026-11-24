@@ -93,6 +93,9 @@ export function AdminStoreTakedownView() {
   const [confirming, setConfirming] = useState(false);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<Record<string, ItemResult>>({});
+  // この画面で止めたと分かった商品 (表示し直しても消さない)。公開の一覧は CDN に少し残ることがあるので、
+  // 読み直しても並ぶことがある。もう一度選べないようにする。
+  const [doneIds, setDoneIds] = useState<Set<string>>(new Set());
 
   const heading = (
     <div className="mb-4">
@@ -128,24 +131,30 @@ export function AdminStoreTakedownView() {
     );
   }
 
+  // 一覧の読み込みは同時に 1 本だけ: 「商品を表示」は読み込み中と止めている間は押せず、止めたあとの読み直しは
+  // 止めている間 (running) の中で待つ。なので前の店や前の読み直しの応答が、後から画面を戻すことはない。
   async function load(handle: string) {
     setLoading(true);
     setLoadError(false);
+    let items: Listing[] | null = null;
     try {
       const res = await fetch(
         `/api/store/listings?handle=${encodeURIComponent(handle)}&limit=50&locale=ja`,
         { cache: 'no-store' },
       );
       const json = (await res.json().catch(() => null)) as { ok?: boolean; items?: Listing[] } | null;
-      if (!res.ok || !json?.ok || !Array.isArray(json.items)) throw new Error('load_failed');
-      setListings(json.items);
-      setShownHandle(handle);
+      if (res.ok && json?.ok && Array.isArray(json.items)) items = json.items;
     } catch {
+      items = null;
+    }
+    if (items) {
+      setListings(items);
+      setShownHandle(handle);
+    } else {
       setListings(null);
       setLoadError(true);
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   }
 
   async function show() {
@@ -171,11 +180,10 @@ export function AdminStoreTakedownView() {
     });
   }
 
-  // この画面で止めたと分かった商品。公開の一覧は CDN に少し残ることがあるので、読み直しても並ぶことがある。
-  // もう一度選べないようにする。
-  const isDone = (id: string) => results[id] === 'stopped' || results[id] === 'alreadyStopped';
+  const isDone = (id: string) => doneIds.has(id);
+  const selectable = (listings ?? []).filter((item) => !isDone(item.id));
   // 止める対象は、いま表示している店の一覧の中で選ばれているものだけ。
-  const targets = (listings ?? []).filter((item) => selected.has(item.id) && !isDone(item.id));
+  const targets = selectable.filter((item) => selected.has(item.id));
 
   async function stopSelected() {
     const ids = targets.map((item) => item.id);
@@ -196,15 +204,17 @@ export function AdminStoreTakedownView() {
       }
       next[id] = result;
       setResults((prev) => ({ ...prev, ...next }));
+      if (result === 'stopped' || result === 'alreadyStopped') setDoneIds((prev) => new Set(prev).add(id));
       // サインインが切れたら、画面のサインインの状態を読み直して、サインインのボタンを出す。
       if (result === 'signIn') void refreshSession();
       // サインイン切れ・権限なし・上限は、残りを送っても同じ答えなので止める (押し直してもらう)。
       if (result === 'signIn' || result === 'forbidden' || result === 'rateLimited') break;
     }
-    setRunning(false);
     setSelected(new Set());
-    // 止めた商品は公開の一覧から消えるので、読み直して確かめられるようにする。
+    // 止めた商品は公開の一覧から消えるので、読み直して確かめられるようにする。読み直しが終わるまでは、
+    // 次の操作 (止める・別の店の表示) をできないままにする。
     if (shownHandle) await load(shownHandle);
+    setRunning(false);
   }
 
   const resultEntries = Object.entries(results);
@@ -308,9 +318,9 @@ export function AdminStoreTakedownView() {
                   type="button"
                   onClick={() => {
                     setConfirming(false);
-                    setSelected(new Set(listings.filter((item) => !isDone(item.id)).map((item) => item.id)));
+                    setSelected(new Set(selectable.map((item) => item.id)));
                   }}
-                  disabled={running}
+                  disabled={running || selectable.length === 0}
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
                 >
                   {t('selectAll')}
