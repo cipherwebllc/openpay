@@ -27,7 +27,7 @@ import {
   SUPPORTED_CHAINS,
 } from '@/lib/relay/relayProvider';
 import { checkIpRateLimit, readIdempotency } from '@/lib/relay/relayGuards';
-import { MAX_BODY_BYTES, anonymizeIp, isDec } from '@/lib/relay/relayRoute';
+import { MAX_BODY_BYTES, anonymizeIp, isDec, isUint256Dec } from '@/lib/relay/relayRoute';
 import { readTextBodyCapped } from '@/lib/httpBodyCap';
 import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
@@ -376,6 +376,16 @@ function parseIntent(raw: Record<string, unknown>): ParsedIntent | null {
       !isDec(raw.feeValue) ||
       typeof raw.intentSalt !== 'string' ||
       !/^0x[0-9a-fA-F]{64}$/.test(raw.intentSalt)
+    ) {
+      return null;
+    }
+    // 下の buildForwarderNonce はこの 4 つを uint256 として符号化する。2^256 以上は viem が投げ、try の外なので 500 に
+    // なっていた (2026-11-24 外部の接続元が境界の値を試した)。入らない値は成立しえない照会なので、不正な形と同じ 400 にする。
+    if (
+      !isUint256Dec(raw.merchantValue) ||
+      !isUint256Dec(raw.feeValue) ||
+      !isUint256Dec(raw.validAfter) ||
+      !isUint256Dec(raw.validBefore)
     ) {
       return null;
     }
