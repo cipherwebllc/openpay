@@ -414,6 +414,45 @@ type FacilitatorCdpWire = {
 };
 
 /**
+ * Base の facilitator (CDP/payai) が、判定の形でない 4xx で要求を断ったとき (例: CDP の 400 `invalid_request`) に投げる。
+ * message は従来の `facilitator /verify HTTP 400` のまま (Error の派生なので、これまでどおり Error として受ける呼び出し側の
+ * 応答とログは変わらない)。status と reason (facilitator が示した理由・署名は伏せる) を足し、呼び出し側が「使えない」(障害) と
+ * 「断られた」を分けて記録できるようにする (2026-11-24 Sentry: CDP の 400 を facilitator_unavailable として理由なしで記録)。
+ */
+export class FacilitatorRejectedError extends Error {
+  readonly status: number;
+  readonly reason: string;
+  constructor(path: '/verify' | '/settle', status: number, reason: string) {
+    super(`facilitator ${path} HTTP ${status}`);
+    this.name = 'FacilitatorRejectedError';
+    this.status = status;
+    this.reason = reason;
+  }
+}
+
+/** 記録する理由の長さの上限 (facilitator の文面をそのまま長く残さない)。 */
+const FACILITATOR_REJECT_REASON_MAX = 200;
+
+/**
+ * 断った 4xx の body から、記録してよい理由だけを取り出す (body 全体は記録しない)。署名 (65 byte = 130 桁) のような
+ * 64 桁を超える 16 進は伏せる (署名をログに出さない・アドレスと 32 byte の値はそのまま)。
+ */
+function facilitatorRejectReason(parsed: unknown): string {
+  if (!isRecord(parsed)) return 'unparsed_body';
+  const parts: string[] = [];
+  for (const key of ['errorType', 'error', 'errorReason', 'invalidReason', 'errorMessage', 'message']) {
+    const value = parsed[key];
+    if (typeof value === 'string' && value.length > 0) parts.push(`${key}=${value}`);
+  }
+  if (parts.length === 0) return 'no_reason';
+  return parts
+    .join(' ')
+    .replace(/0x[0-9a-fA-F]{65,}/g, '0x[redacted]')
+    .replace(/\s+/g, ' ')
+    .slice(0, FACILITATOR_REJECT_REASON_MAX);
+}
+
+/**
  * 既存の呼び出し規約 (判定 body だけを返す) をそのまま保つ薄いラッパ。dualRailRelay /
  * hostedUsdcPaidRoute はこちらを使い続ける (掟 12: 既存 money-path の署名を変えない)。
  */
@@ -508,6 +547,9 @@ export async function postFacilitatorWithStatus(
     parsed.success !== true
   ) {
     return { status: res.status, body: parsed };
+  }
+  if (res.status >= 400 && res.status < 500) {
+    throw new FacilitatorRejectedError(path, res.status, facilitatorRejectReason(parsed));
   }
   throw new Error(`facilitator ${path} HTTP ${res.status}`);
 }

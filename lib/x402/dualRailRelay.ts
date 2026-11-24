@@ -41,6 +41,7 @@ import {
 import {
   buildRelayAccepts,
   decodeVanillaPaymentHeaderWithRail,
+  FacilitatorRejectedError,
   postFacilitator,
   postFacilitatorWithStatus,
   type FacilitatorRail,
@@ -446,6 +447,23 @@ export async function handleDualRailRelay(
     }
     return noStore(NextResponse.json(judgment));
   } catch (e) {
+    if (e instanceof FacilitatorRejectedError) {
+      // facilitator が要求を断った (判定の形でない 4xx)。障害ではないので「使えない」とは記録せず、示した理由を残す。
+      logger.warn('x402.dualrail.facilitator_rejected', {
+        action,
+        resourceId: resource.id,
+        status: e.status,
+        reason: e.reason,
+      });
+      if (action === 'verify') {
+        // verify はお金を動かさない。facilitator の判定の形 (200 + isValid:false) で返し、「あとでやり直して」(503) を
+        // 繰り返させない。理由は x402 の決まった語 (strict な client は一覧にない語を受け取れない) から中立のものを使う。
+        return noStore(NextResponse.json({ isValid: false, invalidReason: 'unexpected_verify_error' }));
+      }
+      // settle は送金の前に断られたと言い切れない (未知の理由は送信済み側に倒す・paymentRedelivery の
+      // isFacilitatorPreBroadcastRejection と同じ考え) ので、応答は従来どおり 503。
+      return jsonError(503, 'facilitator_unavailable');
+    }
     logger.warn('x402.dualrail.facilitator_unavailable', {
       action,
       resourceId: resource.id,
