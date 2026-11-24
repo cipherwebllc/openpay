@@ -1,10 +1,10 @@
 // 運営 (OpenPay 自社) 専用: a1 利用料の収益確認 + freee 用 CSV + 期間照合。
-// SIWE で識別した wallet が ADMIN_WALLETS に載っている場合のみ (二段: requireSession → isAdminWallet)。
+// SIWE で識別した wallet が ADMIN_WALLETS に載り、鍵の署名 (EOA) で作ったセッションの場合のみ (二段: requireSession → isAdminSession)。
 // GET ?format=freee|csv → 収入の生データ CSV (税理士提出/ freee 取込)。それ以外 → JSON (合計/期間別/入金一覧/照合)。
 // 設計: docs/plans/admin-billing-revenue.md。
 import { NextResponse } from 'next/server';
 import { requireSession } from '../../../auth/siwe/_session';
-import { isAdminWallet } from '@/lib/adminAuth';
+import { isAdminSession } from '@/lib/adminAuth';
 import {
   getFeeRevenueEvents,
   summarizeRevenue,
@@ -30,7 +30,7 @@ export async function GET(req: Request): Promise<NextResponse> {
   }
   const session = await requireSession();
   if (!session.ok) return session.response;
-  if (!isAdminWallet(session.address)) {
+  if (!isAdminSession(session)) {
     // 無料 SIWE session の拒否連打を Sentry quota 消費へ波及させない。
     logger.info('admin.billing.forbidden', { wallet: session.address });
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });

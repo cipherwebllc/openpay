@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { env } from '@/lib/env';
-import { isAdminWallet } from '@/lib/adminAuth';
+import { isAdminSession } from '@/lib/adminAuth';
 import { logger } from '@/lib/logger';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
@@ -37,8 +37,8 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 本文 (最大 1.5 MiB) は認証・運営者・日次の制限を通ってから読む (未認証の要求に読み取りと JSON.parse をさせない・兄弟の route と同じ順)。
   const auth = await requireStoreSeller(req, 'listing-assistant');
   if (!auth.ok) return auth.response;
-  // ADMIN_WALLETS が空なら誰も通さない (isAdminWallet は fail-closed)。
-  if (!isAdminWallet(auth.address)) {
+  // ADMIN_WALLETS が空なら誰も通さない (isAdminWallet は fail-closed)。鍵の署名 (EOA) のセッションだけ (isAdminSession)。
+  if (!isAdminSession(auth)) {
     return storePrivateJson({ ok: false, error: 'forbidden' }, 403);
   }
 

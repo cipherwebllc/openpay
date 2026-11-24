@@ -82,7 +82,8 @@ beforeEach(() => {
   h.afterRead = null;
   h.failRead = false;
   h.failWrite = false;
-  h.session.mockResolvedValue({ ok: true, address: ADMIN });
+  // 運営の API は鍵の署名 (EOA) で作ったセッションだけ (lib/adminAuth.ts の isAdminSession・2026-11-25)。
+  h.session.mockResolvedValue({ ok: true, address: ADMIN, signer: 'eoa' });
   h.limit.mockResolvedValue(true);
   vi.stubEnv('ADMIN_WALLETS', ADMIN);
   vi.stubEnv('ENABLE_CREATOR_STORE', '');
@@ -210,10 +211,19 @@ describe('operator-only hosted takedown route', () => {
 
   it.each([ADMIN, ''])('rejects a seller or empty admin allowlist (%s)', async (adminWallets) => {
     vi.stubEnv('ADMIN_WALLETS', adminWallets);
-    h.session.mockResolvedValue({ ok: true, address: OWNER });
+    h.session.mockResolvedValue({ ok: true, address: OWNER, signer: 'eoa' });
     expect((await request()).status).toBe(403);
     expect(kvGet).not.toHaveBeenCalled();
     expect(kvEval).not.toHaveBeenCalled();
+  });
+
+  // 2026-11-25 外部レビュー #1: 許可リストのアドレスでも、スマートウォレットの署名や種類の無い古いセッションは通さない。
+  it.each([['contract'], [undefined]])('rejects an admin address whose session signer is %s', async (signer) => {
+    h.session.mockResolvedValue({ ok: true, address: ADMIN, ...(signer ? { signer } : {}) });
+    expect((await request()).status).toBe(403);
+    expect(kvGet).not.toHaveBeenCalled();
+    expect(kvEval).not.toHaveBeenCalled();
+    expect(h.audit).not.toHaveBeenCalled();
   });
 
   it.each([

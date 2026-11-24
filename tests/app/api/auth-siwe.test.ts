@@ -283,6 +283,8 @@ describe('SIWE routes', () => {
     expect(h.kvGet).toHaveBeenCalledWith('siwe:nonce:csrf1234');
     expect(h.kvDel).toHaveBeenCalledWith('siwe:nonce:csrf1234');
     expect(h.kvSet).toHaveBeenCalledOnce();
+    // 鍵の署名 (EOA) のセッションは、署名の種類 eoa を残す (運営の API はこれだけを通す・2026-11-25)。
+    expect(JSON.parse(h.kvSet.mock.calls[0][1] as string)).toEqual({ address: account.address, signer: 'eoa' });
   });
 
   // 第 9 回レビュー C-1: 署名検証の public client が CCIP-Read (EIP-3668) を追うと、7702 委任済み EOA +
@@ -478,6 +480,7 @@ describe('SIWE routes', () => {
         };
       }
 
+      // スマートウォレットの署名 (1271 / 6492 / 8010 で包んだ形) は、署名の種類 contract を残す (運営の API は通さない・2026-11-25)。
       async function expectSessionCreated(res: Response, address: Address) {
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(res.status).toBe(200);
@@ -485,6 +488,7 @@ describe('SIWE routes', () => {
         expect(res.headers.get('set-cookie')).toContain('op_sess=');
         expect(h.kvDel).toHaveBeenCalledWith('siwe:nonce:ccipread1234');
         expect(h.kvSet).toHaveBeenCalledOnce();
+        expect(JSON.parse(h.kvSet.mock.calls[0][1] as string)).toEqual({ address: getAddress(address), signer: 'contract' });
       }
 
       const validatorCalls = () => calls.filter((c) => c.method === 'eth_call' && !c.tx?.to && c.tx?.data?.toLowerCase().startsWith(VALIDATOR_BYTECODE));

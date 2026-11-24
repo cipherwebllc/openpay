@@ -100,7 +100,8 @@ beforeEach(() => {
   vi.stubEnv('GEMINI_API_KEY', 'test-gemini-key');
   vi.stubEnv('ADMIN_WALLETS', `${OTHER}, ${OWNER}`);
   vi.stubGlobal('fetch', fetchMock);
-  requireSession.mockResolvedValue({ ok: true, address: OWNER });
+  // 運営の API は鍵の署名 (EOA) で作ったセッションだけ (lib/adminAuth.ts の isAdminSession・2026-11-25)。
+  requireSession.mockResolvedValue({ ok: true, address: OWNER, signer: 'eoa' });
   checkIpRateLimit.mockResolvedValue(true);
   checkReadRateLimit.mockImplementation(async (key: string) => (key === DAILY_KEY ? state.dailyAllowed : true));
   fetchMock.mockResolvedValue(jsonResponse(geminiBody()));
@@ -183,6 +184,8 @@ describe('listing assistant route: 入口の検査', () => {
     ['運営者でない', () => { vi.stubEnv('ADMIN_WALLETS', OTHER); }],
     ['ADMIN_WALLETS が空', () => { vi.stubEnv('ADMIN_WALLETS', ''); }],
     ['ADMIN_WALLETS が未設定', () => { vi.stubEnv('ADMIN_WALLETS', undefined); }],
+    ['スマートウォレットの署名 (contract) のセッション', () => { requireSession.mockResolvedValue({ ok: true, address: OWNER, signer: 'contract' }); }],
+    ['署名の種類の無い古いセッション', () => { requireSession.mockResolvedValue({ ok: true, address: OWNER }); }],
   ])('%s は 403 で、本文を読まず日次の回数を使わず Google に届かない', async (_label, setup) => {
     setup();
     const req = post(cooBody());

@@ -6,7 +6,7 @@
 // アカウントは ERC-6492/1271 を message の chainId 上の public client で検証)。
 import { NextResponse } from 'next/server';
 import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
-import { createPublicClient } from 'viem';
+import { createPublicClient, isAddressEqual, recoverMessageAddress } from 'viem';
 import { verifySiweMessage } from 'viem/siwe';
 import { readJsonBodyCapped } from '@/lib/httpBodyCap';
 import { isKvConfigured, kvDel, kvGet, kvSet } from '@/lib/kv';
@@ -22,12 +22,24 @@ import {
   nonceKey,
   sessionKey,
   verifySiweLogin,
+  type SessionSigner,
 } from '@/lib/siwe';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const SIWE_VERIFY_BODY_MAX_BYTES = 8 * 1024;
+
+// 鍵の署名 (65 byte の ECDSA) がそのアドレスに戻れば eoa (どのチェーンでも同じ鍵が持ち主)。スマートウォレットの署名
+// (ERC-1271 の持ち主の鍵・6492 / 8010 で包んだ形) は、戻らないか戻せない = contract。7702 で委任した EOA でも、ふつうの
+// 鍵の署名なら eoa になる (鍵がどのチェーンでも持ち主のまま)。
+async function signerKind(message: string, signature: `0x${string}`, address: `0x${string}`): Promise<SessionSigner> {
+  try {
+    return isAddressEqual(await recoverMessageAddress({ message, signature }), address) ? 'eoa' : 'contract';
+  } catch {
+    return 'contract';
+  }
+}
 
 export async function POST(req: Request): Promise<NextResponse> {
   const rejected = rejectCrossOriginWrite(req, { json: true });
@@ -67,6 +79,9 @@ export async function POST(req: Request): Promise<NextResponse> {
   // createSession の永続化失敗など想定外 throw は 503 に倒し、cookie を発行しない
   // (= セッション無効なのに login 成功に見える false-success を防ぐ)。
   let result: Awaited<ReturnType<typeof verifySiweLogin>>;
+  // 署名の種類 (lib/siwe.ts の SessionSigner)。署名が確かめられた後にだけ決め、セッションに残す。既定は contract
+  // (eoa と言えるのは、鍵の署名をそのアドレスに戻せたときだけ)。
+  let signer: SessionSigner = 'contract';
   try {
     result = await verifySiweLogin(
       { message: body.message, signature: body.signature },
@@ -87,13 +102,15 @@ export async function POST(req: Request): Promise<NextResponse> {
           ccipRead: false,
         });
         try {
-          return await verifySiweMessage(client, {
+          const valid = await verifySiweMessage(client, {
             message,
             signature,
             address,
             domain,
             nonce,
           });
+          if (valid) signer = await signerKind(message, signature, address);
+          return valid;
         } catch (error) {
           // スマートアカウントの署名 (ERC-8010 等) の検証で chain の呼び出しが空 (0x) を返して読めないときは、送り直しても
           // 同じなので検証失敗 = 401 invalid_signature にする (503 は「あとで送り直して」と伝わり、Sentry の error にも
@@ -117,7 +134,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       },
       createSession: async (address) => {
         const token = newSessionToken();
-        const set = await kvSet(sessionKey(token), JSON.stringify({ address }), {
+        const set = await kvSet(sessionKey(token), JSON.stringify({ address, signer }), {
           ttlSec: SESSION_TTL_SEC,
         });
         // 保存失敗 = cookie を出してもセッション無効。throw して 503 に倒し cookie を出さない。
