@@ -397,6 +397,33 @@ describe('POST /api/relay/jpyc/status', () => {
     });
   });
 
+  // 2026-11-24 外部の接続元が境界の値を試した: forwarder の照会の 4 つの欄は parse の中で buildForwarderNonce が uint256 として
+  // 符号化するので、2^256 以上だと viem が投げて 500 になっていた。入らない値は 400 invalid_payload (署名の確認に進まない)。
+  describe('forwarder の照会の数の欄は uint256 に入るものだけ', () => {
+    const OVER = (2n ** 256n).toString();
+    const MAX = (2n ** 256n - 1n).toString();
+
+    it.each(['merchantValue', 'feeValue', 'validAfter', 'validBefore'])('%s が 2^256 なら 400 invalid_payload', async (field) => {
+      h.forwarder = FORWARDER;
+      const res = await POST(req({ ...forwarderIntent, [field]: OVER }));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
+    });
+
+    it.each(['merchantValue', 'feeValue', 'validAfter', 'validBefore'])('%s が 2^256 - 1 なら形の確認は通る (400 invalid_payload にしない)', async (field) => {
+      h.forwarder = FORWARDER;
+      const res = await POST(req({ ...forwarderIntent, [field]: MAX }));
+      expect(await res.json()).not.toEqual({ ok: false, error: 'invalid_payload' });
+    });
+
+    it('1,000 桁の数も 400 invalid_payload (BigInt にする前に桁で断る)', async () => {
+      h.forwarder = FORWARDER;
+      const res = await POST(req({ ...forwarderIntent, merchantValue: '9'.repeat(1000) }));
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
+    });
+  });
+
   it('nonce lookup は署名なしで同じ read-only 状態を照会する', async () => {
     h.used = true;
     h.logHash = LOG_HASH;

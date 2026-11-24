@@ -7,6 +7,7 @@
 // 注意: jpycRelay は relayRoute を import しない (RelayResult を import するだけ) ので循環は無い。
 
 import { NextResponse } from 'next/server';
+import { maxUint256 } from 'viem';
 import { logger } from '@/lib/logger';
 import { anonymizedIpPrefix } from '@/lib/net/ipPrefix';
 import type { RelayResult } from './jpycRelay';
@@ -25,6 +26,12 @@ export const MAX_UINT256_DEC_DIGITS = 78;
 
 export function isDecWithin(v: unknown, maxDigits: number): v is string {
   return isDec(v) && v.length <= maxDigits;
+}
+
+// uint256 に入る 10 進文字列 (0〜2^256-1)。受け取った値を abi の uint256 として符号化する前の確認に使う
+// (入らない値は viem が IntegerOutOfRangeError を投げる)。桁で bound してから BigInt にする。
+export function isUint256Dec(v: unknown): v is string {
+  return isDecWithin(v, MAX_UINT256_DEC_DIGITS) && BigInt(v) <= maxUint256;
 }
 
 // IPv4 は /24・IPv6 は /64 (展開してから切る)。IP でなければ 'unknown'。
