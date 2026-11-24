@@ -26,6 +26,7 @@ import { parseLicenseDefinition } from '@/lib/license/definition';
 // ⚠️ settleViaForwarder を呼ぶ入口を新設したら、この gate も必ず配線すること
 // (現在の入口: app/api/facilitator/settle・app/api/relay/jpyc・app/api/relay/jpyc/move)。
 
+import { maxUint256 } from 'viem';
 import { isKvConfigured, kvGet } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import {
@@ -104,6 +105,13 @@ function parseGateRecord(raw: string): GateRecord | null {
   };
 }
 
+// buildForwarderNonce が uint256 として符号化する 4 つの数が、0〜2^256-1 に入るか。
+function forwarderParamsEncodable(params: ForwarderSettleParams): boolean {
+  return [params.merchantValue, params.feeValue, params.validAfter, params.validBefore].every(
+    (v) => v >= 0n && v <= maxUint256,
+  );
+}
+
 /**
  * hosted intent に紐づく settle broadcast の可否。
  * - 'allow'   = hosted intent ではない、または settling/settled の claim と署名まで完全一致
@@ -137,13 +145,15 @@ export async function checkHostedIntentSettleAdmission(input: {
   if (record.license && !licenseNftEnabled()) return 'denied';
   if (record.state === 'settling' || record.state === 'settled') {
     const fingerprint = paymentSignatureFingerprint(input.signature);
-    const nonce = buildForwarderNonce(
-      input.params,
-      record.chainId,
-      record.forwarder,
-    ).toLowerCase();
+    // buildForwarderNonce は 4 つの数を uint256 として符号化し、2^256 以上は投げる。この関数は settle の route の try の外で
+    // 呼ばれるので 500 になっていた (2026-11-24 外部の接続元が 78 桁の数を試した)。符号化できない params はどの intent の
+    // nonce とも一致しえないので、一致しないとき (下の denied) と同じに扱う。
+    const nonce = forwarderParamsEncodable(input.params)
+      ? buildForwarderNonce(input.params, record.chainId, record.forwarder).toLowerCase()
+      : null;
     const matches =
       fingerprint !== null &&
+      nonce !== null &&
       record.nonce !== null &&
       record.signatureFingerprint !== null &&
       input.chainId === record.chainId &&
