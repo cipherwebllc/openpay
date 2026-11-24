@@ -14,7 +14,7 @@ import {
   type Address,
   type Hex,
 } from 'viem';
-import { chainObjectForId, transportForChain } from '@/lib/chains';
+import { chainObjectForId, transportForChain, type TransportOptions } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
@@ -33,6 +33,7 @@ import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
 import { AUTHORIZATION_LOOKUP_WINDOW_SEC } from '@/lib/relay/validityWindow';
 import { claimNonceLookupNarrowSearch } from '@/lib/relay/statusLookupBudget';
+import { readRelayTxHint } from '@/lib/relay/relayTxHint';
 import {
   buildForwarderNonce,
   type ForwarderSettleParams,
@@ -177,6 +178,19 @@ export async function POST(req: Request): Promise<NextResponse> {
       return json({ ok: true, state: 'settled', txHash: idem.txHash });
     }
 
+    // 冪等の記録 (30 分) が消えた後は、中継が残した 7 日の控えで tx を読む (lib/relay/relayTxHint.ts)。無料枠の RPC は
+    // 下の getLogs を範囲の制限で拒むが、receipt は直接読める。used を確かめた後の手がかりで、unused の判定には使わない。
+    // 控えが無い・読めない・receipt が意図と合わないときは、今までどおり下で探す。
+    if (idem.state === 'missing') {
+      const hinted = await readRelayTxHint(parsed.chainId, parsed.from, parsed.nonce);
+      if (hinted && await receiptMatchesIntent(parsed, token, hinted, TX_HINT_RECEIPT_TRANSPORT)) {
+        // 控えで解けたことの記録 (info・NEXT_PUBLIC_LOG_LEVEL=info のときだけ出る)。本番の効き目は、Sentry の
+        // relay.jpyc.status.indeterminate (100 ブロックの RpcRequestError)・AuthorizationLookupIncomplete が止まることで見る。
+        logger.info('relay.jpyc.status.settled_by_tx_hint', { chainId: parsed.chainId });
+        return json({ ok: true, state: 'settled', txHash: hinted });
+      }
+    }
+
     // KV hash は別 authorization の置換 tx の可能性がある。対象 nonce の実行 tx を再解決し、
     // こちらも receipt を照合してから返す。used/cancelled フラグだけでは決済成功としない。
     // 有効期限が分かれば、RPC の範囲制限で 1 回の検索が拒まれても署名が使われうる時刻に絞って探せる
@@ -204,16 +218,28 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 }
 
+/**
+ * 控えの receipt の読み取りは 1 回だけ・2 秒まで (RPC の再試行や Retry-After で止まらず、端末の照会の期限 10 秒・route の
+ * 15 秒のうちに今の経路 (getLogs) へ進めるようにする)。
+ */
+const TX_HINT_RECEIPT_TRANSPORT: TransportOptions = { timeout: 2_000, retryCount: 0 };
+
 const AUTHORIZATION_TRANSFER_EVENTS = parseAbi([
   'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ]);
 
-async function receiptMatchesIntent(parsed: ParsedIntent, token: Address, txHash: Hex): Promise<boolean> {
+// transport を渡すのは控え (relay:txhint:) の照会だけ。省略は従来どおりの transport (再試行・期限は viem の既定)。
+async function receiptMatchesIntent(
+  parsed: ParsedIntent,
+  token: Address,
+  txHash: Hex,
+  transportOptions?: TransportOptions,
+): Promise<boolean> {
   try {
     const chain = chainObjectForId(parsed.chainId);
     if (!chain) return false;
-    const client = createPublicClient({ chain, transport: transportForChain(parsed.chainId) });
+    const client = createPublicClient({ chain, transport: transportForChain(parsed.chainId, transportOptions) });
     const receipt = await client.getTransactionReceipt({ hash: txHash });
     if (receipt.status !== 'success') return false;
 

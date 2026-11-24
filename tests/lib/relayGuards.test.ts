@@ -30,6 +30,10 @@ const { kvMod, store } = vi.hoisted(() => {
     lpushOk: true,
     getOk: true,
     setFailPrefix: null as string | null,
+    // setThrowPrefix: この prefix で始まるキーへの SET だけを例外にする (控えの書き込みの例外の隔離を確かめる)。
+    setThrowPrefix: null as string | null,
+    // setHangPrefix: この prefix で始まるキーへの SET を返さない (KV が答えない)。
+    setHangPrefix: null as string | null,
   };
   const kvMod = {
     isKvConfigured: () => flags.kvConfigured,
@@ -43,6 +47,8 @@ const { kvMod, store } = vi.hoisted(() => {
       opts: { nx?: boolean; ttlSec?: number } = {},
     ) => {
       setCalls.push({ key: k, value: v, opts: { ...opts } });
+      if (flags.setThrowPrefix && k.startsWith(flags.setThrowPrefix)) throw new Error('kv boom');
+      if (flags.setHangPrefix && k.startsWith(flags.setHangPrefix)) return new Promise<never>(() => undefined);
       if (flags.setFailPrefix && k.startsWith(flags.setFailPrefix)) {
         return { ok: false as const, reason: 'network_error' as const };
       }
@@ -156,6 +162,8 @@ beforeEach(() => {
   store.flags.lpushOk = true;
   store.flags.getOk = true;
   store.flags.setFailPrefix = null;
+  store.flags.setThrowPrefix = null;
+  store.flags.setHangPrefix = null;
 });
 
 afterEach(() => {
@@ -659,5 +667,85 @@ describe('makeRecoverIdempotency (入口跨ぎの共有 claim)', () => {
     const dup = await relay.claimIdempotency(137, FROM, NONCE);
     expect(dup.status).toBe('duplicate');
     expect(dup.status === 'duplicate' && dup.txHash).toBe(TX);
+  });
+});
+
+// 2026-11-24: 冪等の記録 (30 分) が消えた後も status の照会が tx を読めるよう、決済 relay の名前空間だけ 7 日の控え
+// (relay:txhint:・lib/relay/relayTxHint.ts) を並行して書く。冪等の記録の意味 (claim・重複・release・status の読み取り) は変えない。
+describe('決済 relay の tx の控え (relay:txhint:・7 日)', () => {
+  const idemKey = `relay:idem:137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`;
+  const hintKey = `relay:txhint:137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`;
+  const TX = ('0x' + 'c'.repeat(64)) as Hex;
+  const hintSets = () => store.setCalls.filter((c) => c.key.startsWith('relay:txhint:'));
+
+  it("'relay:idem:' の recordRelayHash は冪等の記録 (30 分) と控え (7 日) の 2 鍵に書く", async () => {
+    await makeIdempotency('relay:idem:').recordRelayHash(137, FROM, NONCE, TX);
+    expect(store.setCalls).toEqual([
+      { key: idemKey, value: TX, opts: { ttlSec: IDEM_TTL_SEC } },
+      { key: hintKey, value: TX, opts: { ttlSec: 7 * 24 * 60 * 60 } },
+    ]);
+  });
+
+  it.each(['csvpassrelay:idem:', 'x402fac:idem:', SHARED_RECOVER_IDEM_PREFIX])(
+    '%s の recordRelayHash は自分の鍵だけに書く (控えは書かない)',
+    async (prefix) => {
+      await makeIdempotency(prefix).recordRelayHash(137, FROM, NONCE, TX);
+      expect(store.setCalls).toEqual([
+        { key: `${prefix}137:${FROM.toLowerCase()}:${NONCE.toLowerCase()}`, value: TX, opts: { ttlSec: IDEM_TTL_SEC } },
+      ]);
+    },
+  );
+
+  it("makeRecoverIdempotency は 'relay:idem:' で控えを 1 回・'x402fac:idem:' では書かない", async () => {
+    const relay = makeRecoverIdempotency('relay:idem:');
+    await relay.claimIdempotency(137, FROM, NONCE);
+    await relay.recordRelayHash(137, FROM, NONCE, TX);
+    expect(hintSets()).toEqual([{ key: hintKey, value: TX, opts: { ttlSec: 7 * 24 * 60 * 60 } }]);
+
+    store.setCalls.length = 0;
+    const NONCE2 = ('0x' + 'b'.repeat(64)) as Hex;
+    const facilitator = makeRecoverIdempotency('x402fac:idem:');
+    await facilitator.claimIdempotency(137, FROM, NONCE2);
+    await facilitator.recordRelayHash(137, FROM, NONCE2, TX);
+    expect(hintSets()).toEqual([]);
+  });
+
+  it.each([
+    ['ok:false', 'setFailPrefix'],
+    ['例外', 'setThrowPrefix'],
+  ] as const)('控えの書き込みが %s でも recordRelayHash は resolve し、冪等の記録は書く', async (_label, flag) => {
+    store.flags[flag] = 'relay:txhint:';
+    await expect(makeIdempotency('relay:idem:').recordRelayHash(137, FROM, NONCE, TX)).resolves.toBeUndefined();
+    expect(store.vals.get(idemKey)).toBe(TX);
+    expect(store.vals.has(hintKey)).toBe(false);
+  });
+
+  it('控えの書き込みが返ってこなくても、recordRelayHash は控えを待たずに終わる (中継の記録・応答を遅らせない)', async () => {
+    // 控えの書き込みの順番は鍵ごとにプロセスの中で続くので、ほかのテストと別の nonce を使う。
+    const HANG_NONCE = ('0x' + 'e'.repeat(64)) as Hex;
+    store.flags.setHangPrefix = 'relay:txhint:';
+    // 50 ms のうちに終わる (控えを 1 秒でも待つ作りなら timeout になる)。
+    const outcome = await Promise.race([
+      makeIdempotency('relay:idem:').recordRelayHash(137, FROM, HANG_NONCE, TX).then(() => 'done'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 50)),
+    ]);
+    expect(outcome).toBe('done');
+    expect(store.vals.get(`relay:idem:137:${FROM.toLowerCase()}:${HANG_NONCE}`)).toBe(TX);
+  });
+
+  it('控えだけが残っていても claimIdempotency は first・readIdempotency は missing (冪等の記録の意味を変えない)', async () => {
+    store.vals.set(hintKey, TX);
+    expect((await makeIdempotency('relay:idem:').claimIdempotency(137, FROM, NONCE)).status).toBe('first');
+    store.vals.delete(idemKey);
+    expect(await readIdempotency('relay:idem:', 137, FROM, NONCE)).toEqual({ state: 'missing' });
+  });
+
+  it('releaseIdempotency は控えを消さない', async () => {
+    const pay = makeIdempotency('relay:idem:');
+    await pay.claimIdempotency(137, FROM, NONCE);
+    store.vals.set(hintKey, TX);
+    await pay.releaseIdempotency(137, FROM, NONCE);
+    expect(store.vals.has(idemKey)).toBe(false);
+    expect(store.vals.get(hintKey)).toBe(TX);
   });
 });
