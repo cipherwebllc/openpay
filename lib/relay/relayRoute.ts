@@ -29,9 +29,12 @@ export function isDecWithin(v: unknown, maxDigits: number): v is string {
 }
 
 // uint256 に入る 10 進文字列 (0〜2^256-1)。受け取った値を abi の uint256 として符号化する前の確認に使う
-// (入らない値は viem が IntegerOutOfRangeError を投げる)。桁で bound してから BigInt にする。
+// (入らない値は viem が IntegerOutOfRangeError を投げる)。先頭の 0 を除いた桁で bound してから BigInt にする
+// (先頭に 0 を並べた正しい値を、文字列の長さで断らない)。
 export function isUint256Dec(v: unknown): v is string {
-  return isDecWithin(v, MAX_UINT256_DEC_DIGITS) && BigInt(v) <= maxUint256;
+  if (!isDec(v)) return false;
+  const significant = v.replace(/^0+(?=\d)/, '');
+  return significant.length <= MAX_UINT256_DEC_DIGITS && BigInt(significant) <= maxUint256;
 }
 
 // IPv4 は /24・IPv6 は /64 (展開してから切る)。IP でなければ 'unknown'。

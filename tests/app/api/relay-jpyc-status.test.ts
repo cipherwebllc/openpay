@@ -123,6 +123,7 @@ import {
   findAuthorizationUsedTransactionHash,
 } from '@/lib/relay/relayProvider';
 import { recoverTransferAuthorizationSigner } from '@/lib/jpycEip3009';
+import { recoverReceiveWithAuthorizationSigner } from '@/lib/relay/forwarderSettle';
 import { readRelayTxHint } from '@/lib/relay/relayTxHint';
 import { transportForChain } from '@/lib/chains';
 import { logger } from '@/lib/logger';
@@ -403,17 +404,26 @@ describe('POST /api/relay/jpyc/status', () => {
     const OVER = (2n ** 256n).toString();
     const MAX = (2n ** 256n - 1n).toString();
 
-    it.each(['merchantValue', 'feeValue', 'validAfter', 'validBefore'])('%s が 2^256 なら 400 invalid_payload', async (field) => {
+    it.each(['merchantValue', 'feeValue', 'validAfter', 'validBefore'])('%s が 2^256 なら 400 invalid_payload (署名の確認に進まない)', async (field) => {
       h.forwarder = FORWARDER;
       const res = await POST(req({ ...forwarderIntent, [field]: OVER }));
       expect(res.status).toBe(400);
       expect(await res.json()).toEqual({ ok: false, error: 'invalid_payload' });
+      expect(recoverReceiveWithAuthorizationSigner).not.toHaveBeenCalled();
     });
 
-    it.each(['merchantValue', 'feeValue', 'validAfter', 'validBefore'])('%s が 2^256 - 1 なら形の確認は通る (400 invalid_payload にしない)', async (field) => {
+    it.each(['merchantValue', 'feeValue', 'validAfter', 'validBefore'])('%s が 2^256 - 1 なら形の確認は通り、署名の確認に進む', async (field) => {
       h.forwarder = FORWARDER;
       const res = await POST(req({ ...forwarderIntent, [field]: MAX }));
       expect(await res.json()).not.toEqual({ ok: false, error: 'invalid_payload' });
+      expect(recoverReceiveWithAuthorizationSigner).toHaveBeenCalledOnce();
+    });
+
+    it('先頭に 0 を並べた正しい値は、main と同じく受け付ける (署名の確認に進む)', async () => {
+      h.forwarder = FORWARDER;
+      const res = await POST(req({ ...forwarderIntent, validAfter: '0'.repeat(79) }));
+      expect(await res.json()).not.toEqual({ ok: false, error: 'invalid_payload' });
+      expect(recoverReceiveWithAuthorizationSigner).toHaveBeenCalledOnce();
     });
 
     it('1,000 桁の数も 400 invalid_payload (BigInt にする前に桁で断る)', async () => {

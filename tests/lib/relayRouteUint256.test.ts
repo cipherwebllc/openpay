@@ -6,7 +6,15 @@ import { maxUint256 } from 'viem';
 import { isUint256Dec } from '@/lib/relay/relayRoute';
 
 describe('isUint256Dec', () => {
-  it.each(['0', '1', '1000000000000000000', maxUint256.toString(), `000${maxUint256.toString()}`.slice(0, 78)])(
+  it.each([
+    '0',
+    '1',
+    '1000000000000000000',
+    maxUint256.toString(),
+    // 先頭に 0 を並べた正しい値 (main では受け付けていた・文字列の長さで断らない)
+    '0'.repeat(79),
+    `${'0'.repeat(10)}${maxUint256.toString()}`,
+  ])(
     '%s は入る',
     (v) => {
       expect(isUint256Dec(v)).toBe(true);
