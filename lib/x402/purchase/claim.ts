@@ -17,6 +17,7 @@ import {
   getAddress,
   isAddress,
   isAddressEqual,
+  maxUint256,
   type Hex,
 } from 'viem';
 import { kvEval } from '@/lib/kv';
@@ -146,6 +147,16 @@ export function buildPurchaseAuthorizationClaim(input: {
     nowSec + BigInt(PURCHASE_EXPIRY_SAFETY_SEC)
   ) {
     return { ok: false, reason: 'authorization_expired' };
+  }
+  // buildForwarderNonce は 4 つの数を uint256 として符号化し、2^256 以上は投げる。parse は 78 桁まで通し、
+  // validAfter はここまで見積もりと比べないので、GET の try の外で 500 になっていた (2026-11-24 外部の接続元が
+  // 78 桁の数を試した)。符号化できない数は形の違う支払いと同じに扱う。
+  if (
+    ![params.merchantValue, params.feeValue, params.validAfter, params.validBefore].every(
+      (v) => v >= 0n && v <= maxUint256,
+    )
+  ) {
+    return { ok: false, reason: 'invalid_payload' };
   }
   const nonce = buildForwarderNonce(params, chainId, intent.forwarder);
   if (
