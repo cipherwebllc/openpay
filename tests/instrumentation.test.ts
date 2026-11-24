@@ -45,6 +45,20 @@ describe('server instrumentation telemetry hooks', () => {
     },
   );
 
+  // 2026-11-24: ブラウザでない自動の接続元が送る壊れた router state header で、Next.js が要求を断るたびに Sentry の
+  // error になっていた。この文言だけを両方の runtime で送らない (一覧は lib/sentryServerIgnoreErrors.ts)。
+  it.each(['nodejs', 'edge'])('%s runtime は壊れた router state header の error を Sentry に送らない', async (runtime) => {
+    vi.stubEnv('NEXT_RUNTIME', runtime);
+    const { register } = await import('@/instrumentation');
+    const { SENTRY_SERVER_IGNORE_ERRORS } = await import('@/lib/sentryServerIgnoreErrors');
+
+    await register();
+
+    const options = sentry.init.mock.calls[0][0] as { ignoreErrors: RegExp[] };
+    expect(options.ignoreErrors).toEqual([...SENTRY_SERVER_IGNORE_ERRORS]);
+    expect(options.ignoreErrors.some((p) => p.test('The router state header was sent but could not be parsed.'))).toBe(true);
+  });
+
   it('nodejs runtime は受けた request の本文を採らない (httpIntegration の maxIncomingRequestBodySize: none)', async () => {
     vi.stubEnv('NEXT_PUBLIC_SENTRY_DSN', 'https://public@example.ingest.sentry.io/1');
     vi.stubEnv('NEXT_RUNTIME', 'nodejs');
