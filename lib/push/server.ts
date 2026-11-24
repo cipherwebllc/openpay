@@ -178,7 +178,7 @@ async function sendOne(
       // (登録のときにも断る・lib/push/subscriptionKeys.ts)。
       const removed = await removePushSubscription(wallet, { endpointHash: sub.endpointHash });
       if (!removed.ok) {
-        // 消せなかった購読は残るので「消した」と数えない (次の送信でまた消す)。
+        // 消せたと確かめられなければ「消した」と数えず failed にする (残っていれば次の送信でまた消す)。
         logger.warn('push.invalid_keys_prune_failed', { endpointHash: sub.endpointHash, reason: removed.reason });
         return 'failed';
       }
