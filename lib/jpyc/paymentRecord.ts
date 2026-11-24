@@ -42,10 +42,10 @@ export async function readJpycPaymentRecord(slug: JpycChainSlug, txHash: Hex) {
       throw error;
     });
     if (!receipt) return { kind: 'not_found' } as const;
-    if (receipt.status !== 'success') return { kind: 'no_jpyc_transfer' } as const;
     // receipt のブロックの hash が 32 byte の形でなければ、スキーマどおりの記録 (blockHash は必須) を作れない。壊れた RPC の
-    // 応答なので、既存の RPC の失敗と同じく返す (settle しない・Codex)。
+    // 応答なので、取引の成否より先に、既存の RPC の失敗と同じく返す (settle しない・Codex)。
     if (!isBlockHash(receipt.blockHash)) return { kind: 'rpc_error' } as const;
+    if (receipt.status !== 'success') return { kind: 'no_jpyc_transfer' } as const;
     const logs = parseEventLogs({
       abi: [TRANSFER_EVENT],
       logs: receipt.logs.filter((log) => log.address.toLowerCase() === deployment.address.toLowerCase()),

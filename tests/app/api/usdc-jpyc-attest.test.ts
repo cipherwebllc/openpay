@@ -179,9 +179,10 @@ describe('JPYC attestation gate and RPC record', () => {
   });
   // 2026-11-25 外部レビュー #8: 確定の高さに届いていても、receipt のブロックが今の正規のブロックでなければ確定ではない。
   it('receipt の高さの今の正規のブロックが別の hash (組み替えで外れた) なら finalized: false', async () => {
+    // 確定のブロック (高さ 105) は別の hash・receipt の hash で読むブロックは BLOCK_HASH・高さ 100 の今の正規のブロックは別の hash。
     mocks.block.mockImplementation(async ({ blockTag, blockNumber }) => ({
       number: blockTag ? 105n : 100n,
-      hash: blockNumber === 100n ? `0x${'cd'.repeat(32)}` : BLOCK_HASH,
+      hash: blockTag ? `0x${'ef'.repeat(32)}` : blockNumber === 100n ? `0x${'cd'.repeat(32)}` : BLOCK_HASH,
       timestamp: 1_750_000_000n,
     }));
     const res = await route.GET(request());
@@ -242,12 +243,30 @@ describe('JPYC attestation gate and RPC record', () => {
       vi.useRealTimers();
     }
   });
-  it('receipt のブロックの hash が壊れていれば rpc_error (503・settle しない)', async () => {
-    mocks.receipt.mockResolvedValue({ ...receipt(), blockHash: null });
+  it.each(['success', 'reverted'])('receipt (%s) のブロックの hash が壊れていれば rpc_error (503・settle しない)', async (status) => {
+    mocks.receipt.mockResolvedValue({ ...receipt(status, status === 'success' ? undefined : []), blockHash: null });
     const res = await route.GET(request());
     expect(res.status).toBe(503);
     expect((await res.json()).error).toBe('rpc_unavailable');
     onlyVerify();
+  });
+  it('1 秒は確定の高さが返ってから数える (確定の高さ 800 ms・正規のブロック 1,500 ms なら確定)', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.block.mockImplementation(({ blockTag, blockNumber }) => {
+        const block = { number: blockTag ? 105n : 100n, hash: BLOCK_HASH, timestamp: 1_750_000_000n };
+        if (blockTag) return new Promise((resolve) => setTimeout(() => resolve(block), 800));
+        if (blockNumber === 100n) return new Promise((resolve) => setTimeout(() => resolve(block), 1_500));
+        return Promise.resolve(block);
+      });
+      const { readJpycPaymentRecord } = await import('@/lib/jpyc/paymentRecord');
+      const pending = readJpycPaymentRecord('polygon', TX);
+      await vi.advanceTimersByTimeAsync(1_500);
+      const result = await pending;
+      expect(result.kind === 'ok' && result.record.finality).toEqual({ finalized: true, method: 'finalized-tag', finalizedBlock: '105' });
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it('正規のブロックは確定の高さと同時に読む (settle の前の待ちを足さない・Codex)', async () => {
     let releaseFinalized!: () => void;
