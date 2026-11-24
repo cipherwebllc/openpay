@@ -315,6 +315,8 @@ describe('POST /api/relay/jpyc/move — 実署名で実物の settle の経路�
     // 既存 relay と同じ key: 冪等 (route 別 + 入口をまたぐ共有)・払い元の rate limit・日次予算。
     expect(kv.values.get(idemKey('relay:idem:', params))).toBe(TX_HASH);
     expect(kv.values.get(idemKey(SHARED_RECOVER_IDEM_PREFIX, params))).toBe(TX_HASH);
+    // 冪等の記録 (30 分) が消えた後の status の照会用に、7 日の控えも残る (lib/relay/relayTxHint.ts)。
+    expect(kv.values.get(idemKey('relay:txhint:', params))).toBe(TX_HASH);
     expect(kv.lists.get(`relay:rl:${SENDER}`)).toHaveLength(1);
     expect(touched(`relay:budget:${AMOY}:`)).toHaveLength(1);
 

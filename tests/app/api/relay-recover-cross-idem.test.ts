@@ -75,7 +75,8 @@ const kv = vi.hoisted(() => {
   const values = new Map<string, string>();
   const lists = new Map<string, string[]>();
   const counters = new Map<string, number>();
-  return { values, lists, counters, setKeys: [] as string[] };
+  // setFault: 中継の tx の控え (relay:txhint:) への SET だけを失敗 ('fail') か例外 ('throw') にする。
+  return { values, lists, counters, setKeys: [] as string[], setFault: null as 'fail' | 'throw' | null };
 });
 
 vi.mock('@/lib/kv', () => ({
@@ -90,6 +91,10 @@ vi.mock('@/lib/kv', () => ({
     opts: { nx?: boolean; ttlSec?: number } = {},
   ) => {
     kv.setKeys.push(key);
+    if (kv.setFault && key.startsWith('relay:txhint:')) {
+      if (kv.setFault === 'throw') throw new Error('kv boom');
+      return { ok: false as const, reason: 'network_error' as const };
+    }
     if (opts.nx && kv.values.has(key)) return { ok: true as const, value: null };
     kv.values.set(key, value);
     return { ok: true as const, value: 'OK' as const };
@@ -263,6 +268,7 @@ beforeEach(() => {
   kv.lists.clear();
   kv.counters.clear();
   kv.setKeys.length = 0;
+  kv.setFault = null;
   io.submits.length = 0;
 });
 
@@ -343,5 +349,38 @@ describe('recover authorization を両入口へ POST しても broadcast は 1 �
     );
     expect(res.status).toBe(200);
     expect(io.submits).toHaveLength(2);
+  });
+});
+
+// 2026-11-24: 決済 relay の名前空間 ('relay:idem:') で broadcast した tx は、7 日の控え (relay:txhint:) にも残る
+// (冪等の記録が消えた後の status の照会用・lib/relay/relayTxHint.ts)。控えの書き込みが失敗しても応答は変わらない。
+describe('中継の tx の控え (本物の relayGuards)', () => {
+  const hintKey = (params: ForwarderSettleParams) =>
+    `relay:txhint:${AMOY}:${params.from.toLowerCase()}:${buildForwarderNonce(params, AMOY, FORWARDER).toLowerCase()}`;
+
+  it('決済 relay で broadcast した tx は控えにも残り、応答は今までどおり', async () => {
+    const params = makeParams();
+    const res = await relayPost(relayRequest(params, await signParams(params)));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, txHash: TX_HASH });
+    expect(kv.values.get(hintKey(params))).toBe(TX_HASH);
+  });
+
+  it.each(['fail', 'throw'] as const)('控えの書き込みが %s でも、決済 relay の応答は今までどおり', async (fault) => {
+    kv.setFault = fault;
+    const params = makeParams();
+    const res = await relayPost(relayRequest(params, await signParams(params)));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, txHash: TX_HASH });
+    expect(io.submits).toHaveLength(1);
+    expect(kv.values.has(hintKey(params))).toBe(false);
+    expect(kv.setKeys).toContain(hintKey(params));
+  });
+
+  it('x402 facilitator の入口だけで broadcast した tx は控えに残さない (別の status の名前空間)', async () => {
+    const params = makeParams();
+    const res = await facilitatorPost(facilitatorRequest(params, await signParams(params)));
+    expect(res.status).toBe(200);
+    expect(kv.setKeys.some((k) => k.startsWith('relay:txhint:'))).toBe(false);
   });
 });

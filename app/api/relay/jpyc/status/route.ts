@@ -33,6 +33,7 @@ import { jpycForwarderFor } from '@/lib/relay/forwarderConfig';
 import { feeReceiverFor } from '@/lib/relay/forwarderSettleService';
 import { AUTHORIZATION_LOOKUP_WINDOW_SEC } from '@/lib/relay/validityWindow';
 import { claimNonceLookupNarrowSearch } from '@/lib/relay/statusLookupBudget';
+import { readRelayTxHint } from '@/lib/relay/relayTxHint';
 import {
   buildForwarderNonce,
   type ForwarderSettleParams,
@@ -175,6 +176,16 @@ export async function POST(req: Request): Promise<NextResponse> {
 
     if (idem.state === 'hash' && await receiptMatchesIntent(parsed, token, idem.txHash)) {
       return json({ ok: true, state: 'settled', txHash: idem.txHash });
+    }
+
+    // 冪等の記録 (30 分) が消えた後は、中継が残した 7 日の控えで tx を読む (lib/relay/relayTxHint.ts)。無料枠の RPC は
+    // 下の getLogs を範囲の制限で拒むが、receipt は直接読める。used を確かめた後の手がかりで、unused の判定には使わない。
+    // 控えが無い・読めない・receipt が意図と合わないときは、今までどおり下で探す。
+    if (idem.state === 'missing') {
+      const hinted = await readRelayTxHint(parsed.chainId, parsed.from, parsed.nonce);
+      if (hinted && await receiptMatchesIntent(parsed, token, hinted)) {
+        return json({ ok: true, state: 'settled', txHash: hinted });
+      }
     }
 
     // KV hash は別 authorization の置換 tx の可能性がある。対象 nonce の実行 tx を再解決し、

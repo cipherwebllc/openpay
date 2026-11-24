@@ -126,6 +126,8 @@ vi.mock('@/lib/kv', async (importOriginal) => {
   return {
     ...actual,
     isKvConfigured: () => kv.configured,
+    // 中継の tx の控え (lib/relay/relayTxHint.ts) を読むため。
+    kvGet: async (key: string) => ({ ok: true, value: live(key)?.value ?? null }),
     kvSet: async (key: string, value: string, opts: { nx?: boolean; ttlSec?: number } = {}) => {
       if (kv.failNextSet) {
         kv.failNextSet = false;
@@ -162,6 +164,7 @@ import {
   narrowSearchBudgetKey,
   narrowSearchOnceKey,
 } from '@/lib/relay/statusLookupBudget';
+import { relayTxHintKey } from '@/lib/relay/relayTxHint';
 
 // 署名の期限: 対象のログのブロックの時刻 + 照会の窓 (1230 秒)。ログは窓の下限ちょうどにある。
 const VALID_BEFORE = ts(chainState.logBlock) + 1230n;
@@ -293,5 +296,43 @@ describe('relay status: 署名なしの照会の小分けの探索 (本物の he
     const res = await POST(nonceLookup());
     expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: TX });
     expect(kv.store.size).toBe(0);
+  });
+});
+
+// 2026-11-24 本番の再現: 冪等の記録 (30 分) が消えた後、無料枠の RPC が 10,000 ブロックの検索を拒み、予算切れ・遡り幅の
+// 外で小分けの探索も解けないと「確認中」のままだった。中継が残した控え (relay:txhint:・本物の relayTxHint と KV) があれば、
+// getLogs を 1 回も使わずに receipt で settled になる。
+describe('relay status: 中継の tx の控え (本物の relayTxHint と KV)', () => {
+  const putHint = () => kv.store.set(relayTxHintKey(80002, FROM, NONCE), { value: TX, expiresAt: null });
+
+  it('予算を使い切っていても、控えがあれば getLogs なしで settled', async () => {
+    for (let i = 0; i < NONCE_LOOKUP_NARROW_SEARCH_PER_MINUTE; i++) await POST(nonceLookup(otherNonce(i)));
+    putHint();
+    chainState.calls = { getLogs: 0, getBlock: 0 };
+    const res = await POST(nonceLookup());
+    expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: TX });
+    expect(chainState.calls).toEqual({ getLogs: 0, getBlock: 0 });
+  });
+
+  it('遡り幅 (10,000 ブロック) より古い支払いでも、控えがあれば settled (控えが無ければ indeterminate)', async () => {
+    const oldValidBefore = ts(5_000n) + 1230n;
+    expect(await (await POST(nonceLookup(NONCE, oldValidBefore))).json()).toEqual({ ok: true, state: 'indeterminate' });
+
+    putHint();
+    vi.setSystemTime(new Date('2026-11-05T00:00:40Z')); // 同じ nonce の重複の抑止 (30 秒) を過ぎてから
+    chainState.calls = { getLogs: 0, getBlock: 0 };
+    expect(await (await POST(nonceLookup(NONCE, oldValidBefore))).json()).toEqual({
+      ok: true,
+      state: 'settled',
+      txHash: TX,
+    });
+    expect(chainState.calls.getLogs).toBe(0);
+  });
+
+  it('控えの値が tx hash の形でなければ、今までどおり探す', async () => {
+    kv.store.set(relayTxHintKey(80002, FROM, NONCE), { value: '1', expiresAt: null });
+    const res = await POST(nonceLookup());
+    expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: TX });
+    expect(chainState.calls.getLogs).toBeGreaterThan(1);
   });
 });

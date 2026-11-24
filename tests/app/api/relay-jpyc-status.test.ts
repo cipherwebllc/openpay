@@ -35,6 +35,8 @@ const h = vi.hoisted(() => ({
   getReceipt: vi.fn(),
   forwarder: null as Address | null,
   signer: '0x1111111111111111111111111111111111111111' as Address,
+  // 中継が残した 7 日の控え (lib/relay/relayTxHint.ts)。既定は無し (既存のテストは控えの無い経路)。
+  hint: null as Hex | null,
 }));
 
 vi.mock('viem', async (importOriginal) => ({
@@ -82,6 +84,9 @@ vi.mock('@/lib/relay/relayProvider', () => ({
     return h.expiry;
   }),
 }));
+vi.mock('@/lib/relay/relayTxHint', () => ({
+  readRelayTxHint: vi.fn(async () => h.hint),
+}));
 vi.mock('@/lib/relay/forwarderConfig', () => ({
   jpycForwarderFor: () => h.forwarder,
 }));
@@ -118,6 +123,7 @@ import {
   findAuthorizationUsedTransactionHash,
 } from '@/lib/relay/relayProvider';
 import { recoverTransferAuthorizationSigner } from '@/lib/jpycEip3009';
+import { readRelayTxHint } from '@/lib/relay/relayTxHint';
 import { logger } from '@/lib/logger';
 import { POST } from '@/app/api/relay/jpyc/status/route';
 
@@ -270,6 +276,7 @@ beforeEach(() => {
   });
   h.forwarder = null;
   h.signer = FROM;
+  h.hint = null;
 });
 
 describe('POST /api/relay/jpyc/status', () => {
@@ -776,5 +783,106 @@ describe('relay status の成功 on-chain 証拠 (A1)', () => {
     h.receipt = { status: 'reverted', logs: [settledEvent()] };
     const res = await POST(req(forwarderIntent));
     expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
+  });
+});
+
+// 2026-11-24: 冪等の記録 (relay:idem:・30 分) が消えた後は、中継が残した 7 日の控え (relay:txhint:) で tx の receipt を
+// 直接読む。無料枠の RPC は getLogs を範囲の制限で拒むので、控えが無いと決済済みでも「確認中」のままだった。
+// 控えは used を確かめた後の手がかりで、unused の判定には使わない (落ちた tx の支払いを払い直せなくしない)。
+describe('中継の tx の控え (冪等の記録が消えた後)', () => {
+  const HINT = `0x${'c'.repeat(64)}` as Hex;
+
+  beforeEach(() => {
+    h.hint = HINT;
+  });
+
+  it.each(['signed', 'nonce'] as const)(
+    '控えがあっても authorization が未使用なら %s lookup は unused のまま (控えも receipt も読まない)',
+    async (lookup) => {
+      const res = await POST(req(lookup === 'nonce' ? nonceIntent() : intent));
+      expect(await res.json()).toEqual({ ok: true, state: 'unused' });
+      expect(readRelayTxHint).not.toHaveBeenCalled();
+      expect(h.getReceipt).not.toHaveBeenCalled();
+    },
+  );
+
+  it('控えがあっても未使用で期限切れなら、期限切れの証明つきの unused (払い直せる)', async () => {
+    h.expiry = 'expired';
+    const res = await POST(req({ ...nonceIntent(), validBefore: '1800000000' }));
+    expect(await res.json()).toEqual({ ok: true, state: 'unused', expiry: 'expired' });
+    expect(readRelayTxHint).not.toHaveBeenCalled();
+  });
+
+  it.each(['signed', 'nonce'] as const)(
+    '使用済みで控えの receipt が一致すれば %s lookup は settled (getLogs を使わない)',
+    async (lookup) => {
+      h.used = true;
+      h.rangeLimited = true;
+      const res = await POST(req(lookup === 'nonce' ? nonceIntent() : intent));
+      expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: HINT });
+      expect(readRelayTxHint).toHaveBeenCalledExactlyOnceWith(80002, FROM, NONCE);
+      expect(h.getReceipt).toHaveBeenCalledExactlyOnceWith({ hash: HINT });
+      expect(findAuthorizationUsedTransactionHash).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['signed', 'nonce'] as const)(
+    'forwarder: 控えの receipt の Settled が一致すれば %s lookup は settled',
+    async (lookup) => {
+      h.forwarder = FORWARDER;
+      h.used = true;
+      h.receipt.logs = [settledEvent()];
+      const res = await POST(req(lookup === 'nonce' ? nonceIntent(FORWARDER_NONCE) : forwarderIntent));
+      expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: HINT });
+      expect(findAuthorizationUsedTransactionHash).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['別の nonce', () => h.receipts.set(HINT, { status: 'success', logs: [authorizationEvent({ nonce: OTHER_NONCE }), transfer()] })],
+    ['reverted', () => h.receipts.set(HINT, { status: 'reverted', logs: [] })],
+    ['読めない', () => h.receipts.set(HINT, new Error('rpc down'))],
+  ] as const)('控えの receipt が%sなら今までどおり getLogs で探す', async (_label, setup) => {
+    h.used = true;
+    h.logHash = LOG_HASH;
+    setup();
+    const res = await POST(req());
+    expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
+    expect(h.getReceipt).toHaveBeenCalledWith({ hash: HINT });
+    expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledOnce();
+  });
+
+  it('控えの receipt が合わず getLogs も範囲の制限で拒まれれば、今までどおり indeterminate', async () => {
+    h.used = true;
+    h.rangeLimited = true;
+    h.receipts.set(HINT, { status: 'reverted', logs: [] });
+    const res = await POST(req(nonceIntent()));
+    expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
+  });
+
+  it('控えが無ければ今と同じ経路 (getLogs) で探す', async () => {
+    h.hint = null;
+    h.used = true;
+    h.logHash = LOG_HASH;
+    const res = await POST(req());
+    expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
+    expect(readRelayTxHint).toHaveBeenCalledOnce();
+    expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['hash (receipt が一致)', () => { h.idem = { state: 'hash', txHash: HASH }; }, { ok: true, state: 'settled', txHash: HASH }],
+    ['hash (receipt が reverted)', () => {
+      h.idem = { state: 'hash', txHash: HASH };
+      h.receipts.set(HASH, { status: 'reverted', logs: [] });
+      h.logHash = LOG_HASH;
+    }, { ok: true, state: 'settled', txHash: LOG_HASH }],
+    ['indeterminate (KV の読み取り障害)', () => { h.idem = { state: 'indeterminate' }; }, { ok: true, state: 'indeterminate' }],
+  ] as const)('冪等の記録が %s のときは控えを読まず、今までどおり', async (_label, setup, expected) => {
+    h.used = true;
+    setup();
+    const res = await POST(req());
+    expect(await res.json()).toEqual(expected);
+    expect(readRelayTxHint).not.toHaveBeenCalled();
   });
 });

@@ -27,6 +27,7 @@ import {
 } from '@/lib/kv';
 import { logger } from '@/lib/logger';
 import { scheduleGasBudgetAlert } from './gasBudgetAlert';
+import { RELAY_TX_HINT_IDEM_PREFIX, recordRelayTxHint } from './relayTxHint';
 
 export const RL_MAX = 5; // window 内の最大 relay 回数 (per key)
 export const RL_WINDOW_MS = 60_000;
@@ -374,6 +375,8 @@ export function makeIdempotency(
 
   // claim 済 authorization に broadcast 済 txHash を上書き記録 (NX なし)。重複 POST が
   // explorer 追跡できるように。TTL は claim と同じ。
+  // 決済 relay の名前空間 ('relay:idem:') では、別の鍵に 7 日の控えも並行して書く (lib/relay/relayTxHint.ts・
+  // 冪等の記録が消えた後の status の照会用)。控えの書き込みは reject しないので、この関数の結果は今までどおり。
   async function recordRelayHash(
     chainId: number,
     from: Address,
@@ -381,7 +384,10 @@ export function makeIdempotency(
     txHash: Hex,
   ): Promise<void> {
     if (!isKvConfigured()) return;
-    await kvSet(idemKey(chainId, from, nonce), txHash, { ttlSec: IDEM_TTL_SEC });
+    await Promise.all([
+      kvSet(idemKey(chainId, from, nonce), txHash, { ttlSec: IDEM_TTL_SEC }),
+      ...(prefix === RELAY_TX_HINT_IDEM_PREFIX ? [recordRelayTxHint(chainId, from, nonce, txHash)] : []),
+    ]);
   }
 
   // claim 解放。broadcast "前" の失敗 (relay_error) でのみ呼ぶ (tx 未送信なので安全)。正当な
