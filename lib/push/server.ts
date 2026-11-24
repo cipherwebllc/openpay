@@ -12,6 +12,7 @@ import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { isPrivateHost } from '@/lib/net/privateHost';
 import { isAllowedPushEndpoint } from '@/lib/push/endpoints';
+import { hasSendablePushKeys } from '@/lib/push/subscriptionKeys';
 import {
   listPushSubscriptions,
   refreshPushSubscriptionsTtl,
@@ -171,6 +172,13 @@ async function sendOne(
         logger.warn('push.send_blocked_endpoint');
       }
       return 'failed';
+    }
+    if (!hasSendablePushKeys(sub.keys)) {
+      // 鍵の長さが違う購読は web-push が送る前に投げ、送るたびに失敗して残り続ける。届かない購読 (404/410) と同じく消す
+      // (登録のときにも断る・lib/push/subscriptionKeys.ts)。
+      await removePushSubscription(wallet, { endpointHash: sub.endpointHash });
+      logger.warn('push.invalid_keys_pruned', { endpointHash: sub.endpointHash });
+      return 'pruned';
     }
     const payload = resolvePushPayload(payloadInput, sub);
     const agent = createPushHttpsAgent();

@@ -185,6 +185,27 @@ describe('sendPushToWallet', () => {
     });
   });
 
+  it('鍵の長さが違う保存済みの購読は送らずに消し、ほかの購読へは送る', async () => {
+    // web-push は p256dh 65 byte・auth 16 byte 以上でないと送る前に投げる (status なし)。残すと送るたびに失敗する
+    // (2026-11-24 Sentry push.send_failed) ので、届かない購読 (404/410) と同じく消す。
+    hold.subscriptions[1] = { ...hold.subscriptions[1], keys: { p256dh: 'A'.repeat(86), auth: 'B'.repeat(22) } };
+    hold.subscriptions[2] = { ...hold.subscriptions[2], keys: { p256dh: 'A'.repeat(87), auth: 'B'.repeat(20) } };
+    webPush.sendNotification.mockResolvedValue(undefined);
+    vi.mocked(logger.warn).mockClear();
+
+    await expect(sendPushToWallet(WALLET, { title: '着金がありました' })).resolves.toEqual({
+      attempted: 3, sent: 1, pruned: 2, failed: 0,
+    });
+
+    expect(webPush.sendNotification).toHaveBeenCalledTimes(1);
+    expect(webPush.sendNotification.mock.calls[0][0]).toMatchObject({ endpoint: 'https://fcm.googleapis.com/sub/a' });
+    expect(store.remove).toHaveBeenCalledTimes(2);
+    expect(store.remove).toHaveBeenCalledWith(WALLET, { endpointHash: 'b'.repeat(64) });
+    expect(store.remove).toHaveBeenCalledWith(WALLET, { endpointHash: 'c'.repeat(64) });
+    expect(logger.warn).toHaveBeenCalledWith('push.invalid_keys_pruned', { endpointHash: 'b'.repeat(64) });
+    expect(logger.warn).not.toHaveBeenCalledWith('push.send_failed', expect.anything());
+  });
+
   it('関数 resolver は (locale, sub) を受け購読ごとに payload を出し分ける', async () => {
     hold.subscriptions = [
       {

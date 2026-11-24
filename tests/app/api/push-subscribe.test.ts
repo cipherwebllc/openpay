@@ -246,6 +246,21 @@ describe('/api/push/subscribe', () => {
     });
   });
 
+  // web-push は p256dh 65 byte・auth 16 byte 以上でないと送る前に投げる。形式だけ正しい鍵を保存すると、送るたびに失敗し
+  // 続ける (2026-11-24 Sentry push.send_failed)。87 文字 = 65 byte・22 文字 = 16 byte (上の subscription) は通る。
+  it.each([
+    ['p256dh が 64 byte', { p256dh: 'A'.repeat(86), auth: 'B'.repeat(22) }],
+    ['p256dh が 66 byte', { p256dh: 'A'.repeat(88), auth: 'B'.repeat(22) }],
+    ['auth が 15 byte', { p256dh: 'A'.repeat(87), auth: 'B'.repeat(20) }],
+  ])('POST は送れない長さの鍵を保存しない (%s) → 400', async (_label, keys) => {
+    const res = await POST(
+      req('POST', { subscription: { endpoint: subscription.endpoint, keys }, locale: 'ja' }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'invalid_payload' });
+    expect(storeSpy.upsert).not.toHaveBeenCalled();
+  });
+
   it('includeAmount:true を透過して upsert する', async () => {
     const res = await POST(
       req('POST', { subscription, locale: 'ja', includeAmount: true }),

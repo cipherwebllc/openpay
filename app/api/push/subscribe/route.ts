@@ -3,6 +3,7 @@ import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { env } from '@/lib/env';
 import { isAllowedPushEndpoint } from '@/lib/push/endpoints';
+import { hasSendablePushKeys } from '@/lib/push/subscriptionKeys';
 import { checkClientIpPrefixRateLimit } from '@/lib/net/clientRateLimit';
 import { MAX_BODY_BYTES } from '@/lib/relay/relayRoute';
 import { readTextBodyCapped } from '@/lib/httpBodyCap';
@@ -179,6 +180,8 @@ function parseSubscription(raw: unknown): ParsedSubscription | null {
   const p256dh = parseBase64UrlKey(objectValue(keys, 'p256dh'));
   const auth = parseBase64UrlKey(objectValue(keys, 'auth'));
   if (!endpoint || !p256dh || !auth) return null;
+  // 形式は正しくても長さの違う鍵は送れない (保存すると送るたびに失敗する・lib/push/subscriptionKeys.ts)。
+  if (!hasSendablePushKeys({ p256dh, auth })) return null;
   return { endpoint, keys: { p256dh, auth } };
 }
 
