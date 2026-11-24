@@ -449,9 +449,10 @@ test.describe('create /create (QR generator + Tip widget tab)', () => {
     await expect(printBtn.locator('svg')).toHaveCount(1);
   });
 
-  test('ja: Footer に技術の羅列は無く、お問い合わせ (Discord) がある', async ({ page }) => {
+  test('ja: Footer に技術の羅列は無く、お問い合わせ (LINE) と (Discord) がある', async ({ page }) => {
     await page.goto('/ja/create');
     const footer = page.locator('footer');
+    await expect(footer.getByRole('link', { name: 'お問い合わせ (LINE)' })).toBeVisible();
     await expect(footer.getByRole('link', { name: 'お問い合わせ (Discord)' })).toBeVisible();
     await expect(footer.getByText(/ERC-4337/)).toHaveCount(0);
   });

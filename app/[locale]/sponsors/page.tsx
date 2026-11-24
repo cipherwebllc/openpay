@@ -1,7 +1,7 @@
 // /sponsors: スポンサー・広告掲載のご案内 (2026-11-18 user 裁定の第 1 段 = 募集ページと導線だけ)。
 //
 // 本文は lib/sponsors.ts (ja/en 同梱・ja は承認済みの文)。料金・日数・社数・入稿の数字は lib/sponsorPlans.ts の定数から。
-// 部品は components/sponsors/SponsorsPieces.tsx。問い合わせは Discord と X だけ (URL はフッターと同じ lib/officialLinks.ts)。
+// 部品は components/sponsors/SponsorsPieces.tsx。問い合わせは LINE・Discord・X だけ (URL はフッターと同じ lib/officialLinks.ts)。
 // 第 1 段では掲載の欄・設定ファイル・ランダム表示を作らない (掲載イメージは「サンプル」と明記した枠だけ)。
 // 第 2 段 (設定ファイル・バナーのランダム表示・協賛企業のロゴ・掲載期間の自動の切り替え・各ページへの設置) は、最初の掲載が
 // 決まりそうになってから作る。
@@ -66,7 +66,7 @@ export default async function SponsorsPage({
           </h1>
           <p className="mt-4 max-w-2xl text-base leading-relaxed text-slate-700 sm:text-lg">{c.lead}</p>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600 sm:text-base">{c.audience}</p>
-          <SponsorsContactActions discordLabel={c.contactDiscord} xLabel={c.contactX} />
+          <SponsorsContactActions lineLabel={c.contactLine} discordLabel={c.contactDiscord} xLabel={c.contactX} />
         </header>
 
         <SponsorsSection id="plans" title={phrased(c.plansTitle, locale)}>
@@ -120,10 +120,10 @@ export default async function SponsorsPage({
           <SponsorsParagraph>{c.welcome}</SponsorsParagraph>
         </SponsorsSection>
 
-        {/* 締めは流れと問い合わせのボタン (① Discord か X でお問い合わせ の行き先)。 */}
+        {/* 締めは流れと問い合わせのボタン (① LINE・Discord・X でお問い合わせ の行き先)。 */}
         <SponsorsSection id="flow" title={phrased(c.flowTitle, locale)}>
           <SponsorsFlow steps={c.flow} locale={locale} />
-          <SponsorsContactActions discordLabel={c.contactDiscord} xLabel={c.contactX} className="mt-6" />
+          <SponsorsContactActions lineLabel={c.contactLine} discordLabel={c.contactDiscord} xLabel={c.contactX} className="mt-6" />
         </SponsorsSection>
       </article>
     </AppShell>

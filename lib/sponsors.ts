@@ -55,6 +55,7 @@ export type SponsorsContent = {
   readonly title: string;
   readonly lead: string;
   readonly audience: string;
+  readonly contactLine: string;
   readonly contactDiscord: string;
   readonly contactX: string;
 
@@ -111,11 +112,12 @@ const ja: SponsorsContent = {
   metaDescription:
     `OpenPay の開発・運営を支える法人スポンサー（${formatSponsorYen(SPONSOR.priceYen)} 円／${SPONSOR.termDays} 日・最大 ${SPONSOR.maxCompanies} 社）と、` +
     `バナー広告（${formatSponsorYen(BANNER.priceYen)} 円／${BANNER.termDays} 日・最大 ${BANNER.maxCompanies} 社で共有）の掲載企業を募集しています。` +
-    'お問い合わせは Discord か X で。',
+    'お問い合わせは LINE・Discord・X で。',
   backHome: '← OpenPay トップへ',
   title: 'スポンサー・広告掲載のご案内',
   lead: 'JPYC の利用と、AI が支払う体験を、一緒に広げませんか。OpenPay の開発・運営を支える法人スポンサーと、広告掲載企業を募集しています。',
   audience: 'ウォレット・決済・API・開発基盤など、OpenPay を使うお店・お客様・AI エージェントの開発者に関わる企業の方へ。',
+  contactLine: 'LINE で問い合わせる',
   contactDiscord: 'Discord で問い合わせる',
   contactX: 'X で問い合わせる',
 
@@ -174,7 +176,7 @@ const ja: SponsorsContent = {
   renewalTitle: '更新',
   renewal:
     `掲載は期間ごとに自動で更新します。期間の終わる ${RENEW.term} 日前までに、次の期間の請求書をお送りします。` +
-    '更新しない場合は、期間の終わる日までに Discord か X でお知らせください（お送りした請求書は取り消します）。' +
+    '更新しない場合は、期間の終わる日までに LINE・Discord・X でお知らせください（お送りした請求書は取り消します）。' +
     '次の期間の始まる日までにお支払いを確かめられない場合は、掲載を止めます。',
   renewalAnnual: `年間プランも同じく自動で更新し、請求書は期間の終わる ${RENEW.annual} 日前までにお送りします。`,
 
@@ -199,7 +201,7 @@ const ja: SponsorsContent = {
 
   flowTitle: 'お申し込みの流れ',
   flow: [
-    'Discord か X でお問い合わせ',
+    'LINE・Discord・X でお問い合わせ',
     '掲載の可否・空き枠・開始日のご連絡',
     '素材のご入稿',
     '請求書の発行とお支払い',
@@ -213,12 +215,13 @@ const en: SponsorsContent = {
   metaDescription:
     `We are looking for corporate sponsors (¥${formatSponsorYen(SPONSOR.priceYen)} / ${SPONSOR.termDays} days, up to ${SPONSOR.maxCompanies} companies) ` +
     `and banner advertisers (¥${formatSponsorYen(BANNER.priceYen)} / ${BANNER.termDays} days, shared by up to ${BANNER.maxCompanies} companies) ` +
-    "to support OpenPay's development and operation. Contact us on Discord or X.",
+    "to support OpenPay's development and operation. Contact us on LINE, Discord or X.",
   backHome: '← Back to OpenPay',
   title: 'Sponsorship and advertising',
   lead: "Would you like to help spread the use of JPYC and the experience of AI that pays, together with us? We are looking for corporate sponsors who support OpenPay's development and operation, and for companies to advertise with us.",
   audience:
     'For companies in wallets, payments, APIs, developer platforms and other fields related to the shops, customers and AI-agent developers who use OpenPay.',
+  contactLine: 'Contact us on LINE',
   contactDiscord: 'Contact us on Discord',
   contactX: 'Contact us on X',
 
@@ -280,7 +283,7 @@ const en: SponsorsContent = {
   renewalTitle: 'Renewal',
   renewal:
     `Placements renew automatically each term. We send the invoice for the next term at least ${RENEW.term} days before the current term ends. ` +
-    'If you do not wish to renew, let us know on Discord or X by the last day of the term (we will cancel the invoice). ' +
+    'If you do not wish to renew, let us know on LINE, Discord or X by the last day of the term (we will cancel the invoice). ' +
     'If we cannot confirm payment by the first day of the next term, the placement stops.',
   renewalAnnual: `The annual plan also renews automatically; we send its invoice at least ${RENEW.annual} days before the term ends.`,
 
@@ -306,7 +309,7 @@ const en: SponsorsContent = {
 
   flowTitle: 'How to apply',
   flow: [
-    'Contact us on Discord or X',
+    'Contact us on LINE, Discord or X',
     'We let you know whether we can accept the placement, which slots are open, and the start date',
     'You send us your materials',
     'We issue an invoice and you pay',

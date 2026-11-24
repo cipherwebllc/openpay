@@ -1,7 +1,7 @@
 // スポンサー・広告掲載のご案内 (/sponsors) の部品。page.tsx に規定外の export を作らないため部品に分ける (掟 3)。
 // hook / next-intl を使わない同期の server 部品 (jsdom で描画テストできる)。
 //
-// - 問い合わせのボタンは Discord と X だけ (新しい外部フォーム・メールアドレスは出さない)。URL は lib/officialLinks.ts の
+// - 問い合わせのボタンは LINE・Discord・X だけ (新しい外部フォーム・メールアドレスは出さない)。URL は lib/officialLinks.ts の
 //   定数 (フッターと同じ値)・rel もフッターと同じ。ボタンの名前は見えている文字 (アイコンは aria-hidden・aria-label なし・掟 8)。
 // - 掲載イメージは「サンプル」と明記した枠と文字だけで描く (画像・実在の企業名やロゴは使わない)。バナーの枠の縦横比と
 //   協賛企業の枠の数は lib/sponsorPlans.ts の定数から作る (第 2 段の掲載の欄と同じ値)。
@@ -14,8 +14,8 @@ import { LANDING_PRIMARY, LANDING_SECONDARY } from '@/components/LandingControls
 import { phrased } from '@/components/Phrased';
 import { STEP_BADGE } from '@/components/guide/PosGuidePieces';
 import { keepNumbersTogether } from '@/lib/guideText';
-import { OPENPAY_DISCORD_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
-import { DISCORD_ICON_PATH, X_ICON_PATH } from '@/lib/socialIconPaths';
+import { OPENPAY_DISCORD_URL, OPENPAY_LINE_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
+import { DISCORD_ICON_PATH, LINE_ICON_PATH, X_ICON_PATH } from '@/lib/socialIconPaths';
 import { SPONSOR_BANNER_SPEC, SPONSOR_PLANS } from '@/lib/sponsorPlans';
 import type { SponsorsAnnualCard, SponsorsPlanCard, SponsorsSpecItem } from '@/lib/sponsors';
 
@@ -62,17 +62,24 @@ function BrandIcon({ path }: { path: string }) {
 
 /** Discord (主) と X (従) の問い合わせボタン。スマホは縦に積んで 2 つの幅をそろえる (広い方の中身の幅・全幅にしない)。 */
 export function SponsorsContactActions({
+  lineLabel,
   discordLabel,
   xLabel,
   className,
 }: {
+  lineLabel: string;
   discordLabel: string;
   xLabel: string;
   className?: string;
 }) {
   return (
     <div className={`flex w-fit max-w-full flex-col items-stretch gap-3 sm:flex-row sm:flex-wrap ${className ?? 'mt-6'}`}>
-      <a href={OPENPAY_DISCORD_URL} target="_blank" rel="noopener noreferrer" className={LANDING_PRIMARY.brand}>
+      {/* LINE を先頭 (主) に置く: 日本の企業・お店の担当者がいちばん使い慣れた窓口 (2026-11-25 user 裁定)。 */}
+      <a href={OPENPAY_LINE_URL} target="_blank" rel="noopener noreferrer" className={LANDING_PRIMARY.brand}>
+        <BrandIcon path={LINE_ICON_PATH} />
+        {lineLabel}
+      </a>
+      <a href={OPENPAY_DISCORD_URL} target="_blank" rel="noopener noreferrer" className={LANDING_SECONDARY.brand}>
         <BrandIcon path={DISCORD_ICON_PATH} />
         {discordLabel}
       </a>

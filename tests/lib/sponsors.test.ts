@@ -3,12 +3,12 @@
 //   - ja の文は承認済みの文 (つなぐと承認の文に戻る・中身を足さない)
 //   - ja / en の形がそろう (同じ項目・同じ数)
 //   - 書かないもの: 「税込」・計測やレポートの案内・メールアドレス
-//   - Discord と X の URL は lib/officialLinks.ts だけが持つ (フッターと募集ページで二重に持たない)
+//   - LINE・Discord・X の URL は lib/officialLinks.ts だけが持つ (フッターと募集ページで二重に持たない)
 
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { OPENPAY_DISCORD_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
+import { OPENPAY_DISCORD_URL, OPENPAY_LINE_URL, OPENPAY_X_URL } from '@/lib/officialLinks';
 import {
   SPONSOR_ANNUAL_PLAN,
   SPONSOR_BANNER_SPEC,
@@ -81,12 +81,13 @@ const APPROVED_JA = {
   specs:
     'バナー: 1200×300 px（横 4：縦 1）・PNG / JPG / WebP・300 KB 以内・代替テキスト（画像の説明の文）。ロゴ: SVG か PNG（背景が透明のもの）・横 400 px 以上。リンク先の URL（https）。紹介文: 日本語 80 字以内・英語 160 字以内',
   // 2026-11-18 user「おすすめどおり」: ⑤ に年間プランを足し、⑥ 自動の更新を足した。
-  flow: '① Discord か X でお問い合わせ → ② 掲載の可否・空き枠・開始日のご連絡 → ③ 素材のご入稿 → ④ 請求書の発行とお支払い → ⑤ 掲載開始（30 日・年間プランは 1 年） → ⑥ 期間ごとに自動で更新',
+  // 2026-11-25 LINE 公式アカウントを窓口に足す (文言は user の承認待ち)。
+  flow: '① LINE・Discord・X でお問い合わせ → ② 掲載の可否・空き枠・開始日のご連絡 → ③ 素材のご入稿 → ④ 請求書の発行とお支払い → ⑤ 掲載開始（30 日・年間プランは 1 年） → ⑥ 期間ごとに自動で更新',
   // 2026-11-18 user「おすすめどおり」(年間プランと自動の更新)。
   annual:
     '年間プラン（法人スポンサー）: 363,000 円／365 日。30 日の料金の 11 回分で、1 年間掲載します。お支払いは期間の初めに一括です。広告主様のご都合で途中で止める場合、返金はありません。',
   renewal:
-    '掲載は期間ごとに自動で更新します。期間の終わる 7 日前までに、次の期間の請求書をお送りします。更新しない場合は、期間の終わる日までに Discord か X でお知らせください（お送りした請求書は取り消します）。次の期間の始まる日までにお支払いを確かめられない場合は、掲載を止めます。',
+    '掲載は期間ごとに自動で更新します。期間の終わる 7 日前までに、次の期間の請求書をお送りします。更新しない場合は、期間の終わる日までに LINE・Discord・X でお知らせください（お送りした請求書は取り消します）。次の期間の始まる日までにお支払いを確かめられない場合は、掲載を止めます。',
   renewalAnnual: '年間プランも同じく自動で更新し、請求書は期間の終わる 30 日前までにお送りします。',
   terms:
     '掲載料金は、所定の掲載場所・期間に対する料金です。バナー・ロゴ等の素材は広告主様にご用意いただきます。定期レポートの提供は含まれません。表示回数・クリック数・お問い合わせ・購入等の成果は保証いたしません。',
@@ -97,7 +98,7 @@ const APPROVED_JA = {
   refund:
     '掲載基準に反するため掲載を止めた場合、掲載料はお返ししません。OpenPay の都合で掲載を止めた場合は、残りの日数分を日割りでお返しします。',
   welcome: '企業の公式 SNS やブログでの OpenPay の紹介や、活用事例の相互紹介を歓迎します（必須ではありません）。',
-  buttons: ['Discord で問い合わせる', 'X で問い合わせる'],
+  buttons: ['LINE で問い合わせる', 'Discord で問い合わせる', 'X で問い合わせる'],
 } as const;
 
 describe('ja の文は承認済みの文のまま (中身を足さない・変えない)', () => {
@@ -114,7 +115,7 @@ describe('ja の文は承認済みの文のまま (中身を足さない・変�
     expect(`${c.bannerTermsLabel}${c.bannerTerms}`).toBe(APPROVED_JA.bannerTerms);
     expect(c.refund).toBe(APPROVED_JA.refund);
     expect(c.welcome).toBe(APPROVED_JA.welcome);
-    expect([c.contactDiscord, c.contactX]).toEqual(APPROVED_JA.buttons);
+    expect([c.contactLine, c.contactDiscord, c.contactX]).toEqual(APPROVED_JA.buttons);
   });
 
   it('料金のカード: 大きい数字 + 期間と社数 + 本文をつなぐと、承認の文に戻る', () => {
@@ -237,8 +238,9 @@ function sourceFiles(): string[] {
   return out;
 }
 
-describe('Discord と X の URL は 1 か所 (lib/officialLinks.ts)', () => {
+describe('LINE・Discord・X の URL は 1 か所 (lib/officialLinks.ts)', () => {
   it('値', () => {
+    expect(OPENPAY_LINE_URL).toBe('https://line.me/R/ti/p/@904kjwjn');
     expect(OPENPAY_DISCORD_URL).toBe('https://discord.gg/Cfywb3aNWg');
     expect(OPENPAY_X_URL).toBe('https://x.com/openpay_jp');
   });
@@ -246,7 +248,7 @@ describe('Discord と X の URL は 1 か所 (lib/officialLinks.ts)', () => {
   it('ほかの file に URL の直書きが無い (フッター・募集ページは定数を使う)', () => {
     const holders = sourceFiles().filter((file) => {
       const source = readFileSync(join(ROOT, file), 'utf8');
-      return source.includes(OPENPAY_DISCORD_URL) || source.includes(OPENPAY_X_URL);
+      return source.includes(OPENPAY_LINE_URL) || source.includes(OPENPAY_DISCORD_URL) || source.includes(OPENPAY_X_URL);
     });
     expect(holders).toEqual(['lib/officialLinks.ts']);
   });

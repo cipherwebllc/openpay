@@ -3,6 +3,7 @@ import { screen } from '@testing-library/react';
 import { renderWithIntl } from '../_helpers/i18n';
 import { SiteFooter } from '@/components/SiteFooter';
 import { LEGAL_ENTITY } from '@/lib/legal';
+import { OPENPAY_LINE_URL } from '@/lib/officialLinks';
 import { detectSocialPlatform, socialIconPath } from '@/lib/socialLinks';
 
 // @handle compact 判定 (P3) 用に usePathname だけ差し替え可能にする。既定 null =
@@ -73,11 +74,11 @@ describe('SiteFooter', () => {
     expect(anchors.indexOf(link)).toBe(anchors.indexOf(screen.getByRole('link', { name: guides })) + 1);
   });
 
-  // スポンサー・広告掲載のご案内 (/sponsors・2026-11-18) は、お問い合わせ (Discord) の直前 (列の終わり)。兄弟リンクと同じく
+  // スポンサー・広告掲載のご案内 (/sponsors・2026-11-18) は、お問い合わせ (LINE → Discord・2026-11-25 から) の直前 (列の終わり)。兄弟リンクと同じく
   // locale なし href (middleware が /{locale}/sponsors へ)。ガイド・料金・法務の並びは動かさない。
   it.each([
-    ['ja', 'スポンサー・広告募集', 'お問い合わせ (Discord)'],
-    ['en', 'Sponsorship & ads', 'Contact (Discord)'],
+    ['ja', 'スポンサー・広告募集', 'お問い合わせ (LINE)'],
+    ['en', 'Sponsorship & ads', 'Contact (LINE)'],
   ] as const)('%s: お問い合わせの直前にスポンサー・広告の募集「%s」→ /sponsors (可視テキストが名前)', (locale, name, contact) => {
     renderWithIntl(<SiteFooter />, { locale });
     const link = screen.getByRole('link', { name });
@@ -88,6 +89,21 @@ describe('SiteFooter', () => {
     expect(anchors.indexOf(link)).toBe(anchors.indexOf(screen.getByRole('link', { name: contact })) - 1);
     // ガイド・料金は先頭のまま。
     expect(anchors.slice(0, 2).map((a) => a.getAttribute('href'))).toEqual(['/guide', '/pricing']);
+  });
+
+  // お問い合わせ (LINE・2026-11-25) は お問い合わせ (Discord) の直前。新しいタブで開く・名前は見えている文字。
+  it.each([
+    ['ja', 'お問い合わせ (LINE)', 'お問い合わせ (Discord)'],
+    ['en', 'Contact (LINE)', 'Contact (Discord)'],
+  ] as const)('%s: お問い合わせ (LINE) → LINE 公式アカウント・Discord の直前', (locale, name, discord) => {
+    renderWithIntl(<SiteFooter />, { locale });
+    const link = screen.getByRole('link', { name });
+    expect(link).toHaveAttribute('href', OPENPAY_LINE_URL);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).not.toHaveAttribute('aria-label');
+    const anchors: HTMLElement[] = Array.from(link.closest('nav')!.querySelectorAll('a'));
+    expect(anchors.indexOf(link)).toBe(anchors.indexOf(screen.getByRole('link', { name: discord })) - 1);
   });
 
   it('事業者名と copyright を表示する', () => {
@@ -182,11 +198,18 @@ describe('SiteFooter', () => {
     );
   });
 
-  it('最下段は X・YouTube・note・Discord・GitHub の順のアイコンだけ (文字なし・名前は aria-label = title・@handle の SNS 行と同じアイコン)', () => {
+  it('最下段は X・YouTube・note・LINE・Discord・GitHub の順のアイコンだけ (文字なし・名前は aria-label = title・@handle の SNS 行と同じアイコン)', () => {
     renderWithIntl(<SiteFooter />, { locale: 'ja' });
-    const names = ['OpenPay の X (旧 Twitter)', 'OpenPay の YouTube', 'note (OpenPay マガジン)', 'OpenPay の Discord', 'ソースコード (GitHub)'];
+    const names = [
+      'OpenPay の X (旧 Twitter)',
+      'OpenPay の YouTube',
+      'note (OpenPay マガジン)',
+      'OpenPay の LINE 公式アカウント',
+      'OpenPay の Discord',
+      'ソースコード (GitHub)',
+    ];
     const links = names.map((name) => screen.getByRole('link', { name }));
-    // 5 つとも同じ段に、この順で並ぶ。
+    // 6 つとも同じ段に、この順で並ぶ。
     const row = links[0].parentElement!;
     expect(Array.from(row.querySelectorAll('a'))).toEqual(links);
     for (const link of links) {
