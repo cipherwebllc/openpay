@@ -65,6 +65,10 @@ type GuideNavCopy = {
   /** ハブのお店向けのパネルの「はじめての方へ」(読む順のおすすめ・番号 1〜4 = ガイドの「次へ」の順)。 */
   readonly hubStartTitle: string;
   readonly hubStartLead: string;
+  /** ハブの最後の「導入の相談は LINE で」(2026-11-25 user 裁定・行き先は lib/officialLinks.ts の LINE 公式アカウント)。 */
+  readonly hubContactTitle: string;
+  readonly hubContactBody: string;
+  readonly hubContactAction: string;
   readonly backHome: string;
   readonly metaTitle: string;
   readonly metaDescription: string;
@@ -85,6 +89,9 @@ const JA: GuideNavCopy = {
   hubLead: 'やりたいことに合わせて、ガイドを選んでください。',
   hubStartTitle: 'はじめての方へ',
   hubStartLead: 'お店で受け取るなら、この順に読むと迷わず始められます。',
+  hubContactTitle: '導入の相談は LINE で',
+  hubContactBody: 'お店で使えるか、どのガイドから読むかなど、OpenPay の LINE 公式アカウントでお気軽にご相談ください。',
+  hubContactAction: 'LINE で相談する',
   backHome: '← OpenPay トップへ',
   metaTitle: 'OpenPay でできること — ガイド一覧',
   metaDescription:
@@ -172,6 +179,9 @@ const EN: GuideNavCopy = {
   hubLead: 'Pick the guide that matches what you want to do.',
   hubStartTitle: 'New here?',
   hubStartLead: 'To start taking payments in a shop, read these in order.',
+  hubContactTitle: 'Ask us on LINE about getting started',
+  hubContactBody: 'Whether OpenPay fits your shop, which guide to read first, and more — just message the OpenPay LINE Official Account.',
+  hubContactAction: 'Ask on LINE',
   backHome: '← Back to OpenPay',
   metaTitle: 'What you can do with OpenPay — all guides',
   metaDescription:

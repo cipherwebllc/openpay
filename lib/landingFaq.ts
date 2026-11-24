@@ -14,6 +14,8 @@ export const LANDING_FAQ = [
   { q: 'faqQ8', a: 'faqA8' },
   // JPYC 払いの割引はトップの訴求にせず、加盟店規約の注意があるガイドへ送る (2026-11-02 user 承認)。
   { q: 'faqQ9', a: 'faqA9' },
+  // 導入の相談の窓口 (OpenPay の LINE 公式アカウント・2026-11-25 user 裁定)。最後に置く。
+  { q: 'faqQ10', a: 'faqA10' },
 ] as const;
 
 export type LandingFaqAnswerKey = (typeof LANDING_FAQ)[number]['a'];

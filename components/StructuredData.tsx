@@ -11,7 +11,7 @@ export const SITE_URL = 'https://open-pay.jp';
 
 // FAQ の回答のリンクのタグ (LandingFaq と同じ名前) は、構造化データでは中身の文字だけにする。
 const plainTag = (chunks: string) => chunks;
-const FAQ_PLAIN_TAGS = { jpycEx: plainTag, create: plainTag, pricing: plainTag, guide: plainTag };
+const FAQ_PLAIN_TAGS = { jpycEx: plainTag, create: plainTag, pricing: plainTag, guide: plainTag, line: plainTag };
 
 // <script> 内 JSON の `<` を < にエスケープ。将来 messages の文言に
 // "</script>" 相当が紛れても script 文脈脱出 (XSS) に波及させないための防御

@@ -10,6 +10,7 @@ import ja from '@/messages/ja.json';
 import { LandingFaq } from '@/components/LandingFaq';
 import { LANDING_CARD } from '@/components/LandingControls';
 import { LANDING_FAQ } from '@/lib/landingFaq';
+import { OPENPAY_LINE_URL } from '@/lib/officialLinks';
 
 vi.mock('next-intl/server', () => ({
   getLocale: async () => 'ja',
@@ -79,6 +80,18 @@ describe('LandingFaq: 行の全体を押せる', () => {
       expect(link.closest('summary')).toBeNull();
       expect(rows.some(({ answer }) => answer.contains(link))).toBe(true);
     }
+  });
+
+  it('最後の質問は導入の相談で、答えの中に OpenPay の LINE 公式アカウントへのリンク (新しいタブ・見えている文字が名前)', async () => {
+    const { rows } = await renderRows();
+    const last = rows[rows.length - 1];
+    expect(last.question.textContent).toBe('導入の相談はどこでできますか?');
+    const link = last.answer.querySelector('a')!;
+    expect(link).toHaveAttribute('href', OPENPAY_LINE_URL);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link.textContent).toBe('OpenPay の LINE 公式アカウント');
+    expect(link).not.toHaveAttribute('aria-label');
   });
 
   it('キーボードの focus の輪は行の内側に描く (外枠の overflow-hidden と角の丸みで切れない)', async () => {

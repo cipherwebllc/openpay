@@ -139,6 +139,8 @@
     "faqA8": "Yes. Beyond in-store QR payments, you can request development fees, production fees, or monthly maintenance fees. Send a payment link with the amount and funds settle directly to your wallet, with accounting CSV and e-receipts for your records.",
     "faqQ9": "Can I offer a discount only to customers paying in JPYC?",
     "faqA9": "You can set one with the discount on the register and payment QR. Whether you may do so depends on your merchant agreements, such as those for cards. See the <guide>guide</guide> for details.",
+    "faqQ10": "Where can I ask about getting started?",
+    "faqA10": "Message the <line>OpenPay LINE Official Account</line>. Ask us anything, such as whether OpenPay fits your shop.",
     "closingTitle": "Open payments — for people and AI.",
     "closingBody": "No setup cost, no contract. Start today with just a wallet.",
     "closingCtaStart": "Create a payment QR (free)",
