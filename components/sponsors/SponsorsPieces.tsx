@@ -60,7 +60,7 @@ function BrandIcon({ path }: { path: string }) {
   );
 }
 
-/** Discord (主) と X (従) の問い合わせボタン。スマホは縦に積んで 2 つの幅をそろえる (広い方の中身の幅・全幅にしない)。 */
+/** LINE (主) と Discord・X (従) の問い合わせボタン。スマホは縦に積んで 3 つの幅をそろえる (広い方の中身の幅・全幅にしない)。 */
 export function SponsorsContactActions({
   lineLabel,
   discordLabel,

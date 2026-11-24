@@ -1,6 +1,6 @@
 // 全 page 共通の footer。app/[locale]/layout.tsx から 1 度だけ render される。
 // 役割は (1) legal page (/terms /privacy /disclaimer) への導線、(2) 事業者表記
-// + copyright、(3) お問い合わせ (Discord)・スポンサー・広告の募集 (/sponsors) と SNS 行。技術スタックの羅列はここに置かない
+// + copyright、(3) お問い合わせ (LINE・Discord)・スポンサー・広告の募集 (/sponsors) と SNS 行。技術スタックの羅列はここに置かない
 // (技術は運用透明性ページと GitHub にある・2026-10-25 user 裁定)。
 //
 // QR ポスター印刷時は不要なので `print:hidden` で全体を非表示にする。
