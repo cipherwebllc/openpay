@@ -724,7 +724,12 @@ describe('決済 relay の tx の控え (relay:txhint:・7 日)', () => {
     // 控えの書き込みの順番は鍵ごとにプロセスの中で続くので、ほかのテストと別の nonce を使う。
     const HANG_NONCE = ('0x' + 'e'.repeat(64)) as Hex;
     store.flags.setHangPrefix = 'relay:txhint:';
-    await expect(makeIdempotency('relay:idem:').recordRelayHash(137, FROM, HANG_NONCE, TX)).resolves.toBeUndefined();
+    // 50 ms のうちに終わる (控えを 1 秒でも待つ作りなら timeout になる)。
+    const outcome = await Promise.race([
+      makeIdempotency('relay:idem:').recordRelayHash(137, FROM, HANG_NONCE, TX).then(() => 'done'),
+      new Promise((resolve) => setTimeout(() => resolve('timeout'), 50)),
+    ]);
+    expect(outcome).toBe('done');
     expect(store.vals.get(`relay:idem:137:${FROM.toLowerCase()}:${HANG_NONCE}`)).toBe(TX);
   });
 

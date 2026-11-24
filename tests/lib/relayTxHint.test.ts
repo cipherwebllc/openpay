@@ -125,8 +125,16 @@ describe('scheduleRelayTxHint', () => {
     const task = (nextServer.after.mock.calls[0][0] as () => Promise<void>)();
     expect(task).toBeInstanceOf(Promise);
     await vi.waitFor(() => expect(kv.set).toHaveBeenCalledOnce());
+    // after() が待つ promise は、控えの SET が終わるまで終わらない (応答の後も書き終えるまで見届ける)。
+    let settled = false;
+    void task.then(() => {
+      settled = true;
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(settled).toBe(false);
     slow.resolve({ ok: true, value: 'OK' });
     await expect(task).resolves.toBeUndefined();
+    expect(settled).toBe(true);
   });
 
   it('リクエストの外で after() が投げても、書き込みは進む', async () => {
