@@ -8,7 +8,8 @@
 // との区別が不能になる。
 //
 // 本スクリプトは:
-//   1. `npm audit --omit=dev --json` で production 依存の脆弱性を取得
+//   1. `npm audit --omit=dev --json` で production 依存の脆弱性を取得 (ルートと、独自の package-lock を持つ配布用の
+//      パッケージ = PUBLISHED_PACKAGE_DIRS の両方)
 //   2. MODERATE / HIGH / CRITICAL を GHSA URL (= advisory ID) で同定
 //   3. 下記 ALLOWED_ADVISORIES の key と一致するものは accepted として log のみ
 //   4. unaccepted な MODERATE+ が 1 件でもあれば exit 1
@@ -20,6 +21,14 @@
 // 同期させること。本ファイルは監査 trail として diff レビュー対象。
 
 import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// 独自の package-lock.json を持ち npm で配るパッケージ。ルートの `npm audit` はこれらの依存の一覧を見ないので、別に audit する
+// (2026-11-25 外部レビュー: packages/x402-mcp は利用者の手元でウォレットの鍵を扱うのに、CI の audit の対象外だった)。
+// 受容済みの一覧 (ALLOWED_ADVISORIES) はルートと共用する (同じ GHSA は同じ判断)。
+const PUBLISHED_PACKAGE_DIRS = ['packages/x402-mcp'];
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ────────────────────────────────────────────────────────────────────
 // 受容済 advisory リスト (GHSA ID → 受容理由 + docs ref)
@@ -240,10 +249,11 @@ const isRecord = (value) => value !== null && typeof value === 'object' && !Arra
 //   返り値: { data } (検証済み report) または { failure } (理由の文字列)。
 //   本番 gate では failure を exit 2 (監査未完了) にし、dev 参考集計では warn に留める。
 // ────────────────────────────────────────────────────────────────────
-function runNpmAudit(args) {
+function runNpmAudit(args, cwd) {
   const audit = spawnSync('npm', ['audit', ...args, '--json'], {
     encoding: 'utf8',
     maxBuffer: 50 * 1024 * 1024,
+    ...(cwd === undefined ? {} : { cwd }),
   });
   // endpoint / npm 起動失敗が「脆弱性ゼロ」の成功判定へ波及するのを防ぐ。
   // exit 1 は脆弱性検出と endpoint 障害の両方に使われるため、JSON の形も検査する。
@@ -280,7 +290,8 @@ function runNpmAudit(args) {
 //   - gated severity の package に via が無い / 配列でない / 空 (advisory にも他 pkg にも辿れない)
 //   黙って捨てると accepted にも unaccepted にも数えられず CI が通ってしまう。
 // ────────────────────────────────────────────────────────────────────
-function collectAdvisories(data) {
+// label = 影響のある package 名の前に付ける場所 (配布用のパッケージの advisory をルートのものと見分ける)。
+function collectAdvisories(data, label = '') {
   /** @type {Map<string, { ghsaId: string, name: string, title: string, severity: string, url: string, packages: Set<string> }>} */
   const advisories = new Map();
   /** @type {string[]} */
@@ -311,7 +322,7 @@ function collectAdvisories(data) {
           packages: new Set(),
         });
       }
-      advisories.get(via.url).packages.add(pkgName);
+      advisories.get(via.url).packages.add(label + pkgName);
     }
   }
   return { advisories, uncollectable };
@@ -323,6 +334,22 @@ if (production.failure) {
   process.exit(2);
 }
 const { advisories, uncollectable } = collectAdvisories(production.data);
+
+// 配布用のパッケージの本番依存も同じ gate に入れる。audit が完了しなければ、ルートと同じく監査未完了 (exit 2)。
+for (const dir of PUBLISHED_PACKAGE_DIRS) {
+  const result = runNpmAudit(['--omit=dev'], join(REPO_ROOT, dir));
+  if (result.failure) {
+    console.error(`audit-gate: ${dir}: ${result.failure}`);
+    process.exit(2);
+  }
+  const collected = collectAdvisories(result.data, `${dir}:`);
+  for (const [url, entry] of collected.advisories) {
+    const existing = advisories.get(url);
+    if (existing) for (const name of entry.packages) existing.packages.add(name);
+    else advisories.set(url, entry);
+  }
+  uncollectable.push(...collected.uncollectable);
+}
 
 // ────────────────────────────────────────────────────────────────────
 // 3. 受容済 / 未受容に分類
