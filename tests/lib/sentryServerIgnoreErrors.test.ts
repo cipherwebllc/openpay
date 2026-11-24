@@ -19,8 +19,12 @@ function nextErrorMessage(header: string | string[]): string {
 }
 
 describe('SENTRY_SERVER_IGNORE_ERRORS', () => {
-  it('Next.js が壊れた router state header を読めないときの error には当たる', () => {
-    const message = nextErrorMessage('not-json');
+  it.each([
+    ['JSON でない', 'not-json'],
+    // 形の検査に落ちる (要素が 6 個)。版の違う client が送る header もこの形で落ちる。
+    ['形が合わない', encodeURIComponent(JSON.stringify(['', {}, null, null, false, 'extra']))],
+  ])('Next.js が壊れた router state header を読めないときの error には当たる (%s)', (_label, header) => {
+    const message = nextErrorMessage(header);
     expect(message).toBe('The router state header was sent but could not be parsed.');
     expect(ignored(message)).toBe(true);
   });
