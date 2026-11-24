@@ -255,6 +255,9 @@ Vercel Dashboard → Deployments → 直前の安定 deployment → "Promote to 
 側で直接対処不能 / 影響が限定的なものを accepted risk として明示。deploy 前に
 本項を確認し、新規追加・状況変化があれば update。
 
+対象はルートと、独自の package-lock を持つ配布用のパッケージ (`packages/x402-mcp`・利用者の手元でウォレットの鍵を扱う) の本番依存
+(`scripts/audit-gate.mjs` の `PUBLISHED_PACKAGE_DIRS`・2026-11-25 から)。受容の一覧は共用し、どこの依存かは `packages/x402-mcp:<名前>` と出る。
+
 ### 7.1 ✅ RESOLVED: `js-cookie` (GHSA-qjx8-664m-686j)
 
 **2026-05-24 確認**: `npm audit` で no longer detected。`package.json` overrides で

@@ -18,17 +18,28 @@ function spawnResult(stdout: string, status: number | null = 0, error?: Error, s
   return { pid: 1, output: [null, stdout, ''], stdout, stderr: '', status, signal, error } as SpawnResult;
 }
 
-async function runGate(stdout: string, status: number | null = 0, error?: Error, signal: NodeJS.Signals | null = null, devStdout?: string) {
+type McpAudit = { stdout: string; status?: number | null };
+
+async function runGate(
+  stdout: string,
+  status: number | null = 0,
+  error?: Error,
+  signal: NodeJS.Signals | null = null,
+  devStdout?: string,
+  mcp: McpAudit = { stdout: JSON.stringify(cleanReport), status: 0 },
+) {
   vi.resetModules();
   const mock = vi.mocked(spawnSync);
-  // 前の test で使われなかった mockReturnValueOnce を捨ててから設定する (vitest 4 以降の restoreAllMocks は vi.fn を戻さず、
-  // 本番の gate で落ちて dev の audit を走らせなかった test の 2 つ目の戻り値が、次の test へ持ち越される)。
+  // 前の test の設定を捨ててから、呼び出しの引数で返す値を決める (順番に頼らない)。
+  // - cwd が packages/x402-mcp = 配布用の MCP の本番依存の gate (既定は脆弱性 0 の報告)
+  // - `--omit=dev` = ルートの本番依存の gate
+  // - それ以外 = dev を含む参考集計 (devStdout が無ければルートと同じ値)
   mock.mockReset();
-  mock.mockReturnValue(spawnResult(stdout, status, error, signal));
-  if (devStdout !== undefined) {
-    // 1 回目 = 本番依存の gate (`--omit=dev`)、2 回目 = dev を含む参考集計。
-    mock.mockReturnValueOnce(spawnResult(stdout, status, error, signal)).mockReturnValueOnce(spawnResult(devStdout, 1));
-  }
+  mock.mockImplementation(((_command: string, args: readonly string[], options?: { cwd?: string }) => {
+    if (options?.cwd?.endsWith('packages/x402-mcp')) return spawnResult(mcp.stdout, mcp.status ?? 0);
+    if (args.includes('--omit=dev')) return spawnResult(stdout, status, error, signal);
+    return devStdout === undefined ? spawnResult(stdout, status, error, signal) : spawnResult(devStdout, 1);
+  }) as never);
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
   const exited = new Error('process.exit');
@@ -49,6 +60,49 @@ async function runGate(stdout: string, status: number | null = 0, error?: Error,
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe('audit-gate', () => {
+  // 2026-11-25: 配布用の MCP (packages/x402-mcp) は独自の package-lock を持つので、別に audit して同じ gate に入れる。
+  describe('配布用の MCP の依存', () => {
+    const mcpAdvisory = (ghsa: string, severity = 'high') => ({
+      ...cleanReport,
+      vulnerabilities: {
+        'some-dep': {
+          name: 'some-dep',
+          severity,
+          via: [{ source: 1, name: 'some-dep', title: 'test advisory', severity, url: `https://github.com/advisories/${ghsa}` }],
+        },
+      },
+      metadata: { vulnerabilities: { ...cleanReport.metadata.vulnerabilities, [severity]: 1, total: 1 } },
+    });
+
+    it('packages/x402-mcp を cwd にして本番依存を audit する', async () => {
+      const result = await runGate(JSON.stringify(cleanReport));
+      expect(result.status).toBe(0);
+      expect(spawnSync).toHaveBeenCalledWith(
+        'npm',
+        ['audit', '--omit=dev', '--json'],
+        expect.objectContaining({ cwd: expect.stringMatching(/packages\/x402-mcp$/) }),
+      );
+    });
+
+    it('MCP の依存だけにある未受容の advisory でも gate は落ちる (どこの依存かを出す)', async () => {
+      const result = await runGate(JSON.stringify(cleanReport), 0, undefined, null, undefined, {
+        stdout: JSON.stringify(mcpAdvisory('GHSA-test-mcp0-0001')),
+        status: 1,
+      });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain('UNACCEPTED');
+      expect(result.stdout).toContain('GHSA-test-mcp0-0001');
+      expect(result.stdout).toContain('packages/x402-mcp:some-dep');
+    });
+
+    it('MCP の audit が完了しなければ監査未完了 (exit 2)', async () => {
+      const result = await runGate(JSON.stringify(cleanReport), 0, undefined, null, undefined, { stdout: '<html>Bad gateway</html>', status: 1 });
+      expect(result.status).toBe(2);
+      expect(result.stderr).toContain('audit-gate: packages/x402-mcp:');
+      expect(result.stdout).not.toContain('audit-gate: OK');
+    });
+  });
+
   it.each([0, 1])('accepts a valid empty audit report with exit %s', async (status) => {
     const result = await runGate(JSON.stringify(cleanReport), status);
     expect(result.status).toBe(0);
@@ -175,8 +229,15 @@ describe('audit-gate', () => {
 
     it('runs a second audit including devDependencies and lists dev-only advisories without failing', async () => {
       const result = await runGate(JSON.stringify(cleanReport), 0, undefined, null, JSON.stringify(devOnly));
+      // 1 回目 = ルートの本番依存・2 回目 = 配布用の MCP の本番依存・3 回目 = dev を含む参考集計。
       expect(spawnSync).toHaveBeenNthCalledWith(1, 'npm', ['audit', '--omit=dev', '--json'], expect.any(Object));
-      expect(spawnSync).toHaveBeenNthCalledWith(2, 'npm', ['audit', '--json'], expect.any(Object));
+      expect(spawnSync).toHaveBeenNthCalledWith(
+        2,
+        'npm',
+        ['audit', '--omit=dev', '--json'],
+        expect.objectContaining({ cwd: expect.stringMatching(/packages\/x402-mcp$/) }),
+      );
+      expect(spawnSync).toHaveBeenNthCalledWith(3, 'npm', ['audit', '--json'], expect.any(Object));
       expect(result.status).toBe(0);
       expect(result.stdout).toContain('Dev-scope');
       expect(result.stdout).toContain('GHSA-dev-only-fixture');
@@ -215,7 +276,9 @@ describe('audit-gate', () => {
       };
       const result = await runGate(JSON.stringify(report), 1, undefined, null, JSON.stringify(devOnly));
       expect(result.status).toBe(1);
-      expect(spawnSync).toHaveBeenCalledTimes(1);
+      // 本番の gate (ルートと配布用の MCP) の 2 回だけで、dev を含む参考集計は走らせない。
+      expect(spawnSync).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(spawnSync).mock.calls.every(([, args]) => (args as string[]).includes('--omit=dev'))).toBe(true);
     });
   });
 });
