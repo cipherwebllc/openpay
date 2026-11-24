@@ -823,6 +823,7 @@ describe('中継の tx の控え (冪等の記録が消えた後)', () => {
       expect(readRelayTxHint).toHaveBeenCalledExactlyOnceWith(80002, FROM, NONCE);
       expect(h.getReceipt).toHaveBeenCalledExactlyOnceWith({ hash: HINT });
       expect(findAuthorizationUsedTransactionHash).not.toHaveBeenCalled();
+      expect(logger.info).toHaveBeenCalledWith('relay.jpyc.status.settled_by_tx_hint', { chainId: 80002 });
     },
   );
 
@@ -850,6 +851,16 @@ describe('中継の tx の控え (冪等の記録が消えた後)', () => {
     expect(await res.json()).toEqual({ ok: true, state: 'settled', txHash: LOG_HASH });
     expect(h.getReceipt).toHaveBeenCalledWith({ hash: HINT });
     expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledOnce();
+  });
+
+  it('署名付きの照会の宛先・額と控えの receipt の送金が合わなければ settled にしない (今までどおり探す)', async () => {
+    h.used = true;
+    h.receipts.set(HINT, { status: 'success', logs: [authorizationEvent(), transfer({ value: 1n })] });
+    const res = await POST(req(intent));
+    expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
+    expect(h.getReceipt).toHaveBeenCalledWith({ hash: HINT });
+    expect(findAuthorizationUsedTransactionHash).toHaveBeenCalledOnce();
+    expect(logger.info).not.toHaveBeenCalledWith('relay.jpyc.status.settled_by_tx_hint', expect.anything());
   });
 
   it('控えの receipt が合わず getLogs も範囲の制限で拒まれれば、今までどおり indeterminate', async () => {

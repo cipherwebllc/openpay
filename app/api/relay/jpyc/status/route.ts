@@ -184,6 +184,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (idem.state === 'missing') {
       const hinted = await readRelayTxHint(parsed.chainId, parsed.from, parsed.nonce);
       if (hinted && await receiptMatchesIntent(parsed, token, hinted)) {
+        // 本番で控えが効いているか (getLogs を使わずに解けたか) を数えられるようにする。
+        logger.info('relay.jpyc.status.settled_by_tx_hint', { chainId: parsed.chainId });
         return json({ ok: true, state: 'settled', txHash: hinted });
       }
     }

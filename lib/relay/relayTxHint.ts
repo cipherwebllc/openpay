@@ -21,6 +21,11 @@ export const RELAY_TX_HINT_TTL_SEC = 7 * 24 * 60 * 60;
  * 使い切らせず、今の経路 (getLogs) に落とす。
  */
 export const RELAY_TX_HINT_READ_TIMEOUT_MS = 1_200;
+/**
+ * 控えの書き込みを待つ上限 (ミリ秒)。中継は冪等の記録と並行に控えを書いて両方を待つので、KV の片方だけが遅いときに
+ * 中継の応答 (broadcast 済みの支払いの結果) を長く待たせない。時間切れのときは待つのをやめるだけ (書き込みは続く)。
+ */
+export const RELAY_TX_HINT_WRITE_TIMEOUT_MS = 1_000;
 
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -28,17 +33,29 @@ export function relayTxHintKey(chainId: number, from: Address, nonce: Hex): stri
   return `relay:txhint:${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
 }
 
-/** 控えを書く (上書き・置換の tx は最新が勝つ)。reject しない。 */
+/**
+ * 控えを書く (上書き・置換の tx は最新が勝つ)。reject せず、RELAY_TX_HINT_WRITE_TIMEOUT_MS より長くは待たない。
+ * tx hash の形でない値は書かない (先に書いた正しい控えを上書きしない)。
+ */
 export async function recordRelayTxHint(
   chainId: number,
   from: Address,
   nonce: Hex,
   txHash: Hex,
 ): Promise<void> {
+  if (!TX_HASH_RE.test(txHash)) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    await kvSet(relayTxHintKey(chainId, from, nonce), txHash, { ttlSec: RELAY_TX_HINT_TTL_SEC });
+    await Promise.race([
+      kvSet(relayTxHintKey(chainId, from, nonce), txHash, { ttlSec: RELAY_TX_HINT_TTL_SEC }),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, RELAY_TX_HINT_WRITE_TIMEOUT_MS);
+      }),
+    ]);
   } catch {
     // 控えの書き込みの失敗で、broadcast 済みの中継の応答を失敗にしない (控えが無くても status は今の経路で探す)。
+  } finally {
+    clearTimeout(timer);
   }
 }
 

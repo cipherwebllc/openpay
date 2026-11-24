@@ -206,6 +206,10 @@ describe('POST /api/relay/jpyc free 経路の preflight read 障害 (B-R5)', () 
       expect.arrayContaining(['balanceOf', 'authorizationState']),
     );
     expect(kv.setCalls.some((key) => key.startsWith('relay:idem:'))).toBe(true);
+    // 通常の支払い (free) も、冪等の記録と同じ tx hash の 7 日の控えを残す (lib/relay/relayTxHint.ts)。
+    const idemHash = kv.values.get(`relay:idem:${AMOY}:${customer.address.toLowerCase()}:${NONCE}`);
+    expect(idemHash).toMatch(/^0x[0-9a-f]{64}$/);
+    expect(kv.values.get(`relay:txhint:${AMOY}:${customer.address.toLowerCase()}:${NONCE}`)).toBe(idemHash);
     expect(kv.lists.has(`relay:rl:${customer.address}`)).toBe(true);
     expect(kv.incrKeys.some((key) => key.startsWith(`relay:budget:${AMOY}:`))).toBe(true);
     expect(io.sentRaw).toEqual(['0x1234']);

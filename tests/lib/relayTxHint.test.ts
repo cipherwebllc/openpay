@@ -18,6 +18,7 @@ vi.mock('@/lib/kv', () => ({
 import {
   RELAY_TX_HINT_READ_TIMEOUT_MS,
   RELAY_TX_HINT_TTL_SEC,
+  RELAY_TX_HINT_WRITE_TIMEOUT_MS,
   readRelayTxHint,
   recordRelayTxHint,
   relayTxHintKey,
@@ -49,6 +50,25 @@ describe('recordRelayTxHint', () => {
   it('7 日の TTL で上書きして書く (NX なし = 置換の tx は最新が勝つ)', async () => {
     await recordRelayTxHint(137, FROM, NONCE, TX);
     expect(kv.set).toHaveBeenCalledExactlyOnceWith(KEY, TX, { ttlSec: RELAY_TX_HINT_TTL_SEC });
+  });
+
+  it('tx hash の形でない値は書かない (先に書いた正しい控えを上書きしない)', async () => {
+    await recordRelayTxHint(137, FROM, NONCE, '0x1234' as Hex);
+    expect(kv.set).not.toHaveBeenCalled();
+  });
+
+  it(`KV が ${RELAY_TX_HINT_WRITE_TIMEOUT_MS} ms で答えなければ待つのをやめる (中継の応答を長く待たせない)`, async () => {
+    vi.useFakeTimers();
+    kv.set.mockReturnValueOnce(new Promise(() => undefined));
+    let done = false;
+    const write = recordRelayTxHint(137, FROM, NONCE, TX).then(() => {
+      done = true;
+    });
+    await vi.advanceTimersByTimeAsync(RELAY_TX_HINT_WRITE_TIMEOUT_MS - 1);
+    expect(done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await write;
+    expect(done).toBe(true);
   });
 
   it('KV が ok:false を返しても、投げても reject しない (中継の応答に波及させない)', async () => {
