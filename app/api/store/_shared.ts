@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import type { Address } from 'viem';
+import type { SessionSigner } from '@/lib/siwe';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import {
@@ -41,7 +42,7 @@ async function ipAllowed(req: Request, scope: string): Promise<boolean> {
 }
 
 export type StoreSellerAuth =
-  | { ok: true; address: Address }
+  | { ok: true; address: Address; signer?: SessionSigner }
   | { ok: false; response: NextResponse };
 
 /**
@@ -72,7 +73,7 @@ export async function requireStoreSeller(
   if (!addressAllowed) {
     return { ok: false, response: rateLimitedResponse() };
   }
-  return { ok: true, address: session.address };
+  return session.signer ? { ok: true, address: session.address, signer: session.signer } : { ok: true, address: session.address };
 }
 
 export function objectValue(

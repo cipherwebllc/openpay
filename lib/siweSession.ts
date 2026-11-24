@@ -12,10 +12,10 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import type { Address } from 'viem';
 import { kvGet } from '@/lib/kv';
-import { sessionCookieName, sessionKey, parseSessionRecord, isSessionToken } from '@/lib/siwe';
+import { sessionCookieName, sessionKey, parseSessionRecord, isSessionToken, type SessionSigner } from '@/lib/siwe';
 
 export type SessionReadResult =
-  | { status: 'authenticated'; address: Address }
+  | { status: 'authenticated'; address: Address; signer?: SessionSigner }
   | { status: 'missing' }
   | { status: 'storage-error' };
 
@@ -32,13 +32,14 @@ export async function readSession(): Promise<SessionReadResult> {
   const res = await kvGet(sessionKey(token));
   if (!res.ok) return { status: 'storage-error' };
   const record = parseSessionRecord(res.value);
-  return record
-    ? { status: 'authenticated', address: record.address }
-    : { status: 'missing' };
+  if (!record) return { status: 'missing' };
+  return record.signer
+    ? { status: 'authenticated', address: record.address, signer: record.signer }
+    : { status: 'authenticated', address: record.address };
 }
 
 export type RequireSessionResult =
-  | { ok: true; address: Address }
+  | { ok: true; address: Address; signer?: SessionSigner }
   | { ok: false; response: NextResponse };
 
 /** 未ログインなら 401、KV 読取障害なら 503 の NextResponse を返す。caller は
@@ -63,5 +64,7 @@ export async function requireSession(): Promise<RequireSessionResult> {
       ),
     };
   }
-  return { ok: true, address: session.address };
+  return session.signer
+    ? { ok: true, address: session.address, signer: session.signer }
+    : { ok: true, address: session.address };
 }

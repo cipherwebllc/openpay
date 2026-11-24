@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { rejectCrossOriginWrite } from '@/lib/net/crossOriginWrite';
 import { requireSession } from '@/app/api/auth/siwe/_session';
 import { storePrivateJson } from '@/app/api/store/_shared';
-import { isAdminWallet } from '@/lib/adminAuth';
+import { isAdminSession } from '@/lib/adminAuth';
 import { logger } from '@/lib/logger';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
 import { checkIpRateLimit } from '@/lib/relay/relayGuards';
@@ -39,7 +39,7 @@ export async function POST(
     session.response.headers.set('Vary', 'Cookie');
     return session.response;
   }
-  if (!isAdminWallet(session.address)) {
+  if (!isAdminSession(session)) {
     return storePrivateJson({ ok: false, error: 'forbidden' }, 403);
   }
 

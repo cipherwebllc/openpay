@@ -283,6 +283,8 @@ describe('SIWE routes', () => {
     expect(h.kvGet).toHaveBeenCalledWith('siwe:nonce:csrf1234');
     expect(h.kvDel).toHaveBeenCalledWith('siwe:nonce:csrf1234');
     expect(h.kvSet).toHaveBeenCalledOnce();
+    // 鍵の署名 (EOA) のセッションは、署名の種類 eoa を残す (運営の API はこれだけを通す・2026-11-25)。
+    expect(JSON.parse(h.kvSet.mock.calls[0][1] as string)).toEqual({ address: account.address, signer: 'eoa' });
   });
 
   // 第 9 回レビュー C-1: 署名検証の public client が CCIP-Read (EIP-3668) を追うと、7702 委任済み EOA +
@@ -478,6 +480,7 @@ describe('SIWE routes', () => {
         };
       }
 
+      // スマートウォレットの署名 (1271 / 6492 / 8010 で包んだ形) は、署名の種類 contract を残す (運営の API は通さない・2026-11-25)。
       async function expectSessionCreated(res: Response, address: Address) {
         expect(fetchSpy).not.toHaveBeenCalled();
         expect(res.status).toBe(200);
@@ -485,6 +488,7 @@ describe('SIWE routes', () => {
         expect(res.headers.get('set-cookie')).toContain('op_sess=');
         expect(h.kvDel).toHaveBeenCalledWith('siwe:nonce:ccipread1234');
         expect(h.kvSet).toHaveBeenCalledOnce();
+        expect(JSON.parse(h.kvSet.mock.calls[0][1] as string)).toEqual({ address: getAddress(address), signer: 'contract' });
       }
 
       const validatorCalls = () => calls.filter((c) => c.method === 'eth_call' && !c.tx?.to && c.tx?.data?.toLowerCase().startsWith(VALIDATOR_BYTECODE));
@@ -496,6 +500,20 @@ describe('SIWE routes', () => {
 
         await expectSessionCreated(res, DEPLOYED_WALLET);
         expect(validatorCalls()).toHaveLength(1);
+      });
+
+      // 包んだ中身の署名が SIWE のアドレス本人の鍵でも、6492 の形なら contract (包みを外して復元する変更が入っても気づく・Codex)。
+      it('ERC-6492 で包んだ本人の鍵の署名も contract', async () => {
+        const self = privateKeyToAccount(`0x${'55'.repeat(32)}`);
+        fakeChain({}, { [self.address.toLowerCase()]: self.address });
+
+        const res = await siweLogin(self.address, async (message) => serializeErc6492Signature({
+          address: FACTORY,
+          data: '0xdeadbeef',
+          signature: await self.signMessage({ message }),
+        }));
+
+        await expectSessionCreated(res, self.address);
       });
 
       it('ERC-6492 (未デプロイの wallet・factory で wrap した署名)', async () => {

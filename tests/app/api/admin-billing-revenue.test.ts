@@ -39,9 +39,17 @@ const { kvMod, store } = vi.hoisted(() => {
 });
 vi.mock('@/lib/kv', () => kvMod);
 
-const session = vi.hoisted(() => ({ address: '0x000000000000000000000000000000000000ad11' }));
+// 運営の API は鍵の署名 (EOA) で作ったセッションだけを通す (lib/adminAuth.ts の isAdminSession・2026-11-25)。
+const session = vi.hoisted(() => ({
+  address: '0x000000000000000000000000000000000000ad11',
+  signer: 'eoa' as 'eoa' | 'contract' | undefined,
+}));
 vi.mock('@/lib/siweSession', () => ({
-  requireSession: vi.fn(async () => ({ ok: true as const, address: session.address })),
+  requireSession: vi.fn(async () => ({
+    ok: true as const,
+    address: session.address,
+    ...(session.signer ? { signer: session.signer } : {}),
+  })),
 }));
 vi.mock('@/lib/logger', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -87,12 +95,26 @@ afterEach(() => {
 });
 
 describe('admin billing revenue route', () => {
+  it.each([
+    ['スマートウォレットの署名 (contract)', 'contract' as const],
+    ['署名の種類の無い古いセッション', undefined],
+  ])('許可リストのアドレスでも %s のセッションは 403', async (_label, signer) => {
+    session.signer = signer;
+    try {
+      const res = await GET(req());
+      expect(res.status).toBe(403);
+      expect(await res.json()).toMatchObject({ error: 'forbidden' });
+    } finally {
+      session.signer = 'eoa';
+    }
+  });
+
   it('非 admin → 403', async () => {
     process.env.ADMIN_WALLETS = '0x0000000000000000000000000000000000009999';
     const res = await GET(req());
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ error: 'forbidden' });
-    expect(logger.info).toHaveBeenCalledWith('admin.billing.forbidden', { wallet: ADMIN });
+    expect(logger.info).toHaveBeenCalledWith('admin.billing.forbidden', { wallet: ADMIN, signer: 'eoa' });
     expect(logger.warn).not.toHaveBeenCalled();
   });
 

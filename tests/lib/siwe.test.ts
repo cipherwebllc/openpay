@@ -77,6 +77,15 @@ describe('lib/siwe helpers', () => {
     expect(rec).toEqual({ address: getAddress(ADDR) });
   });
 
+  // 2026-11-25: セッションに署名の種類 (eoa / contract) を残す。無い・知らない値の古いセッションは種類なし (運営の API は通さない)。
+  it.each(['eoa', 'contract'] as const)('parseSessionRecord: 署名の種類 %s を返す', (signer) => {
+    expect(parseSessionRecord(JSON.stringify({ address: ADDR.toLowerCase(), signer }))).toEqual({ address: getAddress(ADDR), signer });
+  });
+
+  it('parseSessionRecord: 知らない署名の種類は種類なしとして読む (アドレスは使える)', () => {
+    expect(parseSessionRecord(JSON.stringify({ address: ADDR.toLowerCase(), signer: 'admin' }))).toEqual({ address: getAddress(ADDR) });
+  });
+
   it('parseSessionRecord: null / 壊れた JSON / 非アドレス → null', () => {
     expect(parseSessionRecord(null)).toBeNull();
     expect(parseSessionRecord('{not json')).toBeNull();

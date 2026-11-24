@@ -60,7 +60,8 @@ function imageUploadIpHashConfigured(): boolean {
 /** この段階でそのウォレットがアップロードしてよいか (段階と権限だけ・設定の有無は見ない)。 */
 export function imageUploadAllowedFor(mode: ImageUploadMode, address: string): boolean {
   if (mode === 'all') return true;
-  // ADMIN_WALLETS が空なら誰も通さない (isAdminWallet は fail-closed)。
+  // ADMIN_WALLETS が空なら誰も通さない (isAdminWallet は fail-closed)。段階 admin は公開前の試しの段階 (本番は 2026-11-20 から
+  // all = 全員) で、アップロードは運営の操作ではないので、署名の種類は見ない (運営の API の isAdminSession とは別)。
   return mode === 'admin' && isAdminWallet(address);
 }
 

@@ -1689,8 +1689,8 @@ engineering を避ける。将来 incident で demand 確認後に対処する�
 
 ### §11.8 SIWE セッションの緊急失効 (鍵・cookie が漏れたとき)
 
-- セッションは KV の `siwe:sess:<token>` (`<token>` は 64 桁 hex・値は `{address}`・期限 7 日)。address から token を引く索引は無いので、特定の address だけを消すことはできない。
-- 認可は毎リクエスト、cookie → KV を引いて address を得る (`lib/siweSession.ts`・app/ の route は再エクスポートの `app/api/auth/siwe/_session.ts` から呼ぶ)。admin はさらに `ADMIN_WALLETS` を env から毎回読んで判定する (`lib/adminAuth.ts`・空なら全拒否)。
+- セッションは KV の `siwe:sess:<token>` (`<token>` は 64 桁 hex・値は `{address, signer}`・期限 7 日)。`signer` は署名の種類で、鍵の署名 (EOA) なら `eoa`・スマートウォレットの署名 (1271 / 6492 / 8010) なら `contract` (2026-11-25 から・それより前のセッションには無い)。address から token を引く索引は無いので、特定の address だけを消すことはできない。
+- 認可は毎リクエスト、cookie → KV を引いて address (と signer) を得る (`lib/siweSession.ts`・app/ の route は再エクスポートの `app/api/auth/siwe/_session.ts` から呼ぶ)。admin はさらに **`signer` が `eoa`** で、`ADMIN_WALLETS` (env から毎回読む) に入っているかを判定する (`lib/adminAuth.ts` の `isAdminSession`・空なら全拒否)。運営者がスマートウォレットでサインインしたセッションや、2026-11-25 より前のセッションは 403 になるので、鍵のウォレットでサインインし直す。
 - 止め方 (軽い順):
   1. **admin の漏えい**: 該当 address を `ADMIN_WALLETS` から外して redeploy する。セッション自体は残るが admin API は 403 になる。一般の店主セッションには効かない。
   2. **全セッションの失効**: Upstash で `siwe:sess:*` を SCAN し、見つかった key を DEL する (全員がログアウトになり、再サインインは署名 1 回)。KV のコマンド予算 (§14.9c) があるので、SCAN は COUNT を大きめにして一度で済ませる。

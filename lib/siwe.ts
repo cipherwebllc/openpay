@@ -80,7 +80,15 @@ export function isAllowedSiweDomain(domain: string): boolean {
 }
 
 /** KV セッション値の JSON 形。address は保存時に checksum 化済。 */
-export type SessionRecord = { address: Address };
+/**
+ * セッションを作った署名の種類 (2026-11-25 外部レビュー #1)。eoa = 鍵の署名 (ECDSA) がそのアドレスに戻る = どのチェーンでも同じ
+ * 鍵が持ち主。contract = スマートウォレット (ERC-1271 / 6492 / 8010) の署名 = 署名を確かめたチェーンでしか持ち主と言えない
+ * (別のチェーンで同じアドレスを別の人が持てる種類がある)。運営の API (lib/adminAuth.ts の isAdminSession) は eoa だけを通す。
+ * この欄の無い古いセッション (この変更の前に作られたもの) は undefined = eoa とは扱わない。
+ */
+export type SessionSigner = 'eoa' | 'contract';
+
+export type SessionRecord = { address: Address; signer?: SessionSigner };
 
 /** 暗号学的乱数 32 bytes の 64hex (Web Crypto・runtime 非依存)。 */
 function randomHex32(): string {
@@ -116,7 +124,10 @@ export function parseSessionRecord(raw: string | null | undefined): SessionRecor
   if (typeof obj !== 'object' || obj === null) return null;
   const addr = (obj as { address?: unknown }).address;
   if (typeof addr !== 'string' || !isAddress(addr)) return null;
-  return { address: getAddress(addr) };
+  const signer = (obj as { signer?: unknown }).signer;
+  return signer === 'eoa' || signer === 'contract'
+    ? { address: getAddress(addr), signer }
+    : { address: getAddress(addr) };
 }
 
 export type SiweVerifyResult =
