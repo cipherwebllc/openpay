@@ -129,7 +129,7 @@ describe('AdminStoreTakedownView', () => {
     const user = await showShop('https://open-pay.jp/ja/@pssrf30ed2f66');
 
     expect(await screen.findByText('@pssrf30ed2f66 の公開中の商品（2 件）')).toBeInTheDocument();
-    expect(calls[0]).toEqual({ url: '/api/store/listings?handle=pssrf30ed2f66&limit=50&locale=ja', method: 'GET' });
+    expect(calls[0]).toEqual({ url: '/api/store/listings?handle=pssrf30ed2f66&limit=100&locale=ja', method: 'GET' });
     expect(screen.getAllByText('画像の URL: https://127.0.0.1/secret.png')).toHaveLength(2);
 
     const stop = screen.getByRole('button', { name: /の販売を止める/ });
@@ -148,7 +148,7 @@ describe('AdminStoreTakedownView', () => {
     ]);
     expect(screen.getByText('止めました')).toBeInTheDocument();
     expect(screen.getByText('止め済みでした')).toBeInTheDocument();
-    expect(calls.at(-1)).toEqual({ url: '/api/store/listings?handle=pssrf30ed2f66&limit=50&locale=ja', method: 'GET' });
+    expect(calls.at(-1)).toEqual({ url: '/api/store/listings?handle=pssrf30ed2f66&limit=100&locale=ja', method: 'GET' });
   });
 
   it('やめるを押すと送らない', async () => {
@@ -222,6 +222,8 @@ describe('AdminStoreTakedownView', () => {
     await user.click(screen.getByRole('button', { name: '止める' }));
     expect(await screen.findByText('止めました')).toBeInTheDocument();
     await waitFor(() => expect(screen.getAllByRole('checkbox')[0]).toBeDisabled());
+    // 一覧のキャッシュで残って見える行には、止めたことと、消えるまで数分かかることを出す。
+    expect(screen.getByText('止めました（一覧から消えるまで数分かかります）')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'すべて選ぶ' }));
     await user.click(screen.getByRole('button', { name: '選んだ 1 件の販売を止める' }));
     await user.click(screen.getByRole('button', { name: '止める' }));
@@ -273,7 +275,8 @@ describe('AdminStoreTakedownView', () => {
   });
 
   it('200 でも本文を読めなければ「止めました」と言わない', async () => {
-    listingResponses = [{ ok: true, items: [item(ID_A, 'SSRFProd A')] }];
+    const one = { ok: true, items: [item(ID_A, 'SSRFProd A')] };
+    listingResponses = [one, one];
     takedownStatus[ID_A] = { status: 200, body: 'unreadable' };
     const user = await showShop('@pssrf30ed2f66');
     await screen.findByText('@pssrf30ed2f66 の公開中の商品（1 件）');
@@ -282,11 +285,18 @@ describe('AdminStoreTakedownView', () => {
     await user.click(screen.getByRole('button', { name: '止める' }));
     expect(await screen.findByText(/止まったか確かめられませんでした/)).toBeInTheDocument();
     expect(screen.queryByText('止めました')).not.toBeInTheDocument();
+    // 止まったか分からない商品は、自動で読み直した同じ店の一覧で選び直せる (止めた記録には入れない)。
+    expect(await screen.findByText(/自動で読み直した下の一覧/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('checkbox')).toBeEnabled());
   });
 
-  it('401 ではサインインの状態を読み直す (サインインのボタンを出すため)', async () => {
+  it('401 ではサインインの状態を読み直し、サインインのボタンと案内を出す', async () => {
     listingResponses = [{ ok: true, items: [item(ID_A, 'SSRFProd A')] }];
     takedownStatus[ID_A] = { status: 401, body: { error: 'unauthorized' } };
+    // 読み直すとセッションが切れていたと分かる (実物の useSiweSession と同じく、次の描画で isSignedIn が false)。
+    h.siwe.refreshSession = vi.fn(async () => {
+      h.siwe.isSignedIn = false;
+    });
     const user = await showShop('@pssrf30ed2f66');
     await screen.findByText('@pssrf30ed2f66 の公開中の商品（1 件）');
     await user.click(screen.getByRole('checkbox'));
@@ -294,6 +304,31 @@ describe('AdminStoreTakedownView', () => {
     await user.click(screen.getByRole('button', { name: '止める' }));
     await screen.findByText(/サインインが切れました/);
     expect(h.siwe.refreshSession).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('button', { name: 'サインインして始める' })).toBeInTheDocument();
+    expect(screen.getByText(/サインインが切れました/)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['503 (完了を確かめられなかった)', { status: 503, body: { ok: false, error: 'storage_unavailable' } }],
+    ['送ったあとの通信の切断', 'network'],
+  ] as const)('%s は「止めました」でも「止められませんでした」でもなく、確かめられなかったと出す', async (_label, how) => {
+    listingResponses = [{ ok: true, items: [item(ID_A, 'SSRFProd A')] }];
+    if (how === 'network') {
+      const base = vi.mocked(fetch).getMockImplementation()!;
+      vi.mocked(fetch).mockImplementation(async (input, init) => {
+        if (init?.method === 'POST') throw new TypeError('network');
+        return base(input, init);
+      });
+    } else {
+      takedownStatus[ID_A] = how;
+    }
+    const user = await showShop('@pssrf30ed2f66');
+    await screen.findByText('@pssrf30ed2f66 の公開中の商品（1 件）');
+    await user.click(screen.getByRole('checkbox'));
+    await user.click(screen.getByRole('button', { name: '選んだ 1 件の販売を止める' }));
+    await user.click(screen.getByRole('button', { name: '止める' }));
+    expect(await screen.findByText(/止まったか確かめられませんでした/)).toBeInTheDocument();
+    expect(screen.queryByText(/止められませんでした。/)).not.toBeInTheDocument();
   });
 
   it('一覧を読めないときは理由を出す', async () => {

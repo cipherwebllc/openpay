@@ -76,6 +76,8 @@ function resultForStatus(status: number, body: unknown): ItemResult {
   if (status === 403) return 'forbidden';
   if (status === 429) return 'rateLimited';
   if (status === 404) return 'notFound';
+  // 503 (storage_unavailable) は API が「完了を確かめられなかった」と言う応答 (DEPLOY_CHECKLIST §16.10)。
+  if (status === 503) return 'unknown';
   return 'failed';
 }
 
@@ -104,6 +106,29 @@ export function AdminStoreTakedownView() {
     </div>
   );
 
+  const resultEntries = Object.entries(results);
+  // 結果の欄は、サインインが切れて下のサインインの分岐に入っても出す (「サインインし直して」の案内を消さない)。
+  const resultsPanel =
+    resultEntries.length > 0 ? (
+      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+        <p className="mb-2 text-sm font-semibold text-slate-900">{t('resultsTitle')}</p>
+        <ul className="space-y-1 text-sm">
+          {resultEntries.map(([id, result]) => (
+            <li key={id} className="break-all">
+              <span className="font-mono text-xs text-slate-600">{id}</span>{' '}
+              <span
+                className={
+                  result === 'stopped' || result === 'alreadyStopped' ? 'text-emerald-700' : 'text-red-600'
+                }
+              >
+                {t(`result.${result}`)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : null;
+
   if (!isConnected) {
     return (
       <section>
@@ -117,9 +142,11 @@ export function AdminStoreTakedownView() {
     return (
       <section>
         {heading}
+        {resultsPanel}
         {mismatch && <p className="mb-2 text-xs text-red-600">{t('mismatch')}</p>}
         <button
           type="button"
+          // 署名の失敗 (断った場合を含む) は握りつぶし、エラーの文は signInError で出す (WalletBadge と同じ)。
           onClick={() => void signIn(t('signInStatement')).catch(() => undefined)}
           disabled={isSigningIn}
           className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
@@ -139,7 +166,7 @@ export function AdminStoreTakedownView() {
     let items: Listing[] | null = null;
     try {
       const res = await fetch(
-        `/api/store/listings?handle=${encodeURIComponent(handle)}&limit=50&locale=ja`,
+        `/api/store/listings?handle=${encodeURIComponent(handle)}&limit=100&locale=ja`,
         { cache: 'no-store' },
       );
       const json = (await res.json().catch(() => null)) as { ok?: boolean; items?: Listing[] } | null;
@@ -200,7 +227,8 @@ export function AdminStoreTakedownView() {
         });
         result = resultForStatus(res.status, await res.json().catch(() => null));
       } catch {
-        result = 'failed';
+        // 送ったあとに通信が切れた場合は、止まったかどうか分からない。
+        result = 'unknown';
       }
       next[id] = result;
       setResults((prev) => ({ ...prev, ...next }));
@@ -211,13 +239,11 @@ export function AdminStoreTakedownView() {
       if (result === 'signIn' || result === 'forbidden' || result === 'rateLimited') break;
     }
     setSelected(new Set());
-    // 止めた商品は公開の一覧から消えるので、読み直して確かめられるようにする。読み直しが終わるまでは、
-    // 次の操作 (止める・別の店の表示) をできないままにする。
+    // 止めた商品は数分のうちに公開の一覧から消える (一覧はキャッシュされる)。止まったか分からない商品を選び直せる
+    // ように、同じ店の一覧を読み直す。読み直しが終わるまでは、次の操作 (止める・別の店の表示) をできないままにする。
     if (shownHandle) await load(shownHandle);
     setRunning(false);
   }
-
-  const resultEntries = Object.entries(results);
 
   return (
     <section>
@@ -252,27 +278,7 @@ export function AdminStoreTakedownView() {
 
       {loadError && <p className="mb-4 text-sm text-red-600">{t('loadError')}</p>}
 
-      {resultEntries.length > 0 && (
-        <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
-          <p className="mb-2 text-sm font-semibold text-slate-900">{t('resultsTitle')}</p>
-          <ul className="space-y-1 text-sm">
-            {resultEntries.map(([id, result]) => (
-              <li key={id} className="break-all">
-                <span className="font-mono text-xs text-slate-600">{id}</span>{' '}
-                <span
-                  className={
-                    result === 'stopped' || result === 'alreadyStopped'
-                      ? 'text-emerald-700'
-                      : 'text-red-600'
-                  }
-                >
-                  {t(`result.${result}`)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {resultsPanel}
 
       {listings !== null && (
         <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -300,6 +306,9 @@ export function AdminStoreTakedownView() {
                         <span className="block text-xs text-slate-600">
                           {t('price', { total: item.totalJpyc })}
                         </span>
+                        {isDone(item.id) && (
+                          <span className="block text-xs font-semibold text-emerald-700">{t('doneRow')}</span>
+                        )}
                         {item.desc && (
                           <span className="block text-xs text-slate-600 break-all">{item.desc.slice(0, 120)}</span>
                         )}
