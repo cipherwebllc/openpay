@@ -284,6 +284,36 @@ describe('checkHostedIntentSettleAdmission', () => {
     ).resolves.toBe('denied');
   });
 
+  // 2026-11-24 外部の接続元が 78 桁の数で settle を試した: settling / settled の intent の照合で buildForwarderNonce が
+  // uint256 に入らない数を符号化できずに投げ、settle の route の try の外なので 500 になっていた。一致しえないので denied。
+  describe('uint256 に入らない数は、投げずに denied', () => {
+    const OVER = 2n ** 256n;
+    const NINES_78 = BigInt('9'.repeat(78));
+    it.each(
+      (['settling', 'settled'] as const).flatMap((state) =>
+        (['merchantValue', 'feeValue', 'validAfter', 'validBefore'] as const).flatMap((field) =>
+          [OVER, NINES_78].map((value) => [state, field, value] as const),
+        ),
+      ),
+    )('%s の intent で %s が %s', async (state, field, value) => {
+      kvReturns(await intentJson(state));
+      await expect(
+        checkHostedIntentSettleAdmission({ params: params({ [field]: value }), chainId: CHAIN_ID, signature: SIGNATURE }),
+      ).resolves.toBe('denied');
+    });
+
+    it('2^256 - 1 は符号化できる (一致しないので denied・投げない)', async () => {
+      kvReturns(await intentJson('settling'));
+      await expect(
+        checkHostedIntentSettleAdmission({
+          params: params({ merchantValue: 2n ** 256n - 1n }),
+          chainId: CHAIN_ID,
+          signature: SIGNATURE,
+        }),
+      ).resolves.toBe('denied');
+    });
+  });
+
   it.each(['quoted', 'signed', 'indeterminate'] as const)(
     '%s 状態への直接 broadcast は一致していても denied',
     async (state) => {
