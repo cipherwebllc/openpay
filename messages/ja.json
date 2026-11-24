@@ -3979,7 +3979,7 @@
       "mail": "メール"
     },
     "contactValueLabel": "送り先",
-    "contactLinePlaceholder": "@openpay",
+    "contactLinePlaceholder": "@yourshop",
     "contactMailPlaceholder": "shop@example.com",
     "contactHint": "お客様の完了画面から、注文の文が入った状態でこの送り先を開きます。リンクに入るので、お店として公開している連絡先にしてください。",
     "contactLineHint": "LINE 公式アカウントだけです (個人の LINE は開けません)。友だちでないお客様には、先に友だち追加が出ます。",
