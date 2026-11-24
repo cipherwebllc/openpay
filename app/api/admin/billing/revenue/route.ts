@@ -32,7 +32,8 @@ export async function GET(req: Request): Promise<NextResponse> {
   if (!session.ok) return session.response;
   if (!isAdminSession(session)) {
     // 無料 SIWE session の拒否連打を Sentry quota 消費へ波及させない。
-    logger.info('admin.billing.forbidden', { wallet: session.address });
+    // signer を残すと、許可リストの運営者が EOA でないセッション (古い・スマートウォレット) で断られたのか分かる。
+    logger.info('admin.billing.forbidden', { wallet: session.address, signer: session.signer ?? null });
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   }
 

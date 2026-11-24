@@ -114,7 +114,7 @@ describe('admin billing revenue route', () => {
     const res = await GET(req());
     expect(res.status).toBe(403);
     expect(await res.json()).toMatchObject({ error: 'forbidden' });
-    expect(logger.info).toHaveBeenCalledWith('admin.billing.forbidden', { wallet: ADMIN });
+    expect(logger.info).toHaveBeenCalledWith('admin.billing.forbidden', { wallet: ADMIN, signer: 'eoa' });
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
