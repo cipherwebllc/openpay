@@ -3067,6 +3067,11 @@ query の percent encoding を含む例は fixture の measurements を参照す
 ストアの公開 flag が OFF でも実行できる。対象の商品 ID・権利者申告を運営側で確認し、
 同じ OpenPay origin にログインしたブラウザの DevTools で実行する（cookie・秘密鍵はコピーしない）。
 
+**画面から止める (2026-11-25 から)**: `/ja/admin/store` で運営の wallet でサインインし、店のページの URL か `@名前` を
+入れて「商品を表示」→ 商品を選ぶ →「選んだ N 件の販売を止める」→ 確かめて「止める」。同じ API を 1 件ずつ呼び、結果を出す。
+公開の一覧 (`/api/store/listings`・Store の新しい 200 件) に出ている商品だけが出るので、出ない商品 (古い商品・Store の
+flag が OFF のとき等) は下の DevTools の手順で止める。止めた商品が公開の一覧から消えるまで数分かかる (一覧のキャッシュ)。
+
 ```js
 const productId = 'h_対象商品の32桁hex'; // 対象 ID に置換
 const response = await fetch(`/api/admin/store/products/${encodeURIComponent(productId)}/takedown`, {

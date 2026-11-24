@@ -13,6 +13,8 @@ const SHARED_ROW = '+ First Load JS shared by all                      171 kB';
 // 予算は実測 + 5。表に無い route は 300 kB を超えるまで落ちなかったので、/[locale] のページを全部載せた。
 const F11_PAGES: Array<[string, number]> = [
   ['/[locale]/admin/billing', 259],
+  // 2026-11-25 運営の販売を止める画面を新設 (手元の build 240 + 5)。
+  ['/[locale]/admin/store', 240],
   ['/[locale]/directory', 236],
   ['/[locale]/disclaimer', 214],
   ['/[locale]/explore', 243],
@@ -97,6 +99,7 @@ Route (app)                                          Size  First Load JS
 ├   └ /en
 ├ ƒ /[locale]/[handle]                              25 kB         442 kB
 ├ ● /[locale]/admin/billing                       5.68 kB         259 kB
+├ ● /[locale]/admin/store                         4.99 kB         240 kB
 ├ ● /[locale]/agent                               19.7 kB         302 kB
 ├   ├ /ja/agent
 ├   └ /en/agent

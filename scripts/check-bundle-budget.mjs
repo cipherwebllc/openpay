@@ -142,6 +142,7 @@ const BUDGETS_KB = {
   // 実測 = main b90757b9 の CI (ci.yml の本番 flag build) の Route 表 (各行の注記) に各 +5。手元 (macOS) の build は
   // 同じ commit で 0〜2 kB 大きい。
   '/[locale]/admin/billing': 264, // 実測 259
+  '/[locale]/admin/store': 245, // 2026-11-25 運営の販売を止める画面。手元の build 240 (CI は 0〜2 kB 小さい) + 5
   '/[locale]/directory': 241, // 実測 236
   '/[locale]/disclaimer': 219, // 実測 214
   '/[locale]/explore': 248, // 実測 243
