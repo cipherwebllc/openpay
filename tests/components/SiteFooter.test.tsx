@@ -91,11 +91,12 @@ describe('SiteFooter', () => {
     expect(anchors.slice(0, 2).map((a) => a.getAttribute('href'))).toEqual(['/guide', '/pricing']);
   });
 
-  // お問い合わせ (LINE・2026-11-25) は お問い合わせ (Discord) の直前。新しいタブで開く・名前は見えている文字。
+  // お問い合わせは LINE 公式アカウントだけ (2026-11-25 user 裁定・前は Discord)。リンク列の最後・新しいタブ・名前は見えている文字。
+  // Discord は下の SNS 行 (アイコン) に残る。
   it.each([
     ['ja', 'お問い合わせ (LINE)', 'お問い合わせ (Discord)'],
     ['en', 'Contact (LINE)', 'Contact (Discord)'],
-  ] as const)('%s: お問い合わせ (LINE) → LINE 公式アカウント・Discord の直前', (locale, name, discord) => {
+  ] as const)('%s: お問い合わせ (LINE) → LINE 公式アカウント (列の最後)・お問い合わせ (Discord) は無い', (locale, name, discord) => {
     renderWithIntl(<SiteFooter />, { locale });
     const link = screen.getByRole('link', { name });
     expect(link).toHaveAttribute('href', OPENPAY_LINE_URL);
@@ -103,7 +104,8 @@ describe('SiteFooter', () => {
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(link).not.toHaveAttribute('aria-label');
     const anchors: HTMLElement[] = Array.from(link.closest('nav')!.querySelectorAll('a'));
-    expect(anchors.indexOf(link)).toBe(anchors.indexOf(screen.getByRole('link', { name: discord })) - 1);
+    expect(anchors.at(-1)).toBe(link);
+    expect(screen.queryByRole('link', { name: discord })).toBeNull();
   });
 
   it('事業者名と copyright を表示する', () => {
@@ -262,7 +264,7 @@ describe('SiteFooter', () => {
   });
 
   // 全ページのフッターから技術の羅列を外した (2026-10-25 user 裁定・技術は運用透明性ページと GitHub にある)。
-  describe('技術の羅列を出さない・お問い合わせ (Discord)', () => {
+  describe('技術の羅列を出さない・お問い合わせ (LINE)', () => {
     it.each(['ja', 'en'] as const)('%s: 技術ラベルの <details> が無い', (locale) => {
       const { container } = renderWithIntl(<SiteFooter />, { locale });
       const footer = screen.getByRole('contentinfo');
@@ -274,16 +276,16 @@ describe('SiteFooter', () => {
     });
 
     it.each([
-      ['ja', 'お問い合わせ (Discord)'],
-      ['en', 'Contact (Discord)'],
-    ] as const)('%s: リンク列にお問い合わせがあり、行き先は SNS 行の Discord と同じ URL (メールアドレスは載せない)', (locale, name) => {
+      ['ja', 'お問い合わせ (LINE)'],
+      ['en', 'Contact (LINE)'],
+    ] as const)('%s: リンク列にお問い合わせがあり、行き先は SNS 行の LINE と同じ URL (メールアドレスは載せない)', (locale, name) => {
       renderWithIntl(<SiteFooter />, { locale });
       const contact = screen.getByRole('link', { name });
-      expect(contact).toHaveAttribute('href', 'https://discord.gg/Cfywb3aNWg');
+      expect(contact).toHaveAttribute('href', 'https://line.me/R/ti/p/@904kjwjn');
       expect(contact).toHaveAttribute('target', '_blank');
       expect(contact).toHaveAttribute('rel', 'noopener noreferrer');
       expect(contact.closest('nav')).not.toBeNull();
-      const icon = screen.getByRole('link', { name: locale === 'ja' ? 'OpenPay の Discord' : 'OpenPay on Discord' });
+      const icon = screen.getByRole('link', { name: locale === 'ja' ? 'OpenPay の LINE 公式アカウント' : 'OpenPay on LINE' });
       expect(icon.getAttribute('href')).toBe(contact.getAttribute('href'));
       expect(screen.getByRole('contentinfo').textContent).not.toMatch(/@[a-z0-9-]+\.(com|jp)/i);
     });
@@ -303,10 +305,17 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
       ).toBeInTheDocument();
       // OpenPay 宣伝味の行は出さない
       // SNS・ソースの段 (アイコンだけで文字が無い) はリンクの名前で確かめる。
-      for (const name of ['OpenPay の X (旧 Twitter)', 'OpenPay の YouTube', 'note (OpenPay マガジン)', 'OpenPay の Discord', 'ソースコード (GitHub)']) {
+      for (const name of [
+        'OpenPay の X (旧 Twitter)',
+        'OpenPay の YouTube',
+        'note (OpenPay マガジン)',
+        'OpenPay の LINE 公式アカウント',
+        'OpenPay の Discord',
+        'ソースコード (GitHub)',
+      ]) {
         expect(screen.queryByRole('link', { name })).toBeNull();
       }
-      expect(screen.queryByRole('link', { name: 'お問い合わせ (Discord)' })).toBeNull();
+      expect(screen.queryByRole('link', { name: 'お問い合わせ (LINE)' })).toBeNull();
       // スポンサー・広告の募集も OpenPay 側の導線なので出さない。
       expect(screen.queryByRole('link', { name: 'スポンサー・広告募集' })).toBeNull();
       expect(screen.queryByRole('link', { name: 'AIストア' })).toBeNull();
@@ -326,7 +335,7 @@ describe('SiteFooter — @handle compact (受取ページ磨き上げ P3)', () =
     pathnameMock.value = '/ja/create';
     try {
       renderWithIntl(<SiteFooter />, { locale: 'ja' });
-      expect(screen.getByRole('link', { name: 'お問い合わせ (Discord)' })).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'お問い合わせ (LINE)' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'スポンサー・広告募集' })).toHaveAttribute('href', '/sponsors');
       expect(screen.getByRole('link', { name: 'OpenPay の YouTube' })).toBeInTheDocument();
       expect(screen.getByRole('link', { name: 'ガイド' })).toHaveAttribute('href', '/guide');

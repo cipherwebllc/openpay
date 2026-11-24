@@ -2178,8 +2178,7 @@
       "discovery": "AIストア",
       "storeLibrary": "購入済みライブラリ",
       "sponsors": "スポンサー・広告募集",
-      "contactLine": "お問い合わせ (LINE)",
-      "contact": "お問い合わせ (Discord)"
+      "contact": "お問い合わせ (LINE)"
     },
     "sourceLink": "ソースコード (GitHub)",
     "xLink": "OpenPay の X (旧 Twitter)",

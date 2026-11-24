@@ -1,6 +1,6 @@
 // 全 page 共通の footer。app/[locale]/layout.tsx から 1 度だけ render される。
 // 役割は (1) legal page (/terms /privacy /disclaimer) への導線、(2) 事業者表記
-// + copyright、(3) お問い合わせ (LINE・Discord)・スポンサー・広告の募集 (/sponsors) と SNS 行。技術スタックの羅列はここに置かない
+// + copyright、(3) お問い合わせ (LINE)・スポンサー・広告の募集 (/sponsors) と SNS 行。技術スタックの羅列はここに置かない
 // (技術は運用透明性ページと GitHub にある・2026-10-25 user 裁定)。
 //
 // QR ポスター印刷時は不要なので `print:hidden` で全体を非表示にする。
@@ -23,7 +23,8 @@ import {
   YOUTUBE_ICON_PATH,
 } from '@/lib/socialIconPaths';
 
-// 公開のメールアドレスは載せず、お問い合わせの行き先は LINE (2026-11-25 から) と Discord (2026-10-25 user 裁定)。SNS 行の Discord と同じ URL を共有する。
+// 公開のメールアドレスは載せず、お問い合わせの行き先は LINE 公式アカウント (2026-11-25 user 裁定・前は Discord = 2026-10-25)。
+// SNS 行の LINE と同じ URL を共有する。Discord は SNS 行に残る。
 // LINE・Discord・X の URL は lib/officialLinks.ts (スポンサー・広告掲載のご案内の問い合わせのボタンと同じ値・二重に持たない)。
 //
 // 最下段の SNS・ソースのアイコン行。アイコンは @handle の SNS 行と同じ simple-icons (lib/socialIconPaths.ts)。
@@ -135,21 +136,11 @@ export function SiteFooter() {
             {t('links.sponsors')}
           </Link>
         )}
-        {/* お問い合わせ (LINE・2026-11-25 user が LINE 公式アカウントを作成) と (Discord)。@handle ページでは SNS 行と
-            同じく OpenPay 側の導線なので出さない。 */}
+        {/* お問い合わせ (LINE)。2026-11-25 user 裁定で Discord から LINE 公式アカウントへ (Discord は下の SNS 行に残る)。
+            @handle ページでは SNS 行と同じく OpenPay 側の導線なので出さない。 */}
         {!onHandlePage && (
           <a
             href={OPENPAY_LINE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-slate-700 hover:underline"
-          >
-            {t('links.contactLine')}
-          </a>
-        )}
-        {!onHandlePage && (
-          <a
-            href={OPENPAY_DISCORD_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-slate-700 hover:underline"
