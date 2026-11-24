@@ -315,7 +315,8 @@ describe('relay status: 中継の tx の控え (本物の relayTxHint と KV)', 
   });
 
   it('遡り幅 (10,000 ブロック) より古い支払いでも、控えがあれば settled (控えが無ければ indeterminate)', async () => {
-    const oldValidBefore = ts(5_000n) + 1230n;
+    chainState.logBlock = 5_000n; // 最新 (20,700) から 15,700 ブロック前 = 遡り幅の外の支払い
+    const oldValidBefore = ts(chainState.logBlock) + 1230n;
     expect(await (await POST(nonceLookup(NONCE, oldValidBefore))).json()).toEqual({ ok: true, state: 'indeterminate' });
 
     putHint();

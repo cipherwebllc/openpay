@@ -45,7 +45,7 @@ vi.mock('viem', async (importOriginal) => ({
 }));
 vi.mock('@/lib/chains', () => ({
   chainObjectForId: () => ({ id: 80002 }),
-  transportForChain: () => ({}),
+  transportForChain: vi.fn(() => ({})),
 }));
 vi.mock('@/lib/env', () => ({
   env: {
@@ -124,6 +124,7 @@ import {
 } from '@/lib/relay/relayProvider';
 import { recoverTransferAuthorizationSigner } from '@/lib/jpycEip3009';
 import { readRelayTxHint } from '@/lib/relay/relayTxHint';
+import { transportForChain } from '@/lib/chains';
 import { logger } from '@/lib/logger';
 import { POST } from '@/app/api/relay/jpyc/status/route';
 
@@ -824,6 +825,8 @@ describe('中継の tx の控え (冪等の記録が消えた後)', () => {
       expect(h.getReceipt).toHaveBeenCalledExactlyOnceWith({ hash: HINT });
       expect(findAuthorizationUsedTransactionHash).not.toHaveBeenCalled();
       expect(logger.info).toHaveBeenCalledWith('relay.jpyc.status.settled_by_tx_hint', { chainId: 80002 });
+      // 控えの receipt は 1 回だけ・2 秒まで (再試行で止まらず、今の経路へ進める)
+      expect(transportForChain).toHaveBeenCalledExactlyOnceWith(80002, { timeout: 2_000, retryCount: 0 });
     },
   );
 
@@ -869,6 +872,13 @@ describe('中継の tx の控え (冪等の記録が消えた後)', () => {
     h.receipts.set(HINT, { status: 'reverted', logs: [] });
     const res = await POST(req(nonceIntent()));
     expect(await res.json()).toEqual({ ok: true, state: 'indeterminate' });
+  });
+
+  it('冪等の記録の hash の receipt は従来どおりの transport (期限・再試行は既定) で読む', async () => {
+    h.used = true;
+    h.idem = { state: 'hash', txHash: HASH };
+    await POST(req());
+    expect(transportForChain).toHaveBeenCalledExactlyOnceWith(80002, undefined);
   });
 
   it('控えが無ければ今と同じ経路 (getLogs) で探す', async () => {

@@ -32,6 +32,8 @@ const { kvMod, store } = vi.hoisted(() => {
     setFailPrefix: null as string | null,
     // setThrowPrefix: この prefix で始まるキーへの SET だけを例外にする (控えの書き込みの例外の隔離を確かめる)。
     setThrowPrefix: null as string | null,
+    // setHangPrefix: この prefix で始まるキーへの SET を返さない (KV が答えない)。
+    setHangPrefix: null as string | null,
   };
   const kvMod = {
     isKvConfigured: () => flags.kvConfigured,
@@ -46,6 +48,7 @@ const { kvMod, store } = vi.hoisted(() => {
     ) => {
       setCalls.push({ key: k, value: v, opts: { ...opts } });
       if (flags.setThrowPrefix && k.startsWith(flags.setThrowPrefix)) throw new Error('kv boom');
+      if (flags.setHangPrefix && k.startsWith(flags.setHangPrefix)) return new Promise<never>(() => undefined);
       if (flags.setFailPrefix && k.startsWith(flags.setFailPrefix)) {
         return { ok: false as const, reason: 'network_error' as const };
       }
@@ -160,6 +163,7 @@ beforeEach(() => {
   store.flags.getOk = true;
   store.flags.setFailPrefix = null;
   store.flags.setThrowPrefix = null;
+  store.flags.setHangPrefix = null;
 });
 
 afterEach(() => {
@@ -714,6 +718,14 @@ describe('決済 relay の tx の控え (relay:txhint:・7 日)', () => {
     await expect(makeIdempotency('relay:idem:').recordRelayHash(137, FROM, NONCE, TX)).resolves.toBeUndefined();
     expect(store.vals.get(idemKey)).toBe(TX);
     expect(store.vals.has(hintKey)).toBe(false);
+  });
+
+  it('控えの書き込みが返ってこなくても、recordRelayHash は控えを待たずに終わる (中継の記録・応答を遅らせない)', async () => {
+    // 控えの書き込みの順番は鍵ごとにプロセスの中で続くので、ほかのテストと別の nonce を使う。
+    const HANG_NONCE = ('0x' + 'e'.repeat(64)) as Hex;
+    store.flags.setHangPrefix = 'relay:txhint:';
+    await expect(makeIdempotency('relay:idem:').recordRelayHash(137, FROM, HANG_NONCE, TX)).resolves.toBeUndefined();
+    expect(store.vals.get(`relay:idem:137:${FROM.toLowerCase()}:${HANG_NONCE}`)).toBe(TX);
   });
 
   it('控えだけが残っていても claimIdempotency は first・readIdempotency は missing (冪等の記録の意味を変えない)', async () => {

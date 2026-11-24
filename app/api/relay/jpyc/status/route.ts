@@ -14,7 +14,7 @@ import {
   type Address,
   type Hex,
 } from 'viem';
-import { chainObjectForId, transportForChain } from '@/lib/chains';
+import { chainObjectForId, transportForChain, type TransportOptions } from '@/lib/chains';
 import { env } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { clientIp, hashIpBucket } from '@/lib/net/ipHash';
@@ -183,7 +183,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     // 控えが無い・読めない・receipt が意図と合わないときは、今までどおり下で探す。
     if (idem.state === 'missing') {
       const hinted = await readRelayTxHint(parsed.chainId, parsed.from, parsed.nonce);
-      if (hinted && await receiptMatchesIntent(parsed, token, hinted)) {
+      if (hinted && await receiptMatchesIntent(parsed, token, hinted, TX_HINT_RECEIPT_TRANSPORT)) {
         // 本番で控えが効いているか (getLogs を使わずに解けたか) を数えられるようにする。
         logger.info('relay.jpyc.status.settled_by_tx_hint', { chainId: parsed.chainId });
         return json({ ok: true, state: 'settled', txHash: hinted });
@@ -217,16 +217,28 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 }
 
+/**
+ * 控えの receipt の読み取りは 1 回だけ・2 秒まで (RPC の再試行や Retry-After で止まらず、端末の照会の期限 10 秒・route の
+ * 15 秒のうちに今の経路 (getLogs) へ進めるようにする)。
+ */
+const TX_HINT_RECEIPT_TRANSPORT: TransportOptions = { timeout: 2_000, retryCount: 0 };
+
 const AUTHORIZATION_TRANSFER_EVENTS = parseAbi([
   'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
   'event Transfer(address indexed from, address indexed to, uint256 value)',
 ]);
 
-async function receiptMatchesIntent(parsed: ParsedIntent, token: Address, txHash: Hex): Promise<boolean> {
+// transport を渡すのは控え (relay:txhint:) の照会だけ。省略は従来どおりの transport (再試行・期限は viem の既定)。
+async function receiptMatchesIntent(
+  parsed: ParsedIntent,
+  token: Address,
+  txHash: Hex,
+  transportOptions?: TransportOptions,
+): Promise<boolean> {
   try {
     const chain = chainObjectForId(parsed.chainId);
     if (!chain) return false;
-    const client = createPublicClient({ chain, transport: transportForChain(parsed.chainId) });
+    const client = createPublicClient({ chain, transport: transportForChain(parsed.chainId, transportOptions) });
     const receipt = await client.getTransactionReceipt({ hash: txHash });
     if (receipt.status !== 'success') return false;
 

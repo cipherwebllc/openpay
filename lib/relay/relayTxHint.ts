@@ -10,6 +10,7 @@
 // unused に戻って払い直せる)。冪等の記録 (claim・重複 POST・注文の予約) とは別の鍵にし、その意味を変えない。
 
 import type { Address, Hex } from 'viem';
+import { after } from 'next/server';
 import { isKvConfigured, kvGet, kvSet } from '@/lib/kv';
 
 /** 控えを書く冪等の名前空間。status (app/api/relay/jpyc/status) が読む決済 relay のものだけ。 */
@@ -21,41 +22,50 @@ export const RELAY_TX_HINT_TTL_SEC = 7 * 24 * 60 * 60;
  * 使い切らせず、今の経路 (getLogs) に落とす。
  */
 export const RELAY_TX_HINT_READ_TIMEOUT_MS = 1_200;
-/**
- * 控えの書き込みを待つ上限 (ミリ秒)。中継は冪等の記録と並行に控えを書いて両方を待つので、KV の片方だけが遅いときに
- * 中継の応答 (broadcast 済みの支払いの結果) を長く待たせない。時間切れのときは待つのをやめるだけ (書き込みは続く)。
- */
-export const RELAY_TX_HINT_WRITE_TIMEOUT_MS = 1_000;
-
 const TX_HASH_RE = /^0x[0-9a-fA-F]{64}$/;
 
 export function relayTxHintKey(chainId: number, from: Address, nonce: Hex): string {
   return `relay:txhint:${chainId}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
 }
 
+// 同じ鍵への書き込みを、このプロセスの中で送った順に 1 つずつ送る (broadcast 直後の hash の SET が遅れて、置換後の
+// hash の SET より後に届いて上書きするのを防ぐ・中継は 1 件の支払いを 1 つの関数の中で記録する)。
+const writeChains = new Map<string, Promise<void>>();
+
 /**
- * 控えを書く (上書き・置換の tx は最新が勝つ)。reject せず、RELAY_TX_HINT_WRITE_TIMEOUT_MS より長くは待たない。
+ * 控えを書く (上書き・置換の tx は最新が勝つ)。reject しない。同じ鍵への前の書き込みが終わってから送る。
  * tx hash の形でない値は書かない (先に書いた正しい控えを上書きしない)。
  */
-export async function recordRelayTxHint(
-  chainId: number,
-  from: Address,
-  nonce: Hex,
-  txHash: Hex,
-): Promise<void> {
-  if (!TX_HASH_RE.test(txHash)) return;
-  let timer: ReturnType<typeof setTimeout> | undefined;
+export function recordRelayTxHint(chainId: number, from: Address, nonce: Hex, txHash: Hex): Promise<void> {
+  if (!TX_HASH_RE.test(txHash)) return Promise.resolve();
+  const key = relayTxHintKey(chainId, from, nonce);
+  const previous = writeChains.get(key) ?? Promise.resolve();
+  const write = previous.then(async () => {
+    try {
+      await kvSet(key, txHash, { ttlSec: RELAY_TX_HINT_TTL_SEC });
+    } catch {
+      // 控えの書き込みの失敗で、broadcast 済みの中継を失敗にしない (控えが無くても status は今の経路で探す)。
+    }
+  });
+  writeChains.set(key, write);
+  void write.then(() => {
+    if (writeChains.get(key) === write) writeChains.delete(key);
+  });
+  return write;
+}
+
+/**
+ * 控えを書き始め、待たずに戻る (中継の冪等の記録・共有 claim の記録・poll・応答を控えの書き込みで遅らせない)。
+ * 応答の後も書き終えるまで関数を止めないよう after() に渡す (掟 12)。リクエストの外 (テスト等) では after() が投げるので、
+ * 書き込みはそのまま進める。
+ */
+export function scheduleRelayTxHint(chainId: number, from: Address, nonce: Hex, txHash: Hex): void {
+  const write = recordRelayTxHint(chainId, from, nonce, txHash);
   try {
-    await Promise.race([
-      kvSet(relayTxHintKey(chainId, from, nonce), txHash, { ttlSec: RELAY_TX_HINT_TTL_SEC }),
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, RELAY_TX_HINT_WRITE_TIMEOUT_MS);
-      }),
-    ]);
+    // 書き込みはもう始まっている。after() には待つための関数を渡す (応答の後に、終わるまで関数を止めない)。
+    after(() => write);
   } catch {
-    // 控えの書き込みの失敗で、broadcast 済みの中継の応答を失敗にしない (控えが無くても status は今の経路で探す)。
-  } finally {
-    clearTimeout(timer);
+    void write;
   }
 }
 
