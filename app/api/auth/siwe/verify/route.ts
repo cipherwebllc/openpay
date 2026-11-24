@@ -17,6 +17,7 @@ import {
   sessionCookieName,
   SESSION_TTL_SEC,
   isAllowedSiweDomain,
+  isZeroDataVerificationError,
   newSessionToken,
   nonceKey,
   sessionKey,
@@ -85,13 +86,24 @@ export async function POST(req: Request): Promise<NextResponse> {
           // 第 9 回レビュー C-1)。false なら revert はただの検証失敗 = 401 invalid_signature になる。
           ccipRead: false,
         });
-        return verifySiweMessage(client, {
-          message,
-          signature,
-          address,
-          domain,
-          nonce,
-        });
+        try {
+          return await verifySiweMessage(client, {
+            message,
+            signature,
+            address,
+            domain,
+            nonce,
+          });
+        } catch (error) {
+          // スマートアカウントの署名 (ERC-8010 等) の検証で chain の呼び出しが空 (0x) を返して読めないときは、送り直しても
+          // 同じなので検証失敗 = 401 invalid_signature にする (503 は「あとで送り直して」と伝わり、Sentry の error にも
+          // なっていた・2026-11-23)。通信の失敗などはこれまでどおり下の catch で 503。
+          if (isZeroDataVerificationError(error)) {
+            logger.info('siwe.verify.zero_data', { chainId });
+            return false;
+          }
+          throw error;
+        }
       },
       // 存在だけを読む (消費は署名検証の後の DEL)。KV 障害は false = nonce_invalid (consume と同じ扱い)。
       nonceExists: async (nonce) => {

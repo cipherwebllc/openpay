@@ -386,6 +386,32 @@ describe('SIWE routes', () => {
       expect(h.kvSet).not.toHaveBeenCalled();
     });
 
+    // 2026-11-23 本番 (siwe.verify.unexpected「Cannot decode zero data ("0x")」): ERC-8010 (7702 委任) の署名の検証で、
+    // chain の呼び出しが空 (0x) を返して結果を読めないときは、送り直しても同じなので 401 invalid_signature にする
+    // (503 だと「あとで送り直して」と伝わり、Sentry の error にもなっていた)。通信の失敗は上のとおり 503 のまま。
+    it.each([
+      ['委任前 (aggregate3 の deployless 呼び出し)', '0x'],
+      ['委任済み (isValidSignature の呼び出し)', `0xef0100${DELEGATE.slice(2)}`],
+    ])('%s で chain の呼び出しが空 (0x) なら 401 invalid_signature (Sentry の error にしない)', async (_label, code) => {
+      h.rpc = async (args) => {
+        if (args.method === 'eth_getCode') return code;
+        if (args.method === 'eth_call') return '0x';
+        throw new Error('unexpected rpc in test: ' + args.method);
+      };
+      vi.mocked(Sentry.captureMessage).mockClear();
+      vi.mocked(Sentry.captureException).mockClear();
+
+      const res = await attackerLogin();
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_signature' });
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(h.kvDel).not.toHaveBeenCalled();
+      expect(h.kvSet).not.toHaveBeenCalled();
+      expect(Sentry.captureMessage).not.toHaveBeenCalled();
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+    });
+
     // 回帰: ccipRead:false のまま、オンチェーンで完結するスマートウォレットの署名 (ERC-1271 / 6492 / 8010) は通る。
     // RPC の応答だけを模擬し、viem の verifySiweMessage → verifyHash の実際の経路を通す。模擬する wallet の
     // isValidSignature(hash, sig) は「ecrecover(hash, sig) が owner のときだけ magic value」(よくある owner 型)。
