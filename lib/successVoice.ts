@@ -1,4 +1,5 @@
-// 決済完了の声「オープンペイ」の読み込みと再生 (lib/successChime.ts から、支払いボタンと完了のときにだけ動的 import する)。
+// 決済完了の声「オープンペイ」の読み込みと再生。lib/successChime.ts からは支払いボタンと完了のときにだけ動的 import する。
+// 完了画面 (components/SuccessOverlay.tsx) は静的に読む (触れたときに同期で鳴らすため・完了画面自体が next/dynamic)。
 // 支払いの 4 ページ (/pay・/checkout・/[handle]・/tip) の First Load JS に入れないため、別の chunk に分けた
 // (2026-11-24・bundle の予算がちょうど上限になったので user 裁定「先に声の読み込みを分けて軽くする」)。
 //
@@ -80,6 +81,46 @@ export function loadVoice(c: AudioContext): Promise<AudioBuffer | null> {
   });
   voiceLoading = loading;
   return loading;
+}
+
+/** audio 要素で鳴らす声。result は鳴らし始めたら true・断られた・止めた・鳴らせなかったら false (reject しない)。 */
+export type VoicePlayback = { result: Promise<boolean>; stop: () => void };
+
+/**
+ * 画面に触れたとき (user gesture の中で同期に呼ぶ) に、audio 要素で声を 1 回鳴らす。stop で止める (読み込み中に完了音を
+ * 消したとき、後から鳴らさない)。
+ *
+ * iPhone は、ほかのアプリ (HashPort 等) から戻った後の Web Audio を「running」のまま時計を止めて無音にする。作り直した
+ * AudioContext も、触れたときに resume しても同じだった。鳴ったのは、触れたときの audio 要素だけ (2026-11-24 iOS 27.2 の
+ * ホーム画面のアプリで実測・components/SuccessOverlay.tsx の watchChimeSilence)。
+ */
+export function playVoiceElement(): VoicePlayback {
+  let audio: HTMLAudioElement | null = null;
+  const stop = () => {
+    try {
+      audio?.pause();
+    } catch {
+      /* noop: 止められなくても完了画面の操作に波及させない */
+    }
+  };
+  try {
+    audio = new Audio(VOICE_URL);
+    // iPhone は audio 要素の volume を変えられない (いつも 1) ので、iPhone ではこの道の声は Web Audio の道より大きい。
+    audio.volume = VOICE_GAIN;
+    const played = audio.play() as Promise<void> | undefined;
+    // 古いブラウザの play() は Promise を返さない (呼べたら鳴らし始めたとみなす)。
+    if (!played || typeof played.then !== 'function') return { result: Promise.resolve(true), stop };
+    return {
+      result: played.then(
+        () => true,
+        () => false,
+      ),
+      stop,
+    };
+  } catch {
+    // audio 要素を作れない・play が投げるときも、完了画面の操作に波及させない (呼び出し側が合成チャイムか次の機会に回す)。
+    return { result: Promise.resolve(false), stop };
+  }
 }
 
 /** 声を 1 回鳴らす。鳴らせなかったら false (呼び出し側が合成チャイムに切り替える)。 */
