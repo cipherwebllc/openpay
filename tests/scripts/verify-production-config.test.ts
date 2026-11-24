@@ -22,10 +22,11 @@ import { PIMLICO_BALANCE_HEADER } from '../../scripts/lib/pimlico-balance-output
 const NOW = Date.parse('2026-07-25T12:00:00.000Z');
 
 describe('assessReverifyRun (予備の GitHub トリガー)', () => {
-  it('鮮度の基準は GitHub の schedule の実測 (2〜7 時間おき) に合わせた 8 時間', () => {
+  it('鮮度の基準は GitHub の schedule の実測 (最大 11.8 時間おき) に余裕を持たせた 16 時間', () => {
     // 3 時間では実測間隔の 76% で fail し、本当の停止・secret 不一致と区別できなかった (2026-09-28)。
+    // 8 時間でも 2026-11-12〜24 の間隔の 11/39 で fail した (平均 7.1 時間・最大 11.8 時間)。
     // 毎時かどうかは本番の最後の成功 (assessReverifyFreshness) で見るので、こちらは締めない。
-    expect(REVERIFY_GITHUB_RUN_MAX_AGE_MS).toBe(8 * 60 * 60 * 1000);
+    expect(REVERIFY_GITHUB_RUN_MAX_AGE_MS).toBe(16 * 60 * 60 * 1000);
   });
 
   it('基準の時間内・success・実 HTTP 200 出力だけを healthy とする', () => {
@@ -69,7 +70,7 @@ describe('assessReverifyFreshness (本番の最後の正常な batch)', () => {
   const at = (ms: number) => new Date(ms).toISOString();
 
   it('基準は毎時の run が 2 回続けて失敗するまで待つ 3 時間', () => {
-    // 主トリガーが Vercel Cron (毎時 0 分・分単位で正確) になったので、GitHub の実測の遅れに合わせた 8 時間は要らない。
+    // 主トリガーが Vercel Cron (毎時 0 分・分単位で正確) になったので、GitHub の実測の遅れに合わせた予備の基準 (16 時間) は要らない。
     expect(REVERIFY_MAX_AGE_MS).toBe(3 * 60 * 60 * 1000);
   });
 

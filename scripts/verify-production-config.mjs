@@ -161,7 +161,7 @@ for (const [name, path] of [
   });
 }
 
-// --- (6b) 予備の reverify-cron.yml が直近 8 時間内に HTTP 200 で完走したか (GitHub の schedule は毎時指定でも実測 2〜7 時間おき) ---
+// --- (6b) 予備の reverify-cron.yml が直近 16 時間内に HTTP 200 で完走したか (GitHub の schedule は毎時指定でも実測は最大 11.8 時間おき) ---
 // secret 欠落・ローテーション不一致・schedule 停止で予備が黙って止まり、主 (Vercel Cron) が止まったときの受け皿
 // (実測 2〜7 時間おきで追いつく) が無くなる前に、read-only の Actions 履歴と実 HTTP 出力から operator 設定不全を検出する。
 {
