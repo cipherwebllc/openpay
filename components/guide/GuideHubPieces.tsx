@@ -1,7 +1,7 @@
 // /guide ハブ (「OpenPay でできること」) のグループのパネル (plans/guide-hub-sidebar.md §2.5・plans/guide-ux-polish-2.md P2)。
 // page.tsx に規定外の export を作らないため部品に分ける (掟 3)。hook なしの同期部品 (jsdom で描画テスト可)。
 // Hero 画像は使わず lucide のアイコンだけ (server で SVG になり client JS は増えない)。
-// 料金 (ガイド以外のページ) の行は「補足」の中に置く。
+// 料金 (ガイド以外のページ) の行は「補足」の中に置く。最後に「導入の相談は LINE で」(GuideHubContact)。
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
@@ -24,7 +24,10 @@ import {
   Wallet,
   type LucideIcon,
 } from 'lucide-react';
+import { LANDING_PRIMARY } from '@/components/LandingControls';
 import { STEP_BADGE } from '@/components/guide/PosGuidePieces';
+import { OPENPAY_LINE_URL } from '@/lib/officialLinks';
+import { LINE_ICON_PATH } from '@/lib/socialIconPaths';
 import type { GuideNav, GuideRelatedItem, GuideSlug } from '@/lib/guideNav';
 
 // store の Palette・qr の QrCode・shop の Store は LP の入口 (components/LandingEntryPoints.tsx) と同じ。
@@ -183,5 +186,29 @@ export function GuideHubPanels({ locale, nav }: { locale: string; nav: GuideNav 
         {nav.groups.filter((group) => !primary.has(group.id)).map((group) => groupPanel(group, true))}
       </div>
     </>
+  );
+}
+
+// ハブの最後の「導入の相談は LINE で」(2026-11-25 user 裁定)。行き先は OpenPay の LINE 公式アカウント (lib/officialLinks.ts)。
+// ボタンの名前は見えている文字 (アイコンは aria-hidden・aria-label なし・掟 8)。/sponsors の LINE のボタンと同じ見た目。
+export function GuideHubContact({ nav }: { nav: GuideNav }) {
+  return (
+    <section aria-labelledby="guide-hub-contact" className="mt-10 rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+      <h2 id="guide-hub-contact" className="text-base font-bold text-slate-900">
+        {nav.hubContactTitle}
+      </h2>
+      <p className="mt-2 text-sm leading-relaxed text-slate-600">{nav.hubContactBody}</p>
+      <a
+        href={OPENPAY_LINE_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`mt-4 w-fit max-w-full ${LANDING_PRIMARY.brand}`}
+      >
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="currentColor" aria-hidden className="shrink-0">
+          <path d={LINE_ICON_PATH} />
+        </svg>
+        {nav.hubContactAction}
+      </a>
+    </section>
   );
 }

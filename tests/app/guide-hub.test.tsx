@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import GuideHubPage, { generateMetadata } from '@/app/[locale]/guide/page';
 import { GUIDE_SLUGS, guideNavFor } from '@/lib/guideNav';
+import { OPENPAY_LINE_URL } from '@/lib/officialLinks';
 
 vi.mock('next-intl/server', () => ({ setRequestLocale: vi.fn() }));
 vi.mock('@/components/AppShell', () => ({ AppShell: ({ children }: { children: React.ReactNode }) => <main>{children}</main> }));
@@ -19,7 +20,11 @@ describe('/guide hub', () => {
     expect(screen.getByText(nav.hubLead)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: nav.backHome })).toHaveAttribute('href', `/${locale}`);
     // 5 グループだけ (料金は「補足」の中)。「はじめての方へ」は別の箱にせず、お店向けのパネルの頭の目印。
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(nav.groups.map((g) => g.title));
+    // 最後に「導入の相談は LINE で」(2026-11-25)。
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual([
+      ...nav.groups.map((g) => g.title),
+      nav.hubContactTitle,
+    ]);
     const shops = screen.getByRole('heading', { level: 2, name: nav.groups[0].title }).closest('section')!;
     expect(within(shops).getByText(nav.hubStartTitle)).toBeInTheDocument();
     expect(within(shops).getByText(nav.hubStartLead)).toBeInTheDocument();
@@ -63,6 +68,16 @@ describe('/guide hub', () => {
       `/${locale}/guide/image-url`,
       `/${locale}/pricing`,
     ]);
+    // 最後の相談の窓口: 説明と、LINE 公式アカウントへのボタン (見えている文字が名前・新しいタブ)。
+    const contact = screen.getByRole('heading', { level: 2, name: nav.hubContactTitle }).closest('section')!;
+    expect(within(contact).getByText(nav.hubContactBody)).toBeInTheDocument();
+    const line = within(contact).getByRole('link', { name: nav.hubContactAction });
+    expect(line).toHaveAttribute('href', OPENPAY_LINE_URL);
+    expect(line).toHaveAttribute('target', '_blank');
+    expect(line).toHaveAttribute('rel', 'noopener noreferrer');
+    // ページの最後の section。
+    const sections = container.querySelectorAll('section');
+    expect(sections[sections.length - 1]).toBe(contact);
     // ハブには目次 (ガイド一覧の nav) を出さない
     expect(screen.queryByRole('navigation', { name: nav.navTitle })).toBeNull();
     expect(container.querySelectorAll('[aria-label]')).toHaveLength(0);

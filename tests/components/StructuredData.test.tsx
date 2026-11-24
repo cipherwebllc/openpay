@@ -40,7 +40,7 @@ describe('StructuredData (FAQPage)', () => {
     expect(faqPage).toBeDefined();
     const structured = faqPage!.mainEntity.map((e) => ({ q: e.name, a: e.acceptedAnswer.text }));
     expect(structured).toEqual(visible);
-    expect(structured).toHaveLength(8);
+    expect(structured).toHaveLength(9);
     // 差し込み値が回答まで届いている (faqA2 の Circle の転送手数料の上限)。
     expect(structured.map((item) => item.a).join(' ')).toContain(`${LANDING_PAYMENT_FEE_VALUES.cctpMaxPercent}%`);
     for (const { q, a } of structured) {

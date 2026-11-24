@@ -5,6 +5,7 @@
 //   - <create>: 受け取るページ (/[locale]/create)
 //   - <pricing>: 料金ページ (/[locale]/pricing・faqA1 の詳細の行き先)
 //   - <guide>: JPYC 払いの割引のガイド (/[locale]/guide/qr#jpyc-discount)
+//   - <line>: OpenPay の LINE 公式アカウント (lib/officialLinks.ts・新しいタブ)
 // 「/create」path 直接表記は一般読み手に分かりにくいため、ラベル「受け取る」で
 // 内部 Link に置き換える。タグを足したら StructuredData の FAQ_PLAIN_TAGS にも足す。
 
@@ -15,6 +16,7 @@ import { getLocale, getTranslations } from 'next-intl/server';
 import { ChevronDown } from 'lucide-react';
 import { LandingSectionHeader } from '@/components/LandingSectionHeader';
 import { LANDING_FAQ, type LandingFaqAnswerKey } from '@/lib/landingFaq';
+import { OPENPAY_LINE_URL } from '@/lib/officialLinks';
 import { LANDING_CARD } from '@/components/LandingControls';
 import { phrased } from '@/components/Phrased';
 
@@ -61,6 +63,16 @@ export async function LandingFaq() {
       create: (chunks) => <FaqLink href={`/${locale}/create`}>{chunks}</FaqLink>,
       pricing: (chunks) => <FaqLink href={`/${locale}/pricing`}>{chunks}</FaqLink>,
       guide: (chunks) => <FaqLink href={`/${locale}/guide/qr#jpyc-discount`}>{chunks}</FaqLink>,
+      line: (chunks) => (
+        <a
+          href={OPENPAY_LINE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="font-medium text-brand underline underline-offset-2 hover:text-brand-dark"
+        >
+          {chunks}
+        </a>
+      ),
     });
   }
 

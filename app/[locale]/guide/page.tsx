@@ -9,7 +9,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { setRequestLocale } from 'next-intl/server';
 import { AppShell } from '@/components/AppShell';
-import { GuideHubPanels } from '@/components/guide/GuideHubPieces';
+import { GuideHubContact, GuideHubPanels } from '@/components/guide/GuideHubPieces';
 import { GuideLead, GuideTitle } from '@/components/guide/GuideHeader';
 import { guideHubMetadata, guideNavFor } from '@/lib/guideNav';
 
@@ -50,6 +50,9 @@ export default async function GuideHubPage({
 
         {/* グループごとのパネル。お店向けの頭に「はじめての方へ」(読む順の番号)・最後に関連ページ (料金)。 */}
         <GuideHubPanels locale={locale} nav={nav} />
+
+        {/* 最後に導入の相談の窓口 (OpenPay の LINE 公式アカウント・2026-11-25)。 */}
+        <GuideHubContact nav={nav} />
       </article>
     </AppShell>
   );
