@@ -85,6 +85,7 @@ import { GET as meGET } from '@/app/api/auth/siwe/me/route';
 import { POST as logoutPOST } from '@/app/api/auth/siwe/logout/route';
 import { requireSession } from '@/lib/siweSession';
 import { newSessionToken, sessionKey } from '@/lib/siwe';
+import { logger } from '@/lib/logger';
 
 const SESSION_TOKEN = '0123456789abcdef'.repeat(4);
 const MALFORMED_TOKENS = [
@@ -384,6 +385,40 @@ describe('SIWE routes', () => {
       expect(res.headers.has('set-cookie')).toBe(false);
       expect(h.kvDel).not.toHaveBeenCalled();
       expect(h.kvSet).not.toHaveBeenCalled();
+    });
+
+    // 2026-11-23 本番 (siwe.verify.unexpected「Cannot decode zero data ("0x")」): ERC-8010 (7702 委任) の署名の検証で、
+    // chain の呼び出しが空 (0x) を返して結果を読めないときは、送り直しても同じなので 401 invalid_signature にする
+    // (503 だと「あとで送り直して」と伝わり、Sentry の error にもなっていた)。通信の失敗は上のとおり 503 のまま。
+    it.each([
+      // 委任前は viem が空の結果を読めずに投げ、route が検証失敗にして info を記録する。委任済みは viem の中で false になる。
+      ['委任前 (aggregate3 の deployless 呼び出し)', '0x', true],
+      ['委任済み (isValidSignature の呼び出し)', `0xef0100${DELEGATE.slice(2)}`, false],
+    ])('%s で chain の呼び出しが空 (0x) なら 401 invalid_signature (Sentry の error にしない)', async (_label, code, logsZeroData) => {
+      const info = vi.spyOn(logger, 'info');
+      info.mockClear();
+      h.rpc = async (args) => {
+        if (args.method === 'eth_getCode') return code;
+        if (args.method === 'eth_call') return '0x';
+        throw new Error('unexpected rpc in test: ' + args.method);
+      };
+      vi.mocked(Sentry.captureMessage).mockClear();
+      vi.mocked(Sentry.captureException).mockClear();
+
+      const res = await attackerLogin();
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ ok: false, error: 'invalid_signature' });
+      expect(res.headers.has('set-cookie')).toBe(false);
+      expect(h.kvDel).not.toHaveBeenCalled();
+      expect(h.kvSet).not.toHaveBeenCalled();
+      expect(Sentry.captureMessage).not.toHaveBeenCalled();
+      expect(Sentry.captureException).not.toHaveBeenCalled();
+      if (logsZeroData) {
+        expect(info).toHaveBeenCalledWith('siwe.verify.zero_data', { chainId: supportedChains[0].id });
+      } else {
+        expect(info).not.toHaveBeenCalledWith('siwe.verify.zero_data', expect.anything());
+      }
     });
 
     // 回帰: ccipRead:false のまま、オンチェーンで完結するスマートウォレットの署名 (ERC-1271 / 6492 / 8010) は通る。

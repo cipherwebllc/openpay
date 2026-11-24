@@ -9,7 +9,15 @@
 // ローカル ECDSA recover、スマートアカウントは ERC-6492/1271)。本モジュールは viem/KV を
 // 注入する DI コアにして、署名や KV 無しでも全分岐を unit test できるようにする。
 
-import { getAddress, isAddress, isHex, type Address, type Hex } from 'viem';
+import {
+  AbiDecodingZeroDataError,
+  ContractFunctionZeroDataError,
+  getAddress,
+  isAddress,
+  isHex,
+  type Address,
+  type Hex,
+} from 'viem';
 import { parseSiweMessage } from 'viem/siwe';
 import { LEGAL_ENTITY } from './legal';
 
@@ -136,6 +144,23 @@ export type SiweVerifyDeps = {
   /** セッションを作成しトークンを返す。 */
   createSession: (address: Address) => Promise<string>;
 };
+
+/**
+ * スマートアカウントの署名 (ERC-1271 / 8010) の検証で、chain の呼び出しが空 (0x) を返して結果を読めなかったか。
+ * RPC がその検証の呼び出し (7702 の authorizationList つきの eth_call 等) に対応していない・呼び先が署名を検証しない、
+ * のどちらでも、送り直しても同じ結果になる。通信の失敗 (HTTP・timeout・RPC の error) はここに入らない。
+ */
+export function isZeroDataVerificationError(error: unknown): boolean {
+  // 外側の型 (viem の BaseError か標準の Error か) によらず cause をたどる。循環した cause でも止まるよう深さに上限を置く。
+  let current: unknown = error;
+  for (let depth = 0; depth < ZERO_DATA_CAUSE_MAX_DEPTH && current; depth += 1) {
+    if (current instanceof AbiDecodingZeroDataError || current instanceof ContractFunctionZeroDataError) return true;
+    current = typeof current === 'object' && 'cause' in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
+}
+
+const ZERO_DATA_CAUSE_MAX_DEPTH = 16;
 
 /**
  * SIWE ログインの検証フロー (純粋コア)。

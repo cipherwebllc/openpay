@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createSiweMessage, generateSiweNonce, verifySiweMessage } from 'viem/siwe';
-import { createPublicClient, getAddress, http } from 'viem';
+import {
+  AbiDecodingZeroDataError,
+  BaseError,
+  ContractFunctionZeroDataError,
+  HttpRequestError,
+  createPublicClient,
+  decodeFunctionResult,
+  getAddress,
+  http,
+  parseAbi,
+} from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { supportedChains, isSupportedChainId } from '@/lib/chains';
 import {
@@ -12,6 +22,7 @@ import {
   verifySiweLogin,
   isAllowedSiweDomain,
   type SiweVerifyDeps,
+  isZeroDataVerificationError,
 } from '@/lib/siwe';
 
 const ADDR = '0x52d4901142e2B5680027da5EB47C86CB02a3cA81';
@@ -384,5 +395,44 @@ describe('verifySiweLogin: 実 EOA 署名の統合 (viem 本物・network 不要
     );
     expect(result).toMatchObject({ ok: false, error: 'domain_mismatch' });
     expect(verify).not.toHaveBeenCalled();
+  });
+});
+
+// 2026-11-23 本番: ERC-8010 の署名の検証で chain の呼び出しが空 (0x) を返し、viem が「Cannot decode zero data」で投げた。
+// 送り直しても同じなので route は 401 invalid_signature にする。通信の失敗はここに入れない (503 のまま)。
+describe('isZeroDataVerificationError', () => {
+  const abi = parseAbi(['function isValidSignature(bytes32 hash, bytes signature) view returns (bytes4)']);
+
+  it('空 (0x) の結果を読めない viem の error は、そのままでも包まれていても true', () => {
+    let raw: unknown;
+    try {
+      decodeFunctionResult({ abi, functionName: 'isValidSignature', data: '0x' });
+    } catch (error) {
+      raw = error;
+    }
+    expect(raw).toBeInstanceOf(AbiDecodingZeroDataError);
+    expect(isZeroDataVerificationError(raw)).toBe(true);
+
+    const wrapped = new BaseError('contract call failed', {
+      cause: new ContractFunctionZeroDataError({ functionName: 'isValidSignature' }),
+    });
+    expect(isZeroDataVerificationError(wrapped)).toBe(true);
+
+    // 外側が標準の Error でも cause をたどる。
+    expect(isZeroDataVerificationError(new Error('verify', { cause: new AbiDecodingZeroDataError() }))).toBe(true);
+  });
+
+  it('循環した cause でも止まる (false)', () => {
+    const a = new Error('a');
+    const b = new Error('b', { cause: a });
+    Object.assign(a, { cause: b });
+    expect(isZeroDataVerificationError(a)).toBe(false);
+  });
+
+  it('通信の失敗やほかの error は false (route は 503 のまま)', () => {
+    expect(isZeroDataVerificationError(new HttpRequestError({ url: 'https://rpc.example', status: 503 }))).toBe(false);
+    expect(isZeroDataVerificationError(new BaseError('rpc down'))).toBe(false);
+    expect(isZeroDataVerificationError(new Error('Cannot decode zero data ("0x") with ABI parameters.'))).toBe(false);
+    expect(isZeroDataVerificationError('0x')).toBe(false);
   });
 });
