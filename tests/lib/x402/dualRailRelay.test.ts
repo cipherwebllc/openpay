@@ -470,7 +470,9 @@ describe('dualRailRelay verify/settle', () => {
     ['引用の中のエスケープ', 'bad value "a\\"b" more', 'errorMessage=bad value'],
     ['エスケープ', 'bad value \\u0041 more', 'errorMessage=bad value'],
     ['制御文字', 'bad value order\u0001 17 more', 'errorMessage=bad value order'],
-    ['引用の中の制御文字', 'bad value "/order\u000117" more', 'errorMessage=bad value [quoted] more'],
+    ['引用の中の制御文字', 'bad value "/order\u000117" more', 'errorMessage=bad value'],
+    ['引用で包んだ JSON', 'bad value "{"reference":"order-17"}" more', 'errorMessage=bad value'],
+    ['引用の中の角かっこ', 'bad value `[1, 2]` more', 'errorMessage=bad value'],
     ['引用の無い説明', 'paymentPayload.payload is invalid', 'errorMessage=paymentPayload.payload is invalid'],
     [
       'CDP の形式の拒否 (語の途中の アポストロフィと項目の path)',

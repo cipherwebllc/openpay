@@ -449,7 +449,7 @@ const WORD_CHAR_RE = /[A-Za-z0-9]/;
  * 文の項目を、1 文字ずつ読んで記録できる形にする。facilitator が入力の値を引用した部分は残さず、どの項目で断られたかは残す。
  * - 次の文字から後ろは記録しない: { [ (JSON の値)・\ (エスケープ)・制御文字・語の途中でない '・閉じていない引用。
  * - 二重引用符とバッククォートの引用は、中身が項目の path (JSON pointer) なら残し、それ以外は [quoted] にする
- *   (中身に \ があればそこで止める)。
+ *   (中身に { [ \ ・制御文字があればそこで止める)。
  * - 語の途中の ' (doesn't) はそのまま残す。
  */
 function messageForLog(text: string): string {
@@ -462,7 +462,8 @@ function messageForLog(text: string): string {
       const close = text.indexOf(c, i + 1);
       if (close === -1) break;
       const inner = text.slice(i + 1, close);
-      if (inner.includes('\\')) break;
+      // 引用の中に止める文字 ({ [ \ ・制御文字) があれば、引用の外と同じくそこで止める (引用で包んだ JSON を地の文にしない)。
+      if (/[{[\\\u0000-\u001f\u007f]/.test(inner)) break;
       out += inner.length <= QUOTED_FIELD_PATH_MAX && QUOTED_FIELD_PATH_RE.test(inner) ? `${c}${inner}${c}` : '[quoted]';
       i = close + 1;
       continue;
