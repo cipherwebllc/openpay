@@ -3,7 +3,7 @@
 // 仕様:
 // - RFC-4180: `,` / `"` / `\n` / `\r` を含む値は `"..."` で囲み内部 `"` を `""` にエスケープ。
 // - UTF-8 BOM を先頭に付与 (Excel / freee / MF の UTF-8 自動認識)。改行は CRLF。
-// - CSV Injection 防御: 値が `=` `+` `-` `@` で始まれば先頭に single quote (OWASP)。
+// - CSV Injection 防御: 値が `=` `+` `-` `@` (と tab・CR・LF・全角の `＝` `＋` `－` `＠`) で始まれば先頭に single quote (OWASP)。
 //   store name / メモ / 備考 の自由入力が攻撃面なので、生成系は必ずこのエスケープを通すこと。
 //   security load-bearing のため重複実装せず本モジュールに一本化する。
 
@@ -15,10 +15,12 @@ export const CSV_NEWLINE = '\r\n';
 // accountingCsv → lineItemsCsv の import があるため逆向き import が循環になるため。
 export const ACCOUNTING_MAX_ROWS = 5000;
 
-const INJECTION_PREFIX = /^[=+\-@\t\r]/;
+// 先頭の LF と全角の 4 字は 2026-11-25 の外部レビューで足した: 表計算ソフトや取り込み方によっては、改行の後の式や全角の記号を
+// 数式として読むことがある (日本語の Excel の IME で全角のまま入る)。ふつうの値がこれらで始まることはほぼないので、広めに守る。
+const INJECTION_PREFIX = /^[=+\-@\t\r\n＝＋－＠]/;
 
 /**
- * 値の先頭が、escapeCsvCell が single quote を前に付ける字 (`=` `+` `-` `@` tab CR) か。
+ * 値の先頭が、escapeCsvCell が single quote を前に付ける字 (`=` `+` `-` `@` tab CR LF と全角の `＝` `＋` `－` `＠`) か。
  * 入力の検証 (会計 CSV の勘定科目など) が同じ判定を使うための述語。判定は上の正規表現 1 つ。
  */
 export function startsWithCsvFormulaChar(value: string): boolean {

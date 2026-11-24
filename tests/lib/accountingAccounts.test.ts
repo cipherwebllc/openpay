@@ -105,11 +105,13 @@ describe('checkAccountName', () => {
     expect(checkAccountName(`  ${ch}売上`)).toEqual({ ok: false, reason: 'formula' });
   });
 
-  it('数式の字は先頭だけ・半角だけ (lib/csv.ts と同じ)', () => {
+  it('数式の字は先頭だけ見る・全角の ＝＋－＠ も数式 (lib/csv.ts と同じ・2026-11-25 から)', () => {
     expect(checkAccountName('売上=高')).toEqual({ ok: true, value: '売上=高' });
     expect(checkAccountName('A-1')).toEqual({ ok: true, value: 'A-1' });
-    const fullWidthEquals = `${cp(0xff1d)}売上`;
-    expect(checkAccountName(fullWidthEquals)).toEqual({ ok: true, value: fullWidthEquals });
+    expect(checkAccountName(`売上${cp(0xff1d)}高`)).toEqual({ ok: true, value: `売上${cp(0xff1d)}高` });
+    for (const ch of [0xff1d, 0xff0b, 0xff0d, 0xff20]) {
+      expect(checkAccountName(`${cp(ch)}売上`)).toEqual({ ok: false, reason: 'formula' });
+    }
   });
 
   it('見る順は 使えない字 → 数式の字 → 長さ', () => {
@@ -140,7 +142,8 @@ describe('lib/csv.ts の述語 (startsWithCsvFormulaChar) と escapeCsvCell', ()
       expect(startsWithCsvFormulaChar(value), JSON.stringify(head)).toBe(defanged);
       if (defanged) formulaHeads.push(head);
     }
-    expect(formulaHeads).toEqual(['\t', '\r', '+', '-', '=', '@']);
+    // LF と全角の 4 字は 2026-11-25 の外部レビューで足した。
+    expect(formulaHeads).toEqual(['\t', '\n', '\r', '+', '-', '=', '@', '＝', '＋', '－', '＠']);
   });
 
   it('先頭以外の数式の字は述語が見ない', () => {
