@@ -302,6 +302,15 @@ describe('checkHostedIntentSettleAdmission', () => {
       ).resolves.toBe('denied');
     });
 
+    it('負の数も符号化せずに denied で、denied の記録も残す', async () => {
+      kvReturns(await intentJson('settling'));
+      h.loggerWarn.mockClear();
+      await expect(
+        checkHostedIntentSettleAdmission({ params: params({ feeValue: -1n }), chainId: CHAIN_ID, signature: SIGNATURE }),
+      ).resolves.toBe('denied');
+      expect(h.loggerWarn).toHaveBeenCalledWith('creator_store.settle_gate_denied', { intentSalt: SALT.toLowerCase(), state: 'settling' });
+    });
+
     it('2^256 - 1 は符号化できる (一致しないので denied・投げない)', async () => {
       kvReturns(await intentJson('settling'));
       await expect(
