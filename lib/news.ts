@@ -18,6 +18,8 @@
 // 2026-11-06 以降の日付の item は tests/lib/news.test.ts が ja の文の数を検査する (それより前は書き換えない)。
 // 利用者に見える機能を merge したら「お知らせ：要／不要」を決め、要ならここと lib/newsIndex.ts に文案を足す (CLAUDE.md)。
 
+import { OPENPAY_LINE_URL } from '@/lib/officialLinks';
+
 export type NewsCategory = 'feature' | 'pricing' | 'notice'; // 新機能 / 料金 / お知らせ
 
 export type NewsItem = {
@@ -37,6 +39,21 @@ export type NewsItem = {
 // date 降順 (新しい順) で宣言する。sortedNews() が降順を保証するため宣言順自体は
 // 表示順を強制しないが、可読性のため宣言時点でも新しい順に並べる。
 export const NEWS_ITEMS: readonly NewsItem[] = [
+  {
+    // 2026-11-25 user 承認の文案。3 文目は偽の「OpenPay」アカウントへの注意 (なりすまし対策)。
+    id: 'line-official-account-2026-11-25',
+    date: '2026-11-25',
+    category: 'notice',
+    title: {
+      ja: 'LINE 公式アカウントで、お問い合わせと導入の相談を受け付けています',
+      en: 'You can now contact us and ask about getting started on LINE',
+    },
+    body: {
+      ja: 'OpenPay の LINE 公式アカウントを開設しました。お店で使えるかどうかや使い方など、友だち追加してトークでお気軽にご相談ください。OpenPay から秘密鍵や復元フレーズをお聞きすることはありません。',
+      en: 'We have opened an OpenPay LINE Official Account. Add us as a friend and message us about anything, such as whether OpenPay fits your shop or how to use it. OpenPay will never ask for your private key or recovery phrase.',
+    },
+    link: { href: OPENPAY_LINE_URL, labelJa: 'LINE で友だち追加する', labelEn: 'Add us on LINE' },
+  },
   {
     id: 'order-link-site-button-2026-11-20',
     date: '2026-11-20',
