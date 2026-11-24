@@ -272,11 +272,13 @@ describe('R1 real hosted challenge → client authorization → server validatio
         const oversizedWire = version === 1 ? oversized : {
           x402Version: 2, resource: v2.resource, accepted: v2.accepts[0], payload: oversized.payload,
         };
+        const verifyCalls = h.verify.mock.calls.length;
         const rejected = await GET(new Request(url, { headers: {
           [version === 1 ? 'X-PAYMENT' : 'PAYMENT-SIGNATURE']: jp.encodeHostedPaymentHeader(oversizedWire),
         } }), { params: Promise.resolve({ id: RESOURCE }) });
         expect(rejected.status, await rejected.clone().text()).toBe(409);
         expect((await rejected.json()).error).toBe('invalid_payload');
+        expect(h.verify.mock.calls.length).toBe(verifyCalls);
       } else {
         expect((await submitted.json()).error).toBe('fixture_stop');
         const [endpoint, forwarded, cdp] = h.postFacilitator.mock.calls.at(-1)!;
