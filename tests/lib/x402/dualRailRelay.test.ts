@@ -462,17 +462,21 @@ describe('dualRailRelay verify/settle', () => {
     ['JSON の値', 'invalid paymentPayload: {"payload":{"reference":"order-17"}}', 'errorMessage=invalid paymentPayload:'],
     ['配列', 'unexpected fields [reference, memo]', 'errorMessage=unexpected fields'],
     ['値の引用', 'bad reference "order-17" in payload', 'errorMessage=bad reference [quoted] in payload'],
-    ['空白を含む値の引用', "bad value 'order 17' here", 'errorMessage=bad value [quoted] here'],
     ['バッククォートの値', 'got `0.5 USDC` expected more', 'errorMessage=got [quoted] expected more'],
+    ['名前の形の値の引用', 'unknown network "base" here', 'errorMessage=unknown network [quoted] here'],
+    ['一重引用符の値 (そこで止める)', "bad value 'order 17' here", 'errorMessage=bad value'],
+    ['一重引用符の中の語の途中の アポストロフィ', "bad value 'don't retry' here", 'errorMessage=bad value'],
     ['閉じていない引用', 'bad value "order-17 and more', 'errorMessage=bad value'],
+    ['引用の中のエスケープ', 'bad value "a\\"b" more', 'errorMessage=bad value'],
+    ['エスケープ', 'bad value \\u0041 more', 'errorMessage=bad value'],
+    ['制御文字', 'bad value order\u0001 17 more', 'errorMessage=bad value order'],
+    ['引用の中の制御文字', 'bad value "/order\u000117" more', 'errorMessage=bad value [quoted] more'],
     ['引用の無い説明', 'paymentPayload.payload is invalid', 'errorMessage=paymentPayload.payload is invalid'],
     [
       'CDP の形式の拒否 (語の途中の アポストロフィと項目の path)',
       'request body has an error: doesn\'t match schema (oneOf): Error at "/paymentPayload/resource/description": too long',
       'errorMessage=request body has an error: doesn\'t match schema (oneOf): Error at "/paymentPayload/resource/description": too long',
     ],
-    ['項目の名前の引用', "missing field 'payTo' in requirements", "errorMessage=missing field 'payTo' in requirements"],
-    ['語の途中の アポストロフィの後の項目の名前', "can't parse 'payTo' value", "errorMessage=can't parse 'payTo' value"],
   ])('文の項目は値の引用を残さず、項目の path は残す (%s)', async (_label, message, expected) => {
     expect(await rejectedReason({ errorMessage: message })).toBe(expected);
   });

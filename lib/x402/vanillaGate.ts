@@ -440,46 +440,45 @@ const FACILITATOR_REJECT_REASON_MAX = 200;
  */
 const FACILITATOR_4XX_NOT_REJECTION: ReadonlySet<number> = new Set([401, 403, 404, 408, 425, 429]);
 
-/** 引用の中で残してよい形: 項目の path (JSON pointer `/a/b` か `a.b` の名前)。値の引用は残さない。 */
-const QUOTED_FIELD_PATH_RE = /^(?:(?:\/[A-Za-z0-9_~.-]*)+|[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)$/;
+/** 引用の中で残してよい形: 項目の path (JSON pointer `/a/b`・96 字まで)。それ以外の引用 (値) は残さない。 */
+const QUOTED_FIELD_PATH_RE = /^(?:\/[A-Za-z0-9_~.-]*)+$/;
 const QUOTED_FIELD_PATH_MAX = 96;
-
-function quotedForLog(inner: string): string {
-  return inner.length <= QUOTED_FIELD_PATH_MAX && QUOTED_FIELD_PATH_RE.test(inner) ? inner : '[quoted]';
-}
+const WORD_CHAR_RE = /[A-Za-z0-9]/;
 
 /**
- * 文の項目を記録できる形にする。facilitator が入力の値を引用した部分は残さず、どの項目で断られたかは残す。
- * 1) JSON の値 ({ か [) から後ろは記録しない。
- * 2) 引用 ("…"・`…`・語の途中でない '…') は、中身が項目の path の形なら残し、それ以外は [quoted] にする
- *    (doesn't のような語の途中の ' は引用として扱わない)。
- * 3) 閉じていない引用から後ろは記録しない。
+ * 文の項目を、1 文字ずつ読んで記録できる形にする。facilitator が入力の値を引用した部分は残さず、どの項目で断られたかは残す。
+ * - 次の文字から後ろは記録しない: { [ (JSON の値)・\ (エスケープ)・制御文字・語の途中でない '・閉じていない引用。
+ * - 二重引用符とバッククォートの引用は、中身が項目の path (JSON pointer) なら残し、それ以外は [quoted] にする
+ *   (中身に \ があればそこで止める)。
+ * - 語の途中の ' (doesn't) はそのまま残す。
  */
 function messageForLog(text: string): string {
-  // 残す引用は、3) で切られないよう印 (\u0001 番号 \u0001) に置き換えておき、最後に戻す。
-  const kept: string[] = [];
-  const keep = (quoted: string) => {
-    kept.push(quoted);
-    return `\u0001${kept.length - 1}\u0001`;
-  };
-  let s = text.replace(/\u0001/g, '').split(/[{[]/, 1)[0];
-  s = s.replace(/(["`])([^"`]*)\1/g, (_m, q: string, inner: string) => {
-    const shown = quotedForLog(inner);
-    return shown === '[quoted]' ? shown : keep(`${q}${shown}${q}`);
-  });
-  s = s.replace(/(?<![A-Za-z0-9])'([^']*)'/g, (_m, inner: string) => {
-    const shown = quotedForLog(inner);
-    return shown === '[quoted]' ? shown : keep(`'${shown}'`);
-  });
-  s = s.split(/["`]|(?<![A-Za-z0-9])'/, 1)[0];
-  return s.replace(/\u0001(\d+)\u0001/g, (_m, i: string) => kept[Number(i)] ?? '').trim();
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '{' || c === '[' || c === '\\' || c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f) break;
+    if (c === '"' || c === '`') {
+      const close = text.indexOf(c, i + 1);
+      if (close === -1) break;
+      const inner = text.slice(i + 1, close);
+      if (inner.includes('\\')) break;
+      out += inner.length <= QUOTED_FIELD_PATH_MAX && QUOTED_FIELD_PATH_RE.test(inner) ? `${c}${inner}${c}` : '[quoted]';
+      i = close + 1;
+      continue;
+    }
+    if (c === "'" && !(WORD_CHAR_RE.test(text[i - 1] ?? '') && WORD_CHAR_RE.test(text[i + 1] ?? ''))) break;
+    out += c;
+    i += 1;
+  }
+  return out.trim();
 }
 
 /**
  * 断った 4xx の body から、記録してよい理由だけを取り出す (body 全体は記録しない)。
  * - 語の項目 (errorType・error・errorReason・invalidReason・correlationId) は、語の形 (英数字と _ . : -・64 字まで) のときだけ。
  *   correlationId は CDP へ問い合わせるときの手がかり。
- * - 文の項目 (errorMessage・message) は messageForLog を通した形 (値の引用は残さず、項目の path は残す)。
+ * - 文の項目 (errorMessage・message) は messageForLog を通した形 (値の引用は残さず、項目の path (JSON pointer) は残す)。
  * - 65 桁以上の 16 進 (署名など) は 0x の有無・大小によらず伏せる (アドレスと 32 byte の値はそのまま)。
  */
 function facilitatorRejectReason(parsed: unknown): string {
