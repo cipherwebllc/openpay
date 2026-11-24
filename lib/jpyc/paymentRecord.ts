@@ -34,11 +34,25 @@ export async function readJpycPaymentRecord(slug: JpycChainSlug, txHash: Hex) {
       withTimeout(client.getBlockNumber({ cacheTime: 0 })),
     ]);
     // Unsupported finalized tags must not hide an otherwise readable payment record (finalized: null).
-    const finality = await readJpycFinality({
+    const tagFinality = await readJpycFinality({
       slug,
       blockNumber: receipt.blockNumber,
       readFinalizedBlock: () => withTimeout(client.getBlock({ blockTag: 'finalized' })),
     });
+    // 確定の高さに届いていても、receipt のブロックが組み替えで外れたもの (別のフォーク) なら確定ではない (2026-11-25 外部
+    // レビュー #8)。lib/orderLinkVerify.ts と同じ順: 確定の高さを先に読み、その後で同じ高さの今の正規のブロックと比べる
+    // (確定した後も receipt のブロックが正規なら、その取引はもう消えない)。比べられなければ「分からない」(null)。
+    // finality は署名の外の参考の欄なので、settle と署名の対象 (blockNumber 等) は変えない。
+    const canonical = tagFinality.finalized === true && tagFinality.method === 'finalized-tag'
+      ? await withTimeout(client.getBlock({ blockNumber: receipt.blockNumber })).then(
+          (canonicalBlock) =>
+            typeof canonicalBlock.hash === 'string'
+              ? canonicalBlock.hash.toLowerCase() === receipt.blockHash.toLowerCase()
+              : null,
+          () => null,
+        )
+      : true;
+    const finality = canonical === true ? tagFinality : { ...tagFinality, finalized: canonical === false ? false : null };
     return {
       kind: 'ok',
       record: {

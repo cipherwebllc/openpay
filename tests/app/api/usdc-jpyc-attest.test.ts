@@ -59,7 +59,8 @@ beforeEach(async () => {
   token = live.deploymentFor('polygon').address; event = live.TRANSFER_EVENT;
   route = await import('@/app/api/paid/usdc/jpyc/attest/route') as unknown as typeof route;
   mocks.receipt.mockResolvedValue(receipt()); mocks.latest.mockResolvedValue(110n);
-  mocks.block.mockImplementation(async ({ blockTag }) => ({ number: blockTag ? 105n : 100n, timestamp: 1_750_000_000n }));
+  // 同じ高さの今の正規のブロックの hash は receipt のブロックと同じ (TX)。
+  mocks.block.mockImplementation(async ({ blockTag }) => ({ number: blockTag ? 105n : 100n, hash: TX, timestamp: 1_750_000_000n }));
   mocks.fetch.mockImplementation(async (url) => {
     if (String(url).endsWith('/verify')) return Response.json({ isValid: true, payer: PAYER });
     if (String(url).endsWith('/settle')) return Response.json({ success: true, transaction: TX, network: 'base', payer: PAYER });
@@ -173,6 +174,27 @@ describe('JPYC attestation gate and RPC record', () => {
     const result = await readJpycPaymentRecord(slug, TX);
     expect(result.kind).toBe('ok');
     if (result.kind === 'ok') expect(result.record.finality).toEqual({ finalized: ['kaia', 'avalanche'].includes(slug) ? true : null, method: 'confirmations' });
+  });
+  // 2026-11-25 外部レビュー #8: 確定の高さに届いていても、receipt のブロックが今の正規のブロックでなければ確定ではない。
+  it('receipt の高さの今の正規のブロックが別の hash (組み替えで外れた) なら finalized: false', async () => {
+    mocks.block.mockImplementation(async ({ blockTag, blockNumber }) => ({
+      number: blockTag ? 105n : 100n,
+      hash: blockNumber === 100n ? `0x${'cd'.repeat(32)}` : TX,
+      timestamp: 1_750_000_000n,
+    }));
+    const res = await route.GET(request());
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(validate(body), JSON.stringify(validate.errors)).toBe(true);
+    expect(body.finality).toEqual({ finalized: false, method: 'finalized-tag', finalizedBlock: '105' });
+  });
+  it('今の正規のブロックを読めなければ finalized: null (確定とも未確定とも言わない)', async () => {
+    mocks.block.mockImplementation(async ({ blockTag, blockNumber }) => {
+      if (blockNumber === 100n) throw new Error('block not found');
+      return { number: blockTag ? 105n : 100n, hash: TX, timestamp: 1_750_000_000n };
+    });
+    const body = await (await route.GET(request())).json();
+    expect(body.finality).toEqual({ finalized: null, method: 'finalized-tag', finalizedBlock: '105' });
   });
   it('finalized block behind receipt reports false', async () => {
     mocks.block.mockResolvedValue({ number: 99n, timestamp: 1_750_000_000n });
