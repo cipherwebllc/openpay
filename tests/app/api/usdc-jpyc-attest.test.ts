@@ -181,7 +181,7 @@ describe('JPYC attestation gate and RPC record', () => {
   it('receipt の高さの今の正規のブロックが別の hash (組み替えで外れた) なら finalized: false', async () => {
     mocks.block.mockImplementation(async ({ blockTag, blockNumber }) => ({
       number: blockTag ? 105n : 100n,
-      hash: blockNumber === 100n ? `0x${'cd'.repeat(32)}` : TX,
+      hash: blockNumber === 100n ? `0x${'cd'.repeat(32)}` : BLOCK_HASH,
       timestamp: 1_750_000_000n,
     }));
     const res = await route.GET(request());
@@ -201,6 +201,53 @@ describe('JPYC attestation gate and RPC record', () => {
     });
     const body = await (await route.GET(request())).json();
     expect(body.finality).toEqual({ finalized: null, method: 'finalized-tag', finalizedBlock: '105' });
+  });
+  // settle の前に足す待ちの約束 (Codex): 確定の高さに届いていなければ正規のブロックを待たない・届いたときだけ最大 1 秒待つ。
+  it('確定の高さに届いていなければ、正規のブロックが返らなくても待たない', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.block.mockImplementation(({ blockTag, blockNumber }) => {
+        if (blockNumber === 100n) return new Promise(() => {});
+        return Promise.resolve({ number: blockTag ? 99n : 100n, hash: BLOCK_HASH, timestamp: 1_750_000_000n });
+      });
+      const { readJpycPaymentRecord } = await import('@/lib/jpyc/paymentRecord');
+      let done = false;
+      const pending = readJpycPaymentRecord('polygon', TX).then((result) => { done = true; return result; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done).toBe(true);
+      const result = await pending;
+      expect(result.kind === 'ok' && result.record.finality).toEqual({ finalized: false, method: 'finalized-tag', finalizedBlock: '99' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('確定の高さに届いて正規のブロックが返らないときは、最大 1 秒だけ待って finalized: null', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.block.mockImplementation(({ blockTag, blockNumber }) => {
+        if (blockNumber === 100n) return new Promise(() => {});
+        return Promise.resolve({ number: blockTag ? 105n : 100n, hash: BLOCK_HASH, timestamp: 1_750_000_000n });
+      });
+      const { readJpycPaymentRecord, CANONICAL_WAIT_MS } = await import('@/lib/jpyc/paymentRecord');
+      expect(CANONICAL_WAIT_MS).toBe(1_000);
+      let done = false;
+      const pending = readJpycPaymentRecord('polygon', TX).then((result) => { done = true; return result; });
+      await vi.advanceTimersByTimeAsync(CANONICAL_WAIT_MS - 1);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(done).toBe(true);
+      const result = await pending;
+      expect(result.kind === 'ok' && result.record.finality).toEqual({ finalized: null, method: 'finalized-tag', finalizedBlock: '105' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('receipt のブロックの hash が壊れていれば rpc_error (503・settle しない)', async () => {
+    mocks.receipt.mockResolvedValue({ ...receipt(), blockHash: null });
+    const res = await route.GET(request());
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe('rpc_unavailable');
+    onlyVerify();
   });
   it('正規のブロックは確定の高さと同時に読む (settle の前の待ちを足さない・Codex)', async () => {
     let releaseFinalized!: () => void;
