@@ -414,7 +414,8 @@ type FacilitatorCdpWire = {
 };
 
 /**
- * CDP が、判定の形でない 4xx で要求を断ったとき (例: 400 `invalid_request`) に投げる (payai は従来どおり Error)。
+ * CDP が、判定の形でない 4xx で要求を断ったとき (例: 400 `invalid_request`) に投げる (payai と、一時的な 408・425・429 は
+ * 従来どおり Error)。
  * message は従来の `facilitator /verify HTTP 400` のまま (Error の派生なので、これまでどおり Error として受ける呼び出し側の
  * 応答とログは変わらない)。status と reason (facilitator が示した理由・署名は伏せる) を足し、呼び出し側が「使えない」(障害) と
  * 「断られた」を分けて記録できるようにする (2026-11-24 Sentry: CDP の 400 を facilitator_unavailable として理由なしで記録)。
@@ -432,6 +433,11 @@ export class FacilitatorRejectedError extends Error {
 
 /** 記録する理由の長さの上限 (facilitator の文面をそのまま長く残さない)。 */
 const FACILITATOR_REJECT_REASON_MAX = 200;
+/**
+ * 一時的な 4xx (時間切れ・早すぎる・呼び出しが多すぎる)。支払いを判定していないので「断られた」とせず、従来どおり
+ * 障害 (Error → 呼び出し側の 503) として扱う (払う側があとでやり直せる)。
+ */
+const TRANSIENT_FACILITATOR_4XX: ReadonlySet<number> = new Set([408, 425, 429]);
 
 /**
  * 断った 4xx の body から、記録してよい理由だけを取り出す (body 全体は記録しない)。
@@ -556,7 +562,7 @@ export async function postFacilitatorWithStatus(
   ) {
     return { status: res.status, body: parsed };
   }
-  if (cdpAuth && res.status >= 400 && res.status < 500) {
+  if (cdpAuth && res.status >= 400 && res.status < 500 && !TRANSIENT_FACILITATOR_4XX.has(res.status)) {
     throw new FacilitatorRejectedError(path, res.status, facilitatorRejectReason(parsed));
   }
   throw new Error(`facilitator ${path} HTTP ${res.status}`);

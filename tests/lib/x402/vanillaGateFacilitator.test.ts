@@ -489,9 +489,6 @@ describe('vanillaGate facilitator 切替', () => {
   });
 });
 
-// B5(b): exact scheme の verify は value >= maxAmountRequired しか見ず resource を含まない。
-// 1 通の署名済み X-PAYMENT が同額・別 resource で二重解錠されるのを、resource + query
-// 束縛の claim で断つ。KV は money truth ではないので障害時は fail-open。
 // 2026-11-24: CDP が判定の形でない 4xx で断ったときだけ FacilitatorRejectedError (Error の派生・message は従来どおり) を
 // 投げる。payai と 5xx は従来どおりの Error (呼び出し側の応答もログも変わらない)。
 describe('postFacilitatorWithStatus の断られた 4xx', () => {
@@ -532,6 +529,14 @@ describe('postFacilitatorWithStatus の断られた 4xx', () => {
     expect((error as Error).message).toBe(`facilitator /verify HTTP ${status}`);
   });
 
+  it.each([408, 425, 429])('CDP の一時的な %s は従来どおりの Error (支払いを判定していない)', async (status) => {
+    useCdp();
+    reply(status, { errorType: 'rate_limit_exceeded' });
+    const error = await postFacilitatorWithStatus('/verify', body, wire).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(FacilitatorRejectedError);
+    expect((error as Error).message).toBe(`facilitator /verify HTTP ${status}`);
+  });
+
   it('CDP の 5xx は従来どおりの Error', async () => {
     useCdp();
     reply(502, { errorType: 'bad_gateway' });
@@ -541,6 +546,9 @@ describe('postFacilitatorWithStatus の断られた 4xx', () => {
   });
 });
 
+// B5(b): exact scheme の verify は value >= maxAmountRequired しか見ず resource を含まない。
+// 1 通の署名済み X-PAYMENT が同額・別 resource で二重解錠されるのを、resource + query
+// 束縛の claim で断つ。KV は money truth ではないので障害時は fail-open。
 describe('vanillaGate resource 束縛 claim', () => {
   const SUPPLY = {
     resourceUrl: 'https://open-pay.jp/api/paid/usdc/jpyc/supply',

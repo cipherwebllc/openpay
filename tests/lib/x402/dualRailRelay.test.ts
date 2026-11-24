@@ -467,6 +467,31 @@ describe('dualRailRelay verify/settle', () => {
     expect(await rejectedReason({ errorMessage: message })).toBe(expected);
   });
 
+  it('200 字の切れ目にまたがる署名も、切る前に伏せる (先頭だけが残らない)', async () => {
+    const hex = 'ab'.repeat(65);
+    const reason = await rejectedReason({ errorMessage: `${'x'.repeat(170)} ${hex} tail` });
+    expect(reason).toBe(`errorMessage=${'x'.repeat(170)} [redacted] tail`);
+    expect(reason).not.toContain('abab');
+  });
+
+  it.each([408, 425, 429])('CDP の一時的な %s は「断られた」とせず、従来どおり 503 (あとでやり直せる)', async (status) => {
+    const warn = vi.spyOn(logger, 'warn');
+    warn.mockClear();
+    facilitatorReplies(status, { errorType: 'rate_limit_exceeded' });
+    const res = await handleDualRailRelay(
+      post('verify', { resourceId: 'res-1', paymentHeader: v1Header() }),
+      'verify',
+    );
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: 'facilitator_unavailable' });
+    expect(warn).toHaveBeenCalledWith('x402.dualrail.facilitator_unavailable', {
+      action: 'verify',
+      resourceId: 'res-1',
+      error: `facilitator /verify HTTP ${status}`,
+    });
+    expect(warn).not.toHaveBeenCalledWith('x402.dualrail.facilitator_rejected', expect.anything());
+  });
+
   it('記録できる理由が無ければ no_reason', async () => {
     expect(await rejectedReason({ errorType: 'has space', errorMessage: '{"only":"quoted"}' })).toBe('no_reason');
   });
