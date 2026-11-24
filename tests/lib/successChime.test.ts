@@ -418,6 +418,105 @@ describe('lib/successChime', () => {
     expect(source).toMatch(/import\('@\/lib\/successVoice'\)/);
   });
 
+  it('完了画面 (声の module を静的に読む) は next/dynamic でだけ読む (支払いの 4 ページの First Load JS に入れない)', async () => {
+    const { readdirSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const offenders: string[] = [];
+    // 静的な import と再 export (`export { X } from`) のどちらも、相対・別名のどの書き方でも見る (型だけの import は除く)。
+    const staticRef = /^\s*(?:import|export)(?!\s+type\b)[^;]*?from\s+['"][^'"]*(?:^|\/)SuccessOverlay['"]/m;
+    for (const dir of ['app', 'components', 'hooks', 'lib']) {
+      for (const entry of readdirSync(join(process.cwd(), dir), { recursive: true }) as string[]) {
+        if (!/\.(tsx?|jsx?|mjs)$/.test(entry)) continue;
+        const text = readFileSync(join(process.cwd(), dir, entry), 'utf8');
+        if (staticRef.test(text)) offenders.push(join(dir, entry));
+      }
+    }
+    expect(offenders).toEqual([]);
+    const wrapper = readFileSync(join(process.cwd(), 'components/PaymentSuccessOverlay.tsx'), 'utf8');
+    expect(wrapper).toMatch(/dynamic\(\s*\(\) => import\('\.\/SuccessOverlay'\)/);
+  });
+
+  it('playSuccessChime は鳴らそうとした AudioContext を返す (時計で鳴ったかを確かめる)・非対応では null', async () => {
+    stubFetch('ok');
+    const { playSuccessChime } = await import('@/lib/successChime');
+    expect(playSuccessChime()).toBeNull();
+    vi.resetModules();
+    w.AudioContext = makeMockAC({ state: 'running' });
+    const fresh = await import('@/lib/successChime');
+    const c = fresh.playSuccessChime();
+    expect(c).not.toBeNull();
+    expect(c).toBe(fresh.unlockChimeAudio());
+    // 声の読み込みと待ちの timer をこのテストの中で終わらせる (次のテストの fetch を呼ばない)。
+    await flush();
+  });
+
+  it('playVoiceElement は声のファイルを audio 要素で鳴らし、鳴らし始めたら true', async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const { playVoiceElement } = await import('@/lib/successVoice');
+    await expect(playVoiceElement().result).resolves.toBe(true);
+    expect(play).toHaveBeenCalledTimes(1);
+    const audio = play.mock.contexts[0] as HTMLAudioElement;
+    expect(audio.src).toMatch(/\/sounds\/openpay-complete-v1\.mp3$/);
+    expect(audio.volume).toBe(0.5);
+  });
+
+  it('playVoiceElement は断られたら (NotAllowedError) false で、reject を残さない', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockRejectedValue(new DOMException('no', 'NotAllowedError'));
+    const { playVoiceElement } = await import('@/lib/successVoice');
+    await expect(playVoiceElement().result).resolves.toBe(false);
+  });
+
+  it('playVoiceElement の stop は、鳴らし始めを待っている声を止める (止めたら false)', async () => {
+    let reject: (error: unknown) => void = () => undefined;
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(
+      () => new Promise<void>((_, r) => (reject = r)),
+    );
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(function (this: HTMLMediaElement) {
+      reject(new DOMException('interrupted by pause', 'AbortError'));
+    });
+    const { playVoiceElement } = await import('@/lib/successVoice');
+    const playback = playVoiceElement();
+    playback.stop();
+    expect(pause.mock.contexts[0]).toBe(play.mock.contexts[0]);
+    await expect(playback.result).resolves.toBe(false);
+  });
+
+  it('playVoiceElement は audio 要素を作れない・play が投げるときも false (throw しない)', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => {
+      throw new Error('boom');
+    });
+    const { playVoiceElement } = await import('@/lib/successVoice');
+    const playback = playVoiceElement();
+    await expect(playback.result).resolves.toBe(false);
+    expect(() => playback.stop()).not.toThrow();
+  });
+
+  it('playVoiceElement は play() が Promise を返さない古いブラウザでは、呼べたら true', async () => {
+    vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(() => undefined as unknown as Promise<void>);
+    const { playVoiceElement } = await import('@/lib/successVoice');
+    await expect(playVoiceElement().result).resolves.toBe(true);
+  });
+
+  it('閉じた context (完了画面が、鳴らなかった完了音の予約を取り消した) は、次に鳴らすときに作り直す', async () => {
+    stubFetch('ok');
+    const made: Array<{ state: string }> = [];
+    const Base = makeMockAC({ state: 'running' });
+    w.AudioContext = class extends Base {
+      constructor() {
+        super();
+        made.push(this);
+      }
+    };
+    const { playSuccessChime } = await import('@/lib/successChime');
+    const first = playSuccessChime() as unknown as { state: string };
+    first.state = 'closed';
+    const second = playSuccessChime();
+    expect(made).toHaveLength(2);
+    expect(second).toBe(made[1]);
+    expect(second).not.toBe(first);
+    await flush();
+  });
+
   it('声のファイルは public/sounds にあり、中身は v1 のまま (変えるならファイル名の版を上げる)', async () => {
     const { readFileSync } = await import('node:fs');
     const { join } = await import('node:path');

@@ -11,14 +11,125 @@ import { Volume2, VolumeX } from 'lucide-react';
 import { pad } from '@/lib/pad';
 import { isSuccessSoundEnabled } from '@/lib/soundPref';
 import { playSuccessChime } from '@/lib/successChime';
+// この画面は next/dynamic で読む (components/PaymentSuccessOverlay.tsx) ので、声の module を静的に読んでも支払いの 4 ページの
+// First Load JS は増えない。触れたときに同期で鳴らすため、動的 import では読まない (await を挟むと iPhone が操作と数えない)。
+import { playVoiceElement, type VoicePlayback } from '@/lib/successVoice';
 import { useModalFocus } from '@/hooks/useModalFocus';
 import { useSuccessSoundPref } from '@/hooks/useSuccessSoundPref';
 import { CopyableField } from './CopyableField';
 import { NonCustodialNotice } from './NonCustodialNotice';
 import { NotifyShopButton, type NotifyShopData } from './NotifyShopButton';
 
-/** 完了画面が裏で出たとき、表に戻ってから音を鳴らす上限 (ミリ秒)。これより遅く戻ったら鳴らさない。 */
+/**
+ * 完了画面が裏で出たとき、表に戻ってから音を鳴らす上限 (ミリ秒)。これより遅く戻ったら鳴らさない。鳴らせなかった完了音を
+ * 最初に触れたときに鳴らし直すのも、鳴らそうとしてからこの時間まで。
+ */
 export const CHIME_ON_RETURN_MAX_MS = 60_000;
+/** 完了音を鳴らしてから、鳴らせたか (Web Audio の時計が進んだか) を確かめるまでの時間 (ミリ秒)。 */
+export const CHIME_SILENCE_CHECK_MS = 1_000;
+/** 確かめるまでに時計がこれ (秒) より進んでいなければ、鳴らせなかったとみなす。 */
+const CHIME_MIN_ADVANCE_S = 0.25;
+
+/** 鳴らそうとした完了音。ctxTime はそのときの時計 (秒)、startedAt はそのときの時刻 (Date.now)。 */
+type ChimeAttempt = { ctx: AudioContext; ctxTime: number; startedAt: number };
+/** 鳴らし直しを外す。stopVoice なら、鳴らし始めを待っている声も止める (音のボタンで消したとき)。 */
+type Disarm = (stopVoice?: boolean) => void;
+
+// 時計が進んだら鳴った (その後に割り込みで suspended になっていても、鳴った分は鳴った)。
+function chimeClockAdvanced(attempt: ChimeAttempt): boolean {
+  return attempt.ctx.currentTime - attempt.ctxTime >= CHIME_MIN_ADVANCE_S;
+}
+
+/**
+ * まだ鳴っていない完了音の予約を、context ごと閉じて取り消す。閉じた context は lib/successChime.ts が次に鳴らすときに
+ * 作り直す。
+ */
+function cancelChimeAttempt(attempt: ChimeAttempt): void {
+  try {
+    void attempt.ctx.close().catch(() => undefined);
+  } catch {
+    /* noop: 閉じられない古いブラウザでも、触れたときの声は鳴らす */
+  }
+}
+
+/**
+ * 鳴らした完了音が本当に鳴ったかを CHIME_SILENCE_CHECK_MS の後に確かめ、鳴っていなければ、最初に触れたときに audio 要素で
+ * 鳴らし直す。外す関数を返す。onDone は、もう鳴らし直さないと決まったとき (鳴った・鳴らし直した・時間切れ・OFF) に呼ぶ。
+ *
+ * iPhone は、ほかのアプリ (HashPort 等) から戻った後、Web Audio を「running」と言いながら時計を止めて無音にする。作り直した
+ * AudioContext も同じで、触らずに鳴らす audio 要素も無音か断られる。鳴ったのは、画面に触れたときの audio 要素だけだった
+ * (2026-11-24 iOS 27.2 のホーム画面のアプリで実測・Safari でも鳴らなかった)。時計が進んだ端末 (Android・ふだんの iPhone) では
+ * 何もしないので、2 回は鳴らない。確かめるまでの 1 秒に触れても数えない (鳴ったかがまだ分からない・戻って 1 秒以内に
+ * 閉じたら鳴らないまま)。
+ */
+function watchChimeSilence(attempt: ChimeAttempt, onDone: () => void): Disarm {
+  let disarmTap: Disarm | null = null;
+  const timer = setTimeout(
+    () => {
+      if (chimeClockAdvanced(attempt)) {
+        onDone();
+        return;
+      }
+      // 鳴らなかった完了音の予約を取り消す (後で context が動き出しても、触れたときの声と 2 回にならない・スリープで
+      // 確かめるのが 60 秒を過ぎても、後から急に鳴らない)。
+      cancelChimeAttempt(attempt);
+      if (Date.now() - attempt.startedAt > CHIME_ON_RETURN_MAX_MS) {
+        onDone();
+        return;
+      }
+      disarmTap = listenFirstTap(attempt, onDone);
+    },
+    Math.max(0, attempt.startedAt + CHIME_SILENCE_CHECK_MS - Date.now()),
+  );
+  return (stopVoice) => {
+    clearTimeout(timer);
+    disarmTap?.(stopVoice);
+  };
+}
+
+/** 画面のどこかに触れたら (音のボタンを除く)、声を 1 回鳴らす。CHIME_ON_RETURN_MAX_MS を過ぎたら聞き手を外す。 */
+function listenFirstTap(attempt: ChimeAttempt, onDone: () => void): Disarm {
+  let pending: VoicePlayback | null = null;
+  // 触れずに時間がたったら、聞き手を外す (document に残さない)。スリープで timer が遅れた分は、触れたときの時刻で見る。
+  const expiry = setTimeout(finish, Math.max(0, attempt.startedAt + CHIME_ON_RETURN_MAX_MS - Date.now()));
+  function remove() {
+    clearTimeout(expiry);
+    document.removeEventListener('touchend', onTap, true);
+    document.removeEventListener('click', onTap, true);
+  }
+  function finish() {
+    remove();
+    onDone();
+  }
+  function onTap(event: Event) {
+    // 音のボタンは自分で鳴らすか消す (消すために押したときに声が鳴らないよう、ここでは数えない)。
+    if (event.target instanceof Element && event.target.closest('[data-chime-toggle]')) return;
+    // 時間がたちすぎた・音を消したなら、鳴らさずに外す。
+    if (Date.now() - attempt.startedAt > CHIME_ON_RETURN_MAX_MS || !isSuccessSoundEnabled()) {
+      finish();
+      return;
+    }
+    // 鳴らし始めるのを待っている間 (声の読み込み中) は、次を鳴らさない (2 回にならない)。1 回のタップの touchend と
+    // click もこれで 1 回になる (鳴り始めたら聞き手を外す・断られた後の click は試し直すだけ)。
+    if (pending) return;
+    const playback = playVoiceElement();
+    pending = playback;
+    // 断られた (scroll の後に指を離したときは、iPhone が操作と数えない) ら、次に触れたときにまた試す。
+    void playback.result.then((ok) => {
+      pending = null;
+      if (ok) finish();
+    });
+  }
+  // 画面のどこに触れても受けるよう document で受ける。iPhone は、押せない要素への tap の click を document まで届けない
+  // ことがあるので touchend でも受ける。capture にして、中の要素が伝わりを止めても受ける。
+  document.addEventListener('touchend', onTap, true);
+  document.addEventListener('click', onTap, true);
+  // 完了画面を閉じたとき (「閉じる」に触れたときを含む) は、鳴らし始めた声を止めない (触れたときに鳴らすと決めた声)。
+  return (stopVoice) => {
+    remove();
+    if (stopVoice) pending?.stop();
+  };
+}
 
 function formatTimeHMS(d: Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
@@ -65,17 +176,47 @@ export function SuccessOverlay({
   // ときに 1 回だけ鳴らす (2026-11-24 user「HashPort で承認して戻るのが遅く、完了画面が出ていて鳴らなかった」)。戻るまでが
   // CHIME_ON_RETURN_MAX_MS を超えたら鳴らさない (時間がたってから急に鳴って驚かせない)。StrictMode の mount → unmount →
   // mount でも聞き手を付け直せるよう、chimedRef は鳴らしたとき (または鳴らさないと決めたとき) にだけ立てる。
+  // 鳴らしたのに鳴らなかった (iPhone がほかのアプリから戻った後の Web Audio を無音にする) ときは、最初に触れたときに鳴らし
+  // 直す (2026-11-24 user 裁定「最初に触れたとき」・watchChimeSilence)。attemptRef は鳴らし直す候補で、もう鳴らし直さないと
+  // 決まったら null。StrictMode の付け直しでは、確かめと聞き手だけを付け直す。
   const chimedRef = useRef(false);
+  const attemptRef = useRef<ChimeAttempt | null>(null);
+  const disarmRef = useRef<Disarm | null>(null);
+  // 音のボタンで出したときの確認の音 (鳴らし始めるまで)。消した・押し直した・閉じたら null (後から合成チャイムを鳴らさない)。
+  const previewRef = useRef<VoicePlayback | null>(null);
+  useEffect(
+    () => () => {
+      previewRef.current = null;
+    },
+    [],
+  );
   useEffect(() => {
-    if (chimedRef.current || !isSuccessSoundEnabled()) return;
+    const watch = () => {
+      const attempt = attemptRef.current;
+      if (!attempt) return;
+      disarmRef.current = watchChimeSilence(attempt, () => {
+        attemptRef.current = null;
+      });
+    };
+    const disarm = () => {
+      disarmRef.current?.();
+      disarmRef.current = null;
+    };
+    if (chimedRef.current) {
+      watch();
+      return disarm;
+    }
+    if (!isSuccessSoundEnabled()) return;
     const play = () => {
       if (chimedRef.current) return;
       chimedRef.current = true;
-      playSuccessChime();
+      const ctx = playSuccessChime();
+      if (ctx) attemptRef.current = { ctx, ctxTime: ctx.currentTime, startedAt: Date.now() };
+      watch();
     };
     if (document.visibilityState !== 'hidden') {
       play();
-      return;
+      return disarm;
     }
     // 戻るまでの時間はふだんの時刻 (Date.now) で測る。WebKit の performance.now は端末のスリープ中に進まないので、
     // スリープを挟むと 60 秒を過ぎても「60 秒以内」に見えてしまう。
@@ -88,7 +229,10 @@ export function SuccessOverlay({
       else chimedRef.current = true;
     };
     document.addEventListener('visibilitychange', onVisible);
-    return () => document.removeEventListener('visibilitychange', onVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      disarm();
+    };
   }, []);
 
   // 1 秒ごとに現在時刻を更新 (店主が「今支払った」と判断する時計)
@@ -102,7 +246,27 @@ export function SuccessOverlay({
   function toggleSound() {
     const next = !soundOn;
     setSoundOn(next);
-    if (next) playSuccessChime();
+    // 押したら (消す・出すのどちらでも)、鳴らせなかった完了音を後で鳴らし直すのはやめ、鳴らし始めを待っている声も止める
+    // (消したのに後から鳴らさない・出すときは、ここで鳴らす)。
+    disarmRef.current?.(true);
+    disarmRef.current = null;
+    // 消すときは、まだ鳴っていない (時計が止まった) 完了音の予約も取り消す (後で context が動き出しても鳴らさない)。
+    const attempt = attemptRef.current;
+    if (!next && attempt && !chimeClockAdvanced(attempt)) cancelChimeAttempt(attempt);
+    attemptRef.current = null;
+    previewRef.current?.stop();
+    previewRef.current = null;
+    // 確認の音は、押した操作の中で audio 要素で鳴らす (iPhone がほかのアプリから戻った後も鳴る・watchChimeSilence)。
+    // audio 要素で鳴らせなかったときは、Web Audio で鳴らす。
+    if (next) {
+      const preview = playVoiceElement();
+      previewRef.current = preview;
+      void preview.result.then((ok) => {
+        if (previewRef.current !== preview) return;
+        previewRef.current = null;
+        if (!ok) playSuccessChime();
+      });
+    }
   }
 
   // mount が open に相当する。開いたら dialog へ focus・Tab は中だけ・Escape で閉じる・閉じたら元の要素へ戻す。
@@ -136,6 +300,7 @@ export function SuccessOverlay({
       <button
         type="button"
         onClick={toggleSound}
+        data-chime-toggle
         aria-pressed={soundOn}
         aria-label={t('soundToggle')}
         title={t('soundToggle')}

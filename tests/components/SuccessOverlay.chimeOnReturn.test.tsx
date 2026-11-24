@@ -11,6 +11,9 @@ vi.mock('wagmi', () => ({
 const chime = vi.hoisted(() => ({ play: vi.fn() }));
 // 完了音の ON/OFF は localStorage を読む本物の hook (useSuccessSoundPref) が soundPref を経由して読む。
 vi.mock('@/lib/successChime', () => ({ playSuccessChime: () => chime.play() }));
+// 音のボタンの確認の音は audio 要素で鳴らす (鳴らなかったときの鳴らし直しは tests/components/SuccessOverlay.chimeOnTap.test.tsx)。
+const voice = vi.hoisted(() => ({ play: vi.fn(() => ({ result: Promise.resolve(true), stop: () => undefined })) }));
+vi.mock('@/lib/successVoice', () => ({ playVoiceElement: () => voice.play() }));
 const pref = vi.hoisted(() => ({ enabled: true }));
 vi.mock('@/lib/soundPref', () => ({
   isSuccessSoundEnabled: () => pref.enabled,
@@ -40,6 +43,7 @@ function renderOverlay(opts?: { reactStrictMode?: boolean }) {
 describe('SuccessOverlay の完了音 (裏で出たときは戻ってから鳴らす)', () => {
   beforeEach(() => {
     chime.play.mockReset();
+    voice.play.mockClear();
     pref.enabled = true;
     visibility = 'visible';
     wall = 1_000_000;
@@ -99,12 +103,13 @@ describe('SuccessOverlay の完了音 (裏で出たときは戻ってから鳴�
     expect(chime.play).not.toHaveBeenCalled();
   });
 
-  it('完了音 OFF で表に出たら鳴らさず、ON に切り替えた瞬間に確認の音を 1 回だけ鳴らす', () => {
+  it('完了音 OFF で表に出たら鳴らさず、ON に切り替えた瞬間に確認の音を 1 回だけ鳴らす (押した操作の中で audio 要素で)', () => {
     pref.enabled = false;
     renderOverlay();
     expect(chime.play).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /完了音/ }));
-    expect(chime.play).toHaveBeenCalledTimes(1);
+    expect(voice.play).toHaveBeenCalledTimes(1);
+    expect(chime.play).not.toHaveBeenCalled();
   });
 
   it('戻る前に完了画面を閉じたら、戻っても鳴らさない (聞き手を外す)', () => {

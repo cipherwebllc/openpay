@@ -25,7 +25,8 @@ let ctx: AudioContext | null = null;
 function getCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   try {
-    if (ctx) return ctx;
+    // 閉じた context は作り直す (完了画面が、鳴らなかった完了音の予約を取り消すために閉じる・components/SuccessOverlay.tsx)。
+    if (ctx && ctx.state !== 'closed') return ctx;
     const AC = window.AudioContext ?? (window as WebkitWindow).webkitAudioContext;
     if (!AC) return null;
     ctx = new AC();
@@ -101,12 +102,14 @@ function playTones(notes: ReadonlyArray<Tone>, peak: number, dur: number): void 
 /**
  * 決済完了の音。声「オープンペイ」を鳴らし、声を読めない・鳴らせないときは合成チャイム (ポロン♪) を鳴らす。
  * どちらか 1 回だけ鳴る。AudioContext 非対応では鳴らない。throw しない。
+ * 鳴らそうとした AudioContext を返す (非対応・失敗は null)。呼び出し側は、この時計が進んだかで鳴らせたかを確かめる
+ * (iPhone は、ほかのアプリから戻った後の Web Audio を running のまま時計を止めて無音にする・components/SuccessOverlay.tsx)。
  */
-export function playSuccessChime(): void {
+export function playSuccessChime(): AudioContext | null {
   try {
     const c = getCtx();
-    if (!c) return;
-    // トグルで ON にしたとき (user gesture の中) にも解錠しておく。iOS が裏に回して interrupted にした context も戻す。
+    if (!c) return null;
+    // running でない (gesture 外の suspended・iOS が裏に回したときの interrupted) なら resume を試みる。
     if (c.state !== 'running') void c.resume().catch(() => undefined);
     let settled = false;
     const fallback = () => {
@@ -130,8 +133,10 @@ export function playSuccessChime(): void {
       )
       // chunk を取れないときも完了の合図は合成チャイムで出す (完了画面に波及させない)。
       .catch(fallback);
+    return c;
   } catch {
     /* noop: 完了音の失敗で UI を壊さない */
+    return null;
   }
 }
 
