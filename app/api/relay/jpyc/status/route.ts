@@ -184,7 +184,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     if (idem.state === 'missing') {
       const hinted = await readRelayTxHint(parsed.chainId, parsed.from, parsed.nonce);
       if (hinted && await receiptMatchesIntent(parsed, token, hinted, TX_HINT_RECEIPT_TRANSPORT)) {
-        // 本番で控えが効いているか (getLogs を使わずに解けたか) を数えられるようにする。
+        // 控えで解けたことの記録 (info・NEXT_PUBLIC_LOG_LEVEL=info のときだけ出る)。本番の効き目は、Sentry の
+        // relay.jpyc.status.indeterminate (100 ブロックの RpcRequestError)・AuthorizationLookupIncomplete が止まることで見る。
         logger.info('relay.jpyc.status.settled_by_tx_hint', { chainId: parsed.chainId });
         return json({ ok: true, state: 'settled', txHash: hinted });
       }
