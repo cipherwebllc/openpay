@@ -35,6 +35,8 @@ export async function generateMetadata({
     title,
     description,
     openGraph: {
+      // root layout の openGraph はここで丸ごと置き換わるので、type も書き直す (無いと og:type が出ない)。
+      type: 'website',
       title,
       description,
       locale: locale === 'ja' ? 'ja_JP' : 'en_US',
