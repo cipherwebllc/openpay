@@ -14,7 +14,9 @@ test.describe('AI エージェント向けの読み取りと発見', () => {
       });
       expect(res.status()).toBe(200);
       expect(res.headers()['content-type']).toBe('text/markdown; charset=utf-8');
-      expect(res.headers()['vary']?.toLowerCase()).toContain('accept');
+      // 部分一致だと Accept-Encoding でも通るので、要素ごとに比べる。
+      const vary = (res.headers()['vary'] ?? '').split(',').map((v) => v.trim().toLowerCase());
+      expect(vary).toContain('accept');
       const llms = await (await request.get('/llms.txt')).text();
       expect(await res.text()).toBe(llms);
     });
