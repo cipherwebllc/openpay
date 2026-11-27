@@ -1,6 +1,10 @@
 import createMiddleware from 'next-intl/middleware';
 import { NextResponse, type NextRequest } from 'next/server';
 import { DEFAULT_LOCALE, LOCALES } from './i18n';
+import { prefersMarkdown } from './lib/markdownNegotiation';
+
+// `Accept: text/markdown` で求められたら Markdown 版を返すトップの URL (2026-11-27)。
+const MARKDOWN_HOME_PATHS = new Set(['/', ...LOCALES.map((l) => `/${l}`)]);
 
 const intl = createMiddleware({
   locales: LOCALES,
@@ -23,6 +27,19 @@ export default function middleware(request: NextRequest) {
   if (pathname === '/og' || pathname.startsWith('/og/')) {
     const url = request.nextUrl.clone();
     url.pathname = `/api${pathname}`;
+    return NextResponse.rewrite(url);
+  }
+  // AI エージェントが Markdown を求めたトップは、locale の振り分けの前に Markdown 版へ内部 rewrite する
+  // (/ でも /ja へ redirect せず、その URL のまま返す)。ブラウザは text/markdown を送らないので HTML は不変。
+  // 読み取り (GET・HEAD) だけ。ほかの method は今までどおり intl に渡す。
+  if (
+    (request.method === 'GET' || request.method === 'HEAD') &&
+    MARKDOWN_HOME_PATHS.has(pathname) &&
+    prefersMarkdown(request.headers.get('accept'))
+  ) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/api/agent/home-markdown';
+    url.search = '';
     return NextResponse.rewrite(url);
   }
   return intl(request);

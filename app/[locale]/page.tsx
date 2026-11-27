@@ -2,6 +2,7 @@
 // AppShell (Client) の中に Server-rendered の各 Landing* セクションを並べる。
 // 並び: ヒーロー → モバイルオーダー → 本文 → 使い方 → 料金 (5 つの場合) → FAQ → 信頼 (応援カードを含む締め) → スポンサー募集の小さな案内。
 
+import type { Metadata } from 'next';
 import { setRequestLocale } from 'next-intl/server';
 import { RouteMessages } from '@/i18n/RouteMessages';
 import { AppShell } from '@/components/AppShell';
@@ -23,6 +24,23 @@ import { LandingTrust } from '@/components/LandingTrust';
 import { LandingSponsorsNote } from '@/components/LandingSponsorsNote';
 import { LandingBand } from '@/components/LandingSectionHeader';
 import { LandingYourOpenPay } from '@/components/LandingYourOpenPay';
+
+// トップの canonical と言語別 URL (2026-11-27)。layout に置くと全下層に継承されるので
+// ページ単位で置く (app/[locale]/layout.tsx の注記)。title・OG は layout のものを継ぐ。
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}): Promise<Metadata> {
+  const { locale } = await params;
+  const l = locale === 'en' ? 'en' : 'ja';
+  return {
+    alternates: {
+      canonical: `/${l}`,
+      languages: { ja: '/ja', en: '/en' },
+    },
+  };
+}
 
 export default async function HomePage({
   params,
