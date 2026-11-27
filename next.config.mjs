@@ -146,6 +146,8 @@ const nextConfig = {
   outputFileTracingIncludes: {
     '/api/og/tip': ['./app/api/og/fonts/**', './public/icon-512.png'],
     '/api/og/handle': ['./app/api/og/fonts/**', './public/icon-512.png'],
+    // トップの Markdown 版は実行時に public/llms.txt を読む (app/api/agent/home-markdown/route.ts)。
+    '/api/agent/home-markdown': ['./public/llms.txt'],
   },
   // ⚠️ rewrites() をここに定義しないこと: rewrites が 1 つでも存在すると client
   // router に rewrite 解決コードが入り、全ルートの First Load JS が +3kB 太って

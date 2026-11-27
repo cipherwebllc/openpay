@@ -2,14 +2,15 @@
 // AI エージェントは HTML のエラーページを読めない (Is Agentic の必須項目「JSON error responses」が 0 点)。
 // 今ある route はこの catch-all より優先されるので、既存の API の応答は変わらない
 // (method の無い既存 route は従来どおり 405)。本文は RFC 9457 の problem+json に、
-// 既存の API と同じ `error` の欄を足した形。
+// 既存の API と同じ `error` の欄を足した形 (新しい説明文は足さない)。
+// OPTIONS も 404 にする (Next の自動 OPTIONS は 204 + Allow で、無い API を在るように見せる)。
+// HEAD は GET から Next が作る。
 
 const BODY = JSON.stringify({
   type: 'about:blank',
   title: 'Not Found',
   status: 404,
   error: 'not_found',
-  detail: 'No OpenPay API endpoint matches this path.',
   docs: 'https://open-pay.jp/openapi.json',
 });
 
@@ -25,3 +26,4 @@ export const POST = notFound;
 export const PUT = notFound;
 export const PATCH = notFound;
 export const DELETE = notFound;
+export const OPTIONS = notFound;

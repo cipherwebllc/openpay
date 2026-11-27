@@ -14,11 +14,15 @@ export const API_DOC_URL =
 export const AGENT_SKILL_PATH =
   '/.well-known/agent-skills/openpay-agent/SKILL.md';
 
+/** RFC 9727 §2: カタログ自身を rel="api-catalog" で指す Link (GET と HEAD の両方に付く)。 */
+export const API_CATALOG_LINK = '</.well-known/api-catalog>; rel="api-catalog"';
+
 export function apiCatalog() {
   return {
     linkset: [
       {
-        anchor: `${AGENT_SITE_ORIGIN}/api/`,
+        // /openapi.json の servers と同じ基点 (各 API の path は /api/...)。
+        anchor: AGENT_SITE_ORIGIN,
         'service-desc': [
           { href: `${AGENT_SITE_ORIGIN}/openapi.json`, type: 'application/json' },
         ],

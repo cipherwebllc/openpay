@@ -31,7 +31,12 @@ export default function middleware(request: NextRequest) {
   }
   // AI エージェントが Markdown を求めたトップは、locale の振り分けの前に Markdown 版へ内部 rewrite する
   // (/ でも /ja へ redirect せず、その URL のまま返す)。ブラウザは text/markdown を送らないので HTML は不変。
-  if (MARKDOWN_HOME_PATHS.has(pathname) && prefersMarkdown(request.headers.get('accept'))) {
+  // 読み取り (GET・HEAD) だけ。ほかの method は今までどおり intl に渡す。
+  if (
+    (request.method === 'GET' || request.method === 'HEAD') &&
+    MARKDOWN_HOME_PATHS.has(pathname) &&
+    prefersMarkdown(request.headers.get('accept'))
+  ) {
     const url = request.nextUrl.clone();
     url.pathname = '/api/agent/home-markdown';
     url.search = '';
