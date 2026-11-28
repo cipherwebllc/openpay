@@ -24,7 +24,7 @@ export type ExternalPurchase = {
 export const FIRST_PARTY_WALLETS: readonly string[] = firstPartyWallets.map(({ address }) => address);
 
 /** 集計時点 (週次更新で進める)。 */
-export const EXTERNAL_PURCHASES_AS_OF = '2026-11-22';
+export const EXTERNAL_PURCHASES_AS_OF = '2026-11-28';
 
 export const EXTERNAL_PURCHASES: readonly ExternalPurchase[] = [
   { chain: 'base', date: '2026-07-19', amount: '0.01', asset: 'USDC', payer: '0x7e571e959cc7c75ccdd2eac24f8775ea2eaa2f09', tx: '0xdea66bfcd77d7c439774b344b64b5750b111b71a3fb23eaee6c24a6947eeed53' },
@@ -122,6 +122,29 @@ export const EXTERNAL_PURCHASES: readonly ExternalPurchase[] = [
   { chain: 'base', date: '2026-11-22', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0xa04701fe852c9c1ae7b2ea0100f0d7e68a00015b0fccc2e18b30ce3a8eb635b4' },
   { chain: 'base', date: '2026-11-22', amount: '0.01', asset: 'USDC', payer: '0x73cc9400bd9f086d7427d3421d79195a68bb1ea4', tx: '0xc88f3638840952cda5ddee936c892669ad97a7e5b6b7f896ab1a1cc742d611bb' },
   { chain: 'base', date: '2026-11-22', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0x1f23041a0264b47ff6edc52cfb9d0fe3fc576d55bcb8e791e27dada780e0d937' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0xd47812957b9af2f3dc71b8cdf5e954f5f43b6d90499825ff525e5e09596437e1' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x73cc9400bd9f086d7427d3421d79195a68bb1ea4', tx: '0xd8c021403d9ad47ff44e9260a39bf1e8dd33c60028286726fdd2d0f531db10fd' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0x9a63c8aa910d0e618648c08267864d4032f59a57795fdf788e879ef198f4d6ca' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0x276177ac686ca02c4c702e3e91dd2d8030622d8d0749b0b102c57f949fc088bb' },
+  { chain: 'base', date: '2026-11-23', amount: '0.001', asset: 'USDC', payer: '0x9d42eba8868cfd38a50ba615ee0cf903f1bbece9', tx: '0xa9b17ad88428316283f88e0a50d8bbe0f524b044c1f801fc97fdc4890ab27948' },
+  { chain: 'base', date: '2026-11-23', amount: '0.001', asset: 'USDC', payer: '0x9d42eba8868cfd38a50ba615ee0cf903f1bbece9', tx: '0x63ca067cf2f20db66b3efd77b0a9d824837ad842af7dd3f2fd561143b49b0ba9' },
+  { chain: 'base', date: '2026-11-23', amount: '0.001', asset: 'USDC', payer: '0x82cef1cdc34d65cf690235dc24e823a6585a6f86', tx: '0xa6307c24f211a5f94320338e1e128ae2c9343bd2dc8b430fbf27d59718140ed3' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0x1c73a6f7bc0d9d941c71514bc7c3194974f9bfe731fc75ee16c248449746bc9f' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0x7bc498bd500bd98f576571be97930da0d62035815d88436bd52497dafb40e530' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0x8361f9968d8d29e07a88f8610a60d50c08839562c37f82ae7facfadfb7a75b5b' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0xd270ea31c2fc4670fe45c51b1d733ad35c64717f0b66888ecca42bd4e1c88db4' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0x262a9b4f5be1ac63d2d7e55e07158ecf471cab155efb6a008ea32aee39320ebd' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0xbe1e960a2b14754668ab0768840cf578cda10d7d494a4d9375a0ec66747e97e5' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0xf98b04efc5f826d9b383a26de5a6893793fdf35c94f2edaf1a0b1b438809ff30' },
+  { chain: 'base', date: '2026-11-23', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0x8be9d183ccb81a645d705b2026af1a7077db1e7d6fe20cb8b496e4ebb671b2cf' },
+  { chain: 'base', date: '2026-11-24', amount: '0.01', asset: 'USDC', payer: '0x8ec901f7e2710163387d70950f680f1ea2269d15', tx: '0xae98dcf6cac6bb353f6218414f5be091041228c901d1cddeb2a88f0864a202a5' },
+  { chain: 'base', date: '2026-11-24', amount: '0.01', asset: 'USDC', payer: '0x73cc9400bd9f086d7427d3421d79195a68bb1ea4', tx: '0x619cd2690a98f4db575e6739d5f565ff7e5859bee30fe407755619f7ee55d2ae' },
+  { chain: 'base', date: '2026-11-24', amount: '0.01', asset: 'USDC', payer: '0x35fe83e85f949b7235595a76782296c6c9c3c030', tx: '0x0dafdcebf723b4bcd238cd5ba9d305fc663f2ceea76e8882f2c18709013e6852' },
+  { chain: 'base', date: '2026-11-24', amount: '0.01', asset: 'USDC', payer: '0xaa34bd941511cc82a19878e2efbe0bd7077e1db3', tx: '0xe665c9c657b039aae49fe753731c4847c57545b63cfe9ab1ad356af78e896d1f' },
+  { chain: 'base', date: '2026-11-24', amount: '0.01', asset: 'USDC', payer: '0xaa34bd941511cc82a19878e2efbe0bd7077e1db3', tx: '0x9da2334dbb6a75cd9f26468ce1917a1461044696255e21244b78d1f58f2970c7' },
+  { chain: 'base', date: '2026-11-24', amount: '0.01', asset: 'USDC', payer: '0x73cc9400bd9f086d7427d3421d79195a68bb1ea4', tx: '0x6f48301ecf2cc05e2681317501b8b00fa5d97d34271cfd8d23c7e1fac8422201' },
+  { chain: 'base', date: '2026-11-24', amount: '0.01', asset: 'USDC', payer: '0x35fe83e85f949b7235595a76782296c6c9c3c030', tx: '0x61a738d644f8ca2369c33784f8b66b5ed294483386f07db9be1d7e5de73693ef' },
+  { chain: 'base', date: '2026-11-27', amount: '0.01', asset: 'USDC', payer: '0x79f896ff38691931fc2494610c106ad755e6f758', tx: '0x50682909c9b3a466011c04f61e981c905e6a10bb1d787e5f88eae2cf58558c31' },
 ];
 
 export function externalPurchaseSummary(rows: readonly ExternalPurchase[] = EXTERNAL_PURCHASES): {

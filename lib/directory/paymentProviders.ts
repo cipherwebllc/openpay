@@ -142,7 +142,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2027-01..2027-03',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-11-23',
+    verifiedAt: '2026-11-29',
   },
   {
     provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
@@ -159,7 +159,7 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: null,
     plannedPeriod: '2026-10..2027-02',
     sourceUrl: OSAKA_SUBSIDY_URL,
-    verifiedAt: '2026-11-23',
+    verifiedAt: '2026-11-29',
   },
   {
     provider: 'Mi&T (Osaka Pref. subsidy)',
@@ -200,7 +200,9 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: '2026-07-13',
     plannedPeriod: null,
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
-    verifiedAt: '2026-11-23',
+    // 2026-11-29 (第 17 回): Midnight Foundation・WEA JAPAN との MOU (11/27) は対象の銘柄・開始時期・手数料を挙げて
+    // いないので、項目の値は変わらない。
+    verifiedAt: '2026-11-29',
   },
   {
     // 2026-09-29 の第 6 回週次更新で追跡開始 (発表は 2026-01-28 の PR TIMES・backfill)。

@@ -2110,6 +2110,84 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
       'ネットスターズ公式サイトのお知らせで再確認: 2026-09-30〜11-18 の 8 件の見出しに、Stablecoin Pay の稼働日・手数料・対応チェーンの変更を伝えるものはない。11/18 の発表は、Liquid Group との RoamQR と JPQR Global を通じた日本でのクロスボーダー QR 決済の開始を伝えている。',
     sourceUrl: 'https://www.netstars.co.jp/',
   },
+  // ── 第 17 回週次更新 (収集 2026-11-29・収集窓 2026-11-24〜11-29) ──
+  {
+    // JPYC EX のお知らせ announce-0052 (本文は【完了】に書き換わった版・日付 2026/11/27)。予告は公式 X (11/26 11:31 JST)、
+    // 完了の時刻 13:30 は公式 X の完了の投稿 (11/27 13:33 JST) による (お知らせの本文は「完了いたしました」だけで時刻なし)。
+    // 手数料・チェーン・上限は変わらないので、エントリの事実は不変。
+    date: '2026-11-27',
+    collectedAt: '2026-11-29',
+    scopes: ['jpyc-services'],
+    slug: 'jpyc-ex',
+    changeType: 'updated',
+    changeCategory: 'update',
+    assets: ['JPYC'],
+    summary:
+      'JPYC EX ran scheduled maintenance from 10:00 to 13:30 JST on 2026-11-27, announced on 2026-11-26. During the maintenance all JPYC EX services were unavailable, including logging in to My Page, account opening, new issuance and redemption reservations, issuance and redemption processing on all networks, and viewing reservations, transaction history and registered details. The official completion post https://x.com/jpyc_official/status/2126172547674947914 says the maintenance was completed at 13:30, and all of the suspended services became available again; deposits and transfers for issuance or redemption made during the maintenance are processed in order. The advance notice is the official post https://x.com/jpyc_official/status/2125779437216276842.',
+    summaryJa:
+      'JPYC EX が 2026-11-27 10:00〜13:30 に計画メンテナンスを実施 (11/26 に告知)。期間中は、マイページへのログイン・アカウント開設・発行と償還の新規予約・全ネットワークの発行と償還の処理・予約内容や取引履歴と登録情報の照会を含む、すべてのサービスが利用不可。公式 X の完了の投稿 https://x.com/jpyc_official/status/2126172547674947914 によると 13:30 に完了し、停止していたすべてのサービスが通常どおり利用可能に。メンテナンス中の発行・償還に関する入金・入庫は順次処理するとしている。告知は公式 X の投稿 https://x.com/jpyc_official/status/2125779437216276842。',
+    sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0052',
+  },
+  {
+    // Midnight Foundation の PR TIMES (2026-11-27 11:10)。ネットスターズ公式サイトのお知らせには 2026-11-29 の時点で載って
+    // いない (トップページの最新は 11/26 のユーシーカードとの JPQR Global の取次の契約)。2026-09-03 の imToken の MOU と同じ型で
+    // 決済スコープだけに載せる。MOU は対象の銘柄・開始時期・手数料を挙げていない (JPYC は WEA JAPAN の会社概要にある対応の例、
+    // Ethereum・Solana は検討テーマの例として出るだけ)。検討テーマのうち「承認された資産に限定した、利回りを生む資産への
+    // アクセス」は、利回りの案内に読まれないよう要約に入れない。現況行の事実は変わらない。
+    date: '2026-11-27',
+    collectedAt: '2026-11-29',
+    scopes: ['stablecoin-payments'],
+    provider: 'NetStars Stablecoin Pay',
+    changeType: 'updated',
+    changeCategory: 'partnership',
+    summary:
+      'Midnight Foundation, WEA JAPAN and NetStars announced that they had signed a basic agreement (MOU) to study a collaboration on stablecoin payments. The three companies plan to examine faster private payment processing, a way to manage and automatically reconcile merchant balances and transaction records while keeping them confidential, security design including key protection, and privacy support for multiple blockchains such as Ethereum and Solana. The MOU names no target tokens, start date or fees.',
+    summaryJa:
+      'Midnight Foundation・WEA JAPAN・ネットスターズの 3 社が、ステーブルコイン決済に関する協業の検討に向けた基本合意書 (MOU) を締結したと発表。高速なプライベート決済処理、加盟店の残高や取引記録を秘匿したまま管理し自動で照合できる仕組み、鍵の保護などを含むセキュリティ設計、Ethereum・Solana など複数のブロックチェーンへのプライバシー対応を検討する。MOU は対象の銘柄・開始時期・手数料を挙げていない。',
+    sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000004.000189466.html',
+  },
+  // ── 第 17 回週次更新の verified (2026-11-29) ──
+  {
+    date: '2026-11-29',
+    collectedAt: '2026-11-29',
+    scopes: ['jpyc-services'],
+    slug: 'coincheck',
+    changeType: 'verified',
+    assets: ['USDC'],
+    summary:
+      'Re-verified the FSA register of Electronic Payment Instruments Exchange Service Providers: the published register checked on 2026-11-29 was the version as of 2026-08-27 and listed two providers, SBI VC Trade (No. 00001) and Coincheck (No. 00002, USDC).',
+    summaryJa:
+      '金融庁の電子決済手段等取引業者登録一覧で再確認: 2026-11-29 に確認した公表の一覧は令和 8 年 8 月 27 日現在の版で、掲載は SBI VC トレード (第00001号) とコインチェック (第00002号・USDC) の 2 社。',
+    sourceUrl: 'https://www.fsa.go.jp/menkyo/menkyoj/denshikessaisyudan.pdf',
+  },
+  {
+    date: '2026-11-29',
+    collectedAt: '2026-11-29',
+    scopes: ['stablecoin-payments'],
+    provider: 'HashPort (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-11-11; for the awarded projects other than Mi&T, details such as start timing are to be published once decided) and its award list (https://www.pref.osaka.lg.jp/documents/132917/senkutekihozyokinichiran.pdf): HashPort pilot schedule (an assumed one week or more between January and March 2027) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-11-11 のまま。Mi&T 以外の採択事業は実証開始時期等の詳細が決まりしだい順次公表) と交付決定事業一覧 (https://www.pref.osaka.lg.jp/documents/132917/senkutekihozyokinichiran.pdf) で再確認: HashPort の実証の予定 (2027 年 1〜3 月の間で 1 週間以上を想定) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
+  {
+    date: '2026-11-29',
+    collectedAt: '2026-11-29',
+    scopes: ['stablecoin-payments'],
+    provider: 'Mina Wallet / Sumitomo Mitsui Card (Osaka Pref. subsidy)',
+    changeType: 'verified',
+    assets: ['JPYC', 'USDC'],
+    summary:
+      'Re-verified on the Osaka Prefecture page (still last updated 2026-11-11; for the awarded projects other than Mi&T, details such as start timing are to be published once decided) and its award list (https://www.pref.osaka.lg.jp/documents/132917/senkutekihozyokinichiran.pdf): Mina Wallet / Sumitomo Mitsui Card pilot schedule (around October 2026 to February 2027, a few days to about a month) unchanged.',
+    summaryJa:
+      '大阪府公式ページ (更新日 2026-11-11 のまま。Mi&T 以外の採択事業は実証開始時期等の詳細が決まりしだい順次公表) と交付決定事業一覧 (https://www.pref.osaka.lg.jp/documents/132917/senkutekihozyokinichiran.pdf) で再確認: マイナウォレット / 三井住友カードの実証の予定 (2026 年 10 月〜2027 年 2 月頃の間で数日〜1 か月程度) に変更なし。',
+    sourceUrl:
+      'https://www.pref.osaka.lg.jp/o020060/kikaku/osaka-kokusaikinyu/senkuteki_hojokin.html',
+  },
 ];
 
 // ディレクトリ初期公開日。baseline の 'added' はこの固定日に立てる — entry.updatedAt 由来に

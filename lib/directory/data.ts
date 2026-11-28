@@ -43,8 +43,9 @@ export const DIRECTORY_ENTRIES = [
     // 2026-11-18 (第 15 回): 11/10 のメンテナンスの完了と、11/10〜11 の臨時メンテナンス 2 回 (GMO あおぞらネット銀行の
     //   銀行 API サービスの一時停止に伴う) は changelog のみ (エントリの事実は不変)
     // 2026-11-24 (第 16 回): 11/20 のアップデート (マイページを開く手順・取引履歴) は changelog のみ (エントリの事実は不変)
+    // 2026-11-29 (第 17 回): 11/27 の計画メンテナンス (告知と完了) は changelog のみ (エントリの事実は不変)
     ...provenance('https://jpyc.co.jp/', 'JPYC株式会社', 'official', {
-      verifiedAt: '2026-11-23',
+      verifiedAt: '2026-11-29',
       updatedAt: '2026-10-06',
     }),
     facts: {
@@ -121,7 +122,7 @@ export const DIRECTORY_ENTRIES = [
     // 2026-08-27: 電子決済手段等取引業者に登録 (金融庁登録一覧・第00002号・取扱 USDC)。
     // 取扱開始時期は未発表のため tokens は空のまま (sourced-facts-only)。
     ...provenance('https://coincheck.com/', 'コインチェック株式会社', 'official', {
-      verifiedAt: '2026-11-23',
+      verifiedAt: '2026-11-29',
       updatedAt: '2026-09-04',
     }),
     facts: {
