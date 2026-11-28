@@ -2124,9 +2124,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeCategory: 'update',
     assets: ['JPYC'],
     summary:
-      'JPYC EX ran scheduled maintenance from 10:00 to 13:30 JST on 2026-11-27, announced on 2026-11-26. During the maintenance all JPYC EX services were unavailable, including logging in to My Page, account opening, new issuance and redemption reservations, issuance and redemption processing on all networks, and viewing reservations, transaction history and registered details. The official completion post https://x.com/jpyc_official/status/2126172547674947914 says the maintenance was completed at 13:30 and that deposits and transfers for issuance or redemption made during the maintenance are being processed in order; the notice at the source URL of this event says all of the suspended services are available again as usual. The advance notice is the official post https://x.com/jpyc_official/status/2125779437216276842.',
+      'JPYC EX ran scheduled maintenance from 10:00 to 13:30 JST on 2026-11-27, announced in an official post on 2026-11-26. During the maintenance all JPYC EX services were unavailable, including logging in to My Page, account opening, new issuance and redemption reservations, issuance and redemption processing on all networks, and viewing reservations, transaction history and registered details. The official completion post https://x.com/jpyc_official/status/2126172547674947914 says the maintenance was completed at 13:30 and that deposits and transfers for issuance or redemption made during the maintenance are being processed in order; the notice at the source URL of this event says all of the suspended services are available again as usual. The advance notice is the official post https://x.com/jpyc_official/status/2125779437216276842.',
     summaryJa:
-      'JPYC EX が 2026-11-27 10:00〜13:30 に計画メンテナンスを実施 (11/26 に告知)。期間中は、マイページへのログイン・アカウント開設・発行と償還の新規予約・全ネットワークの発行と償還の処理・予約内容や取引履歴と登録情報の照会を含む、すべてのサービスが利用不可。公式 X の完了の投稿 https://x.com/jpyc_official/status/2126172547674947914 によると 13:30 に完了し、メンテナンス中の発行・償還に関する入金・入庫は順次処理している。停止していたすべてのサービスが通常どおり利用可能になったことは、このイベントの出典のお知らせによる。告知は公式 X の投稿 https://x.com/jpyc_official/status/2125779437216276842。',
+      'JPYC EX が 2026-11-27 10:00〜13:30 に計画メンテナンスを実施 (11/26 に公式 X で告知)。期間中は、マイページへのログイン・アカウント開設・発行と償還の新規予約・全ネットワークの発行と償還の処理・予約内容や取引履歴と登録情報の照会を含む、すべてのサービスが利用不可。公式 X の完了の投稿 https://x.com/jpyc_official/status/2126172547674947914 によると 13:30 に完了し、メンテナンス中の発行・償還に関する入金・入庫は順次処理している。停止していたすべてのサービスが通常どおり利用可能になったことは、このイベントの出典のお知らせによる。告知は公式 X の投稿 https://x.com/jpyc_official/status/2125779437216276842。',
     sourceUrl: 'https://faq.jpyc.co.jp/s/article/announce-0052',
   },
   {
@@ -2143,9 +2143,9 @@ export const MANUAL_CHANGELOG: readonly ServiceChangeEvent[] = [
     changeType: 'updated',
     changeCategory: 'partnership',
     summary:
-      'Midnight Foundation, WEA JAPAN and NetStars announced that they had signed a basic agreement (MOU) to study a collaboration on stablecoin payments. The three companies plan to examine faster private payment processing, a way to manage and automatically reconcile merchant balances and transaction records while keeping them confidential, security design including key protection, and privacy support for multiple blockchains such as Ethereum and Solana. The announcement does not specify target tokens, a start date or fees for the collaboration.',
+      'Midnight Foundation, WEA JAPAN and NetStars announced that they had signed a basic agreement (MOU) to study a collaboration on stablecoin payments. The main study themes named in the announcement include fast private payment processing, a way to manage and automatically reconcile merchant balances and transaction records while keeping them confidential, security design including key protection, and privacy support for multiple blockchains such as Ethereum and Solana. The announcement does not specify target tokens, a start date or fees for the collaboration.',
     summaryJa:
-      'Midnight Foundation・WEA JAPAN・ネットスターズの 3 社が、ステーブルコイン決済に関する協業の検討に向けた基本合意書 (MOU) を締結したと発表。高速なプライベート決済処理、加盟店の残高や取引記録を秘匿したまま管理し自動で照合できる仕組み、鍵の保護などを含むセキュリティ設計、Ethereum・Solana など複数のブロックチェーンへのプライバシー対応を検討する。今回の発表では、協業の対象の銘柄・開始時期・手数料は公表されていない。',
+      'Midnight Foundation・WEA JAPAN・ネットスターズの 3 社が、ステーブルコイン決済に関する協業の検討に向けた基本合意書 (MOU) を締結したと発表。発表は主な検討テーマとして、高速なプライベート決済処理、加盟店の残高や取引記録を秘匿したまま管理し自動で照合できる仕組み、鍵の保護などを含むセキュリティ設計、Ethereum・Solana など複数のブロックチェーンへのプライバシー対応などを挙げている。今回の発表では、協業の対象の銘柄・開始時期・手数料は公表されていない。',
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000004.000189466.html',
   },
   // ── 第 17 回週次更新の verified (2026-11-29) ──
