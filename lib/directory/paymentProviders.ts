@@ -200,8 +200,8 @@ export const PAYMENT_PROVIDERS: readonly PaymentProviderRecord[] = [
     startedAt: '2026-07-13',
     plannedPeriod: null,
     sourceUrl: 'https://prtimes.jp/main/html/rd/p/000000185.000019526.html',
-    // 2026-11-29 (第 17 回): Midnight Foundation・WEA JAPAN との MOU (11/27) は対象の銘柄・開始時期・手数料を挙げて
-    // いないので、項目の値は変わらない。
+    // 2026-11-29 (第 17 回): Midnight Foundation・WEA JAPAN との MOU (11/27) の発表は、協業の対象の銘柄・開始時期・手数料を
+    // 示していないので、項目の値は変わらない。
     verifiedAt: '2026-11-29',
   },
   {

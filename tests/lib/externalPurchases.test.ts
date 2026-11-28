@@ -40,7 +40,7 @@ describe('external purchases (transparency §9)', () => {
     }
   });
 
-  it('集計 (2026-11-22 時点) と表示文言が一致する', () => {
+  it('集計 (EXTERNAL_PURCHASES_AS_OF 時点) と表示文言が一致する', () => {
     const summary = externalPurchaseSummary();
     expect(summary).toEqual({ buyers: 38, settlements: 118, first: '2026-07-19', last: '2026-11-27' });
     for (const locale of ['ja', 'en'] as const) {
